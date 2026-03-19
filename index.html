@@ -1,0 +1,214 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>TimeLine</title>
+
+  <!-- Fonts -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Courier+Prime:wght@400;700&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
+
+  <!-- Styles -->
+  <link rel="stylesheet" href="css/styles.css">
+
+  <!-- Content Security Policy -->
+  <meta http-equiv="Content-Security-Policy"
+    content="default-src 'self';
+             script-src 'self' https://apis.google.com https://accounts.google.com;
+             style-src  'self' https://fonts.googleapis.com 'unsafe-inline';
+             font-src   'self' https://fonts.gstatic.com;
+             img-src    'self' data: blob: https://*.googleusercontent.com https://drive.google.com;
+             media-src  'self' data: blob: https://drive.google.com;
+             connect-src 'self' https://www.googleapis.com https://accounts.google.com;
+             frame-src  https://accounts.google.com;">
+</head>
+<body>
+
+  <!-- SVG filter: hand-drawn roughen effect applied to post images -->
+  <svg aria-hidden="true" style="position:absolute;width:0;height:0;overflow:hidden" xmlns="http://www.w3.org/2000/svg">
+    <defs>
+      <filter id="roughen" x="-5%" y="-5%" width="110%" height="110%">
+        <feTurbulence type="fractalNoise" baseFrequency="0.035" numOctaves="4" result="noise" seed="5"/>
+        <feDisplacementMap in="SourceGraphic" in2="noise" scale="3" xChannelSelector="R" yChannelSelector="G"/>
+      </filter>
+    </defs>
+  </svg>
+
+  <!-- ── Auth Screen ───────────────────────────── -->
+  <div class="auth-screen" id="authScreen">
+    <div class="auth-content">
+      <div class="auth-title">TimeLine</div>
+      <p class="auth-subtitle">Share photos and thoughts with friends. Private by default.</p>
+      <button id="signInBtn" class="btn-primary">Sign In with Google</button>
+      <p class="auth-note" id="authNote">Demo mode — no Google credentials required</p>
+    </div>
+  </div>
+
+  <!-- ── Main App ───────────────────────────────── -->
+  <div id="appView" hidden>
+
+    <header>
+      <div class="logo">TimeLine</div>
+      <div class="header-actions">
+        <span class="user-badge" id="userBadge" title="Signed-in user">user</span>
+        <button id="signOutBtn">Sign Out</button>
+      </div>
+    </header>
+
+    <main class="app-container">
+
+      <!-- Friends Sidebar -->
+      <section class="sidebar" aria-label="Friends">
+        <h3>Friends</h3>
+        <div class="friends-list" id="friendsList">
+          <p class="empty-text">No friends yet</p>
+        </div>
+        <button id="addFriendBtn" class="full-width" style="margin-top:12px">+ Add Friend</button>
+      </section>
+
+      <!-- Compose -->
+      <section class="compose-section" aria-label="Create post">
+        <h3>Create</h3>
+
+        <!-- Tab bar -->
+        <div class="compose-tabs" role="tablist" aria-label="Post type">
+          <button class="compose-tab active" role="tab" aria-selected="true"  aria-controls="panelText"  data-tab="text">Post</button>
+          <button class="compose-tab"        role="tab" aria-selected="false" aria-controls="panelImage" data-tab="image">Image</button>
+        </div>
+
+        <!-- Text post panel -->
+        <div id="panelText" class="compose-panel" role="tabpanel">
+          <textarea
+            id="postText"
+            placeholder="What's on your mind?"
+            maxlength="500"
+            aria-label="Post content"
+            rows="4"
+          ></textarea>
+          <div class="char-counter"><span id="charCount">0</span>/500</div>
+
+          <div class="friend-selector">
+            <label>Send to friends:</label>
+            <div class="friends-checklist" id="textFriendsList" aria-label="Friends to share with">
+              <p class="empty-text">Add friends to share with them</p>
+            </div>
+          </div>
+
+          <label class="privacy-toggle">
+            <input type="checkbox" id="textPrivate"> Private (only you)
+          </label>
+
+          <div class="compose-actions">
+            <button id="cancelTextBtn" type="button">Cancel</button>
+            <button id="publishTextBtn" type="button" class="btn-primary">Post</button>
+          </div>
+        </div>
+
+        <!-- Image/video post panel -->
+        <div id="panelImage" class="compose-panel" role="tabpanel" hidden>
+          <div class="file-input-wrapper">
+            <input
+              type="file"
+              id="imageInput"
+              accept=".jpg,.jpeg,.png,.gif,.webp,.mp4,.webm"
+              aria-label="Select photo or video"
+            >
+            <label class="file-input-label" for="imageInput">
+              Click to select a photo or video
+            </label>
+          </div>
+
+          <div id="mediaPreview" aria-live="polite"></div>
+
+          <div class="friend-selector">
+            <label>Send to friends:</label>
+            <div class="friends-checklist" id="imageFriendsList" aria-label="Friends to share with">
+              <p class="empty-text">Add friends to share with them</p>
+            </div>
+          </div>
+
+          <label class="privacy-toggle">
+            <input type="checkbox" id="imagePrivate"> Private (only you)
+          </label>
+
+          <div class="compose-actions">
+            <button id="cancelImageBtn" type="button">Cancel</button>
+            <button id="publishImageBtn" type="button" class="btn-primary">Post</button>
+          </div>
+        </div>
+      </section>
+
+      <!-- Timeline -->
+      <section class="timeline" id="timeline" aria-label="Timeline">
+        <div class="empty-state" id="emptyState">
+          <p>Your timeline is empty. Create your first post!</p>
+        </div>
+      </section>
+
+    </main>
+  </div><!-- /#appView -->
+
+  <!-- ── Modal: Add Friend ──────────────────────── -->
+  <div
+    class="modal"
+    id="addFriendModal"
+    role="dialog"
+    aria-modal="true"
+    aria-labelledby="addFriendTitle"
+    hidden
+  >
+    <div class="modal-content">
+      <div class="modal-header" id="addFriendTitle">Add Friend</div>
+      <input
+        type="email"
+        class="modal-input"
+        id="friendEmailInput"
+        placeholder="friend@example.com"
+        autocomplete="email"
+        aria-label="Friend email address"
+      >
+      <p class="modal-error" id="friendModalError" role="alert" hidden></p>
+      <div class="modal-buttons">
+        <button id="cancelFriendBtn" type="button">Cancel</button>
+        <button id="confirmAddFriendBtn" type="button" class="btn-primary">Add</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── Toast Container ────────────────────────── -->
+  <div id="toastContainer" aria-live="polite" aria-atomic="false"></div>
+
+  <!-- ── Loading Overlay ────────────────────────── -->
+  <div id="loadingOverlay" role="status" aria-label="Loading" hidden>
+    <div class="spinner"></div>
+  </div>
+
+  <!-- ── Scripts ────────────────────────────────── -->
+
+  <!--
+    Load user's config.js first (contains real CLIENT_ID & API_KEY).
+    Falls back to config.example.js (demo mode) if config.js is absent.
+  -->
+  <script>
+    // Attempt to load the real config; if it fails, set a flag
+    window._configLoadAttempted = true;
+  </script>
+  <script src="js/config.js" onerror="window._configMissing = true"></script>
+  <script src="config.example.js"></script>
+
+  <!-- Google API Client Library -->
+  <script src="https://apis.google.com/js/api.js" async defer></script>
+  <!-- Google Identity Services -->
+  <script src="https://accounts.google.com/gsi/client" async defer></script>
+
+  <!-- App modules (order matters) -->
+  <script src="js/utils.js"></script>
+  <script src="js/auth.js"></script>
+  <script src="js/drive.js"></script>
+  <script src="js/posts.js"></script>
+  <script src="js/ui.js"></script>
+
+</body>
+</html>
