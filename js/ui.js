@@ -265,82 +265,166 @@ const UI = (() => {
 
   /* ── Feed ───────────────────────────────────── */
 
+  let _feedAlbums = [];   // cached after load for filter re-renders
+  let _feedFilter = 'all';
+
   async function _renderFeed() {
-    const grid  = document.getElementById('feed-grid');
+    const list  = document.getElementById('feed-list');
     const empty = document.getElementById('feed-empty');
-    grid.innerHTML = '<p class="muted-text" style="grid-column:1/-1">Loading…</p>';
+    list.innerHTML = '<p class="muted-text">Loading…</p>';
     empty.hidden = true;
     _on('new-post-btn', 'click', _openNewPostModal);
     _clearThumbBlobs();
 
+    // Wire up filter pills
+    document.querySelectorAll('#feed-filters .filter-pill').forEach(btn => {
+      btn.addEventListener('click', () => {
+        document.querySelectorAll('#feed-filters .filter-pill').forEach(b => b.classList.remove('active'));
+        btn.classList.add('active');
+        _feedFilter = btn.dataset.filter;
+        _paintFeedAlbums();
+      });
+    });
+
     try {
-      const user = Auth.getCurrentUser();
       const [sharedFolders, ownPosts] = await Promise.all([
         Data.getFeedFolders(),
         Data.listOwnPosts()
       ]);
 
-      // Merge own posts into the folder list so they appear in your own feed
+      // Build a unified album list
       const allFolders = [
-        ...sharedFolders,
+        ...sharedFolders.map(f => ({
+          id: f.id,
+          name: f.name,
+          sharer: f.owners?.[0]?.displayName || 'Friend',
+          sharerEmail: f.owners?.[0]?.emailAddress || '',
+          sharedAt: f.sharedWithMeTime || f.createdTime,
+          _isOwn: false
+        })),
         ...ownPosts.map(p => ({
           id: p.folderId,
           name: p.name,
-          owners: [{ displayName: 'You' }],
-          _isOwn: true,
-          caption: p.caption
+          sharer: 'You',
+          sharerEmail: '',
+          sharedAt: p.createdAt || new Date().toISOString(),
+          caption: p.caption,
+          _isOwn: true
         }))
       ];
 
-      grid.innerHTML = '';
+      // Sort albums newest-shared first
+      allFolders.sort((a, b) => new Date(b.sharedAt) - new Date(a.sharedAt));
 
-      if (!allFolders.length) {
-        empty.hidden = false;
-        empty.querySelector('p').textContent = 'Your feed is empty. Create a post or add friends to see their shares here.';
-        return;
-      }
-
-      const items = [];
-      await Promise.all(allFolders.map(async folder => {
+      // Load files for each album
+      _feedAlbums = await Promise.all(allFolders.map(async album => {
         try {
-          const files = await Drive.listFiles(folder.id);
-          files.filter(f => f.mimeType?.startsWith('image/') || f.mimeType?.startsWith('video/')).forEach(f => {
-            items.push({ file: f, folder, owner: folder.owners?.[0] });
-          });
-        } catch (err) {
-          console.warn('Feed: could not load folder', folder.id, err);
+          const files = (await Drive.listFiles(album.id))
+            .filter(f => f.mimeType?.startsWith('image/') || f.mimeType?.startsWith('video/'));
+          return { ...album, files };
+        } catch {
+          return { ...album, files: [] };
         }
       }));
 
-      if (!items.length) { empty.hidden = false; return; }
-
-      // Newest first
-      items.sort((a, b) => new Date(b.file.createdTime) - new Date(a.file.createdTime));
-
-      items.forEach(({ file, folder, owner }) => {
-        const el = _el(`
-          <div class="media-item">
-            <img src="" alt="" loading="lazy" />
-            <div class="media-overlay">
-              <span>${Utils.escapeHtml(owner?.displayName || 'Friend')}</span>
-              <span class="media-time">${Utils.formatRelativeTime(file.createdTime)}</span>
-            </div>
-          </div>
-        `);
-        _loadThumbnail(el.querySelector('img'), file.id, file.thumbnailLink);
-        el.addEventListener('click', () => openLightbox(file.id, folder.id, {
-          canCopy: !folder._isOwn,
-          canDelete: !!folder._isOwn,
-          thumbnailLink: file.thumbnailLink
-        }));
-        grid.appendChild(el);
-      });
+      list.innerHTML = '';
+      _paintFeedAlbums();
     } catch (err) {
       console.error('Feed load error', err);
-      grid.innerHTML = '';
+      list.innerHTML = '';
       empty.hidden = false;
       empty.querySelector('p').textContent = 'Could not load your feed. Check your connection and try again.';
     }
+  }
+
+  function _paintFeedAlbums() {
+    const list  = document.getElementById('feed-list');
+    const empty = document.getElementById('feed-empty');
+    list.innerHTML = '';
+
+    const visible = _feedAlbums.filter(a => {
+      if (_feedFilter === 'friends') return !a._isOwn;
+      if (_feedFilter === 'mine')    return a._isOwn;
+      return true;
+    }).filter(a => a.files.length > 0);
+
+    if (!visible.length) {
+      empty.hidden = false;
+      empty.querySelector('p').textContent = _feedFilter === 'all'
+        ? 'Your feed is empty. Create a post or add friends to see their shares here.'
+        : 'Nothing here yet.';
+      return;
+    }
+    empty.hidden = true;
+
+    visible.forEach(album => {
+      const cover   = album.files[0];
+      const count   = album.files.length;
+      const timeStr = Utils.formatRelativeTime(album.sharedAt);
+
+      const card = _el(`
+        <div class="feed-album-card">
+          <div class="feed-album-cover">
+            <img src="" alt="" loading="lazy" />
+            ${count > 1 ? `<span class="feed-album-count">${count} photos</span>` : ''}
+          </div>
+          <div class="feed-album-meta">
+            <div class="feed-album-title">${Utils.escapeHtml(album.name)}</div>
+            <div class="feed-album-byline">
+              <span class="feed-album-sharer">${Utils.escapeHtml(album.sharer)}</span>
+              <span class="feed-album-dot">·</span>
+              <span class="feed-album-time">${timeStr}</span>
+              ${count > 1 ? `<span class="feed-album-dot">·</span><span class="feed-album-expand-hint">tap to expand</span>` : ''}
+            </div>
+            ${album.caption ? `<div class="feed-album-caption">${Utils.escapeHtml(album.caption)}</div>` : ''}
+          </div>
+        </div>
+      `);
+
+      _loadThumbnail(card.querySelector('img'), cover.id, cover.thumbnailLink);
+
+      // Expanded grid (hidden by default for multi-photo albums)
+      let expanded = false;
+      const expandGrid = document.createElement('div');
+      expandGrid.className = 'feed-album-grid';
+      expandGrid.hidden = true;
+
+      if (count === 1) {
+        // Single photo — click card opens lightbox directly
+        card.style.cursor = 'pointer';
+        card.addEventListener('click', () => openLightbox(cover.id, album.id, {
+          canCopy: !album._isOwn, canDelete: album._isOwn, thumbnailLink: cover.thumbnailLink
+        }));
+      } else {
+        // Multi-photo album — click toggles grid
+        card.style.cursor = 'pointer';
+        card.addEventListener('click', () => {
+          expanded = !expanded;
+          expandGrid.hidden = !expanded;
+          card.classList.toggle('feed-album-card--open', expanded);
+          if (expanded && !expandGrid.dataset.loaded) {
+            expandGrid.dataset.loaded = '1';
+            album.files.forEach(f => {
+              const thumb = _el(`<div class="media-item"><img src="" alt="" loading="lazy" /></div>`);
+              _loadThumbnail(thumb.querySelector('img'), f.id, f.thumbnailLink);
+              thumb.addEventListener('click', e => {
+                e.stopPropagation();
+                openLightbox(f.id, album.id, {
+                  canCopy: !album._isOwn, canDelete: album._isOwn, thumbnailLink: f.thumbnailLink
+                });
+              });
+              expandGrid.appendChild(thumb);
+            });
+          }
+        });
+      }
+
+      const wrapper = document.createElement('div');
+      wrapper.className = 'feed-album-wrapper';
+      wrapper.appendChild(card);
+      wrapper.appendChild(expandGrid);
+      list.appendChild(wrapper);
+    });
   }
 
   /* ── My Data ─────────────────────────────────── */
@@ -1333,6 +1417,7 @@ const UI = (() => {
     refreshReactions();
 
     // Comments
+    let _commentsEnabled = true;
     async function refreshComments() {
       try {
         const comments = await Drive.getComments(fileId);
@@ -1348,7 +1433,14 @@ const UI = (() => {
             </div>
           `));
         });
-      } catch { commArea.innerHTML = ''; }
+      } catch (err) {
+        if (err?.status === 403) {
+          _commentsEnabled = false;
+          commArea.innerHTML = '<span class="muted-text small">Comments unavailable — owner hasn\'t granted commenter access.</span>';
+        } else {
+          commArea.innerHTML = '';
+        }
+      }
     }
     refreshComments();
 
@@ -1394,13 +1486,21 @@ const UI = (() => {
     const input = document.getElementById('lightbox-comment-input');
     form.onsubmit = async e => {
       e.preventDefault();
+      if (!_commentsEnabled) { Utils.showToast('Comments not available for this file', 'error'); return; }
       const text = input.value.trim();
       if (!text) return;
       try {
         await Drive.addComment(fileId, text);
         input.value = '';
         refreshComments();
-      } catch { Utils.showToast('Failed to post comment', 'error'); }
+      } catch (err) {
+        if (err?.status === 403) {
+          _commentsEnabled = false;
+          Utils.showToast('No commenter access on this file', 'error');
+        } else {
+          Utils.showToast('Failed to post comment', 'error');
+        }
+      }
     };
 
     document.getElementById('lightbox-close').onclick    = closeLightbox;

@@ -225,7 +225,7 @@ const Drive = (() => {
 
   async function listSharedWithMe() {
     const q = `sharedWithMe=true and trashed=false and mimeType='application/vnd.google-apps.folder'`;
-    const params = new URLSearchParams({ q, fields: 'files(id,name,owners,createdTime)', spaces: 'drive', pageSize: '50' });
+    const params = new URLSearchParams({ q, fields: 'files(id,name,owners,createdTime,sharedWithMeTime)', spaces: 'drive', pageSize: '50' });
     const data = await _json(`${BASE}/files?${params}`, { headers: _headers() });
     return data.files || [];
   }

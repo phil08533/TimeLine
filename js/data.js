@@ -246,14 +246,22 @@ const Data = (() => {
   }
 
   async function shareCollection(folderId, emails) {
-    await Promise.all(emails.map(e => Drive.shareWithEmail(folderId, e, 'reader').catch(() => {})));
+    await Promise.all(emails.map(e => Drive.shareWithEmail(folderId, e, 'commenter').catch(() => {})));
   }
 
   /* ── Reactions ─────────────────────────────── */
 
+  // Reactions are stored in the user's own Drive root to avoid permission errors
+  // on folders shared by friends (reader access can't write files).
+  // File name: react-{sanitised folderId}.json
+  function _reactKey(collectionFolderId) {
+    return `react-${collectionFolderId.replace(/[^a-zA-Z0-9_-]/g, '_')}.json`;
+  }
+
   async function getReactions(collectionFolderId) {
     try {
-      const f = await Drive.findFile('reactions.json', collectionFolderId);
+      const key = _reactKey(collectionFolderId);
+      const f = await Drive.findFile(key, _folders.rootId);
       if (!f) return { likes: [] };
       return await Drive.readJsonFile(f.id);
     } catch {
@@ -263,25 +271,19 @@ const Data = (() => {
 
   async function toggleLike(collectionFolderId) {
     const user = Auth.getCurrentUser();
-    const f = await Drive.findFile('reactions.json', collectionFolderId);
-    let reactions;
-    if (f) {
-      reactions = await Drive.readJsonFile(f.id);
-    } else {
-      reactions = { likes: [] };
-    }
+    const key  = _reactKey(collectionFolderId);
+    const f    = await Drive.findFile(key, _folders.rootId);
+    let reactions = f ? await Drive.readJsonFile(f.id) : { likes: [] };
 
     const idx = reactions.likes.findIndex(l => l.userId === user.userId);
-    let liked;
-    if (idx >= 0) {
-      reactions.likes.splice(idx, 1);
-      liked = false;
-    } else {
+    const liked = idx < 0;
+    if (liked) {
       reactions.likes.push({ userId: user.userId, email: user.email, at: new Date().toISOString() });
-      liked = true;
+    } else {
+      reactions.likes.splice(idx, 1);
     }
 
-    await Drive.upsertJsonFile('reactions.json', reactions, collectionFolderId);
+    await Drive.upsertJsonFile(key, reactions, _folders.rootId);
     return { liked, count: reactions.likes.length };
   }
 
@@ -312,7 +314,7 @@ const Data = (() => {
     } else if (sharing === 'friends') {
       const friends = await getFriends();
       await Promise.all(friends.map(f =>
-        Drive.shareWithEmail(folderId, f.email, 'reader').catch(() => {})
+        Drive.shareWithEmail(folderId, f.email, 'commenter').catch(() => {})
       ));
     }
 

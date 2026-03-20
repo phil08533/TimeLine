@@ -113,9 +113,14 @@
           <h2>Feed</h2>
           <button class="btn btn-primary btn-sm" id="new-post-btn">+ New Post</button>
         </div>
-        <div id="feed-grid" class="media-grid"></div>
+        <div id="feed-filters" class="my-data-filters">
+          <button class="filter-pill active" data-filter="all">All</button>
+          <button class="filter-pill" data-filter="friends">From Friends</button>
+          <button class="filter-pill" data-filter="mine">Your Posts</button>
+        </div>
+        <div id="feed-list"></div>
         <div id="feed-empty" class="empty-state" hidden>
-          <p>Your feed is empty. Friends can share public collections or circles with you — their posts will appear here.</p>
+          <p>Your feed is empty. Create a post or add friends to see their shares here.</p>
         </div>
       </section>
 
