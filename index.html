@@ -111,8 +111,25 @@
       <section id="page-feed" class="page" data-page="feed">
         <div class="page-header">
           <h2>Feed</h2>
-          <button class="btn btn-primary btn-sm" id="new-post-btn">+ New Post</button>
         </div>
+
+        <!-- Inline post composer -->
+        <div class="composer-card" id="post-composer">
+          <textarea id="composer-caption" class="composer-caption" placeholder="What's on your mind?" rows="2"></textarea>
+          <div id="composer-previews" class="composer-previews" hidden></div>
+          <div class="composer-toolbar">
+            <label class="btn btn-ghost btn-sm composer-photo-btn" for="composer-files">
+              📷 Add Photos
+              <input type="file" id="composer-files" accept="image/*,video/*" multiple hidden />
+            </label>
+            <select id="composer-sharing" class="select-sm">
+              <option value="friends">Friends</option>
+              <option value="everyone">Public</option>
+            </select>
+            <button id="composer-submit" class="btn btn-primary btn-sm">Post</button>
+          </div>
+        </div>
+
         <div id="feed-filters" class="my-data-filters">
           <button class="filter-pill active" data-filter="all">All</button>
           <button class="filter-pill" data-filter="friends">From Friends</button>
@@ -120,7 +137,7 @@
         </div>
         <div id="feed-list"></div>
         <div id="feed-empty" class="empty-state" hidden>
-          <p>Your feed is empty. Create a post or add friends to see their shares here.</p>
+          <p>Your feed is empty. Write a post above, or add friends to see their shares here.</p>
         </div>
       </section>
 
