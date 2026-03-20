@@ -14,6 +14,10 @@ const UI = (() => {
   function boot() {
     Auth.init({ onSignIn: _onSignIn, onSignOut: _onSignOut });
     document.getElementById('sign-in-btn').addEventListener('click', () => Auth.signIn());
+    document.getElementById('demo-btn').addEventListener('click', () => Auth.signIn());
+
+    const demoSignInLink = document.getElementById('demo-sign-in-link');
+    if (demoSignInLink) demoSignInLink.addEventListener('click', e => { e.preventDefault(); Auth.signOut(); });
 
     _initSetupUI();
 
@@ -26,12 +30,20 @@ const UI = (() => {
     const saveBtn       = document.getElementById('save-client-id-btn');
     const clearBtn      = document.getElementById('clear-client-id-btn');
     const statusEl      = document.getElementById('setup-status');
+    const authNote      = document.getElementById('auth-note');
+    const demoBtn       = document.getElementById('demo-btn');
 
     if (!setupSection) return;
 
-    // Show setup panel only when no Client ID is configured
-    if (!Auth.hasRealCredentials()) {
+    const hasCredentials = Auth.hasRealCredentials();
+
+    if (!hasCredentials) {
+      // No Google Client ID — show demo option and setup panel
       setupSection.hidden = false;
+      if (demoBtn) demoBtn.hidden = false;
+      if (authNote) authNote.textContent = 'No Google Client ID configured — Sign in will use a local demo account.';
+    } else {
+      if (authNote) authNote.textContent = 'Your photos stay in your Google Drive. We never see them.';
     }
 
     // Pre-fill if a Client ID is already saved in localStorage
@@ -71,6 +83,8 @@ const UI = (() => {
   async function _onSignIn(user) {
     _showScreen('app-shell');
     _updateNavAvatar(user);
+    const demoBanner = document.getElementById('demo-banner');
+    if (demoBanner) demoBanner.hidden = !Auth.isDemoMode();
     Utils.showLoading();
     try {
       // Hard 20 s cap — if Drive setup stalls the user still gets into the app

@@ -166,6 +166,16 @@ body { min-height: 100vh; }
 .auth-pitch strong { color: var(--text); }
 .auth-note { font-size: .8rem; color: var(--muted); }
 .btn-lg { padding: .8rem 2rem; font-size: 1rem; }
+#demo-btn { margin-top: .25rem; }
+
+/* ── Demo banner ── */
+.demo-banner {
+  background: var(--border);
+  color: var(--muted);
+  font-size: .8rem;
+  text-align: center;
+  padding: .5rem 1rem;
+}
 
 /* ── Auth setup panel ── */
 .auth-setup {
