@@ -212,6 +212,41 @@ const UI = (() => {
     if (el) el.style.display = 'block';
   }
 
+  /* ── Thumbnail loader ────────────────────────── */
+
+  // Drive thumbnailLink and drive.google.com/thumbnail both require a matching
+  // browser Google session cookie to load in <img> tags.  For private files the
+  // only reliable path is an authenticated API fetch → blob URL.
+  // We try thumbnailLink first (cheap, zero bytes from our quota) and fall back
+  // to getFileAsBlob if the browser cookie session doesn't match the OAuth user.
+
+  let _thumbBlobUrls = [];
+
+  function _clearThumbBlobs() {
+    _thumbBlobUrls.forEach(u => URL.revokeObjectURL(u));
+    _thumbBlobUrls = [];
+  }
+
+  function _loadThumbnail(imgEl, fileId, thumbnailLink) {
+    if (Auth.isDemoMode()) {
+      const u = Drive.getThumbnailUrl(fileId);
+      if (u) imgEl.src = u;
+      return;
+    }
+    function _fetchBlob() {
+      Drive.getFileAsBlob(fileId).then(u => {
+        _thumbBlobUrls.push(u);
+        imgEl.src = u;
+      }).catch(() => {});
+    }
+    if (thumbnailLink) {
+      imgEl.src = thumbnailLink;
+      imgEl.addEventListener('error', _fetchBlob, { once: true });
+    } else {
+      _fetchBlob();
+    }
+  }
+
   /* ── Feed ───────────────────────────────────── */
 
   async function _renderFeed() {
@@ -219,19 +254,38 @@ const UI = (() => {
     const empty = document.getElementById('feed-empty');
     grid.innerHTML = '<p class="muted-text" style="grid-column:1/-1">Loading…</p>';
     empty.hidden = true;
+    _on('new-post-btn', 'click', _openNewPostModal);
+    _clearThumbBlobs();
 
     try {
-      const sharedFolders = await Data.getFeedFolders();
+      const user = Auth.getCurrentUser();
+      const [sharedFolders, ownPosts] = await Promise.all([
+        Data.getFeedFolders(),
+        Data.listOwnPosts()
+      ]);
+
+      // Merge own posts into the folder list so they appear in your own feed
+      const allFolders = [
+        ...sharedFolders,
+        ...ownPosts.map(p => ({
+          id: p.folderId,
+          name: p.name,
+          owners: [{ displayName: 'You' }],
+          _isOwn: true,
+          caption: p.caption
+        }))
+      ];
+
       grid.innerHTML = '';
 
-      if (!sharedFolders.length) {
+      if (!allFolders.length) {
         empty.hidden = false;
-        empty.querySelector('p').textContent = 'Your feed is empty. Friends can share public collections or circles with you — their posts will appear here.';
+        empty.querySelector('p').textContent = 'Your feed is empty. Create a post or add friends to see their shares here.';
         return;
       }
 
       const items = [];
-      await Promise.all(sharedFolders.map(async folder => {
+      await Promise.all(allFolders.map(async folder => {
         try {
           const files = await Drive.listFiles(folder.id);
           files.filter(f => f.mimeType?.startsWith('image/') || f.mimeType?.startsWith('video/')).forEach(f => {
@@ -250,14 +304,19 @@ const UI = (() => {
       items.forEach(({ file, folder, owner }) => {
         const el = _el(`
           <div class="media-item">
-            <img src="${Drive.getThumbnailUrl(file.id, 'w400', file.thumbnailLink)}" alt="" loading="lazy" />
+            <img src="" alt="" loading="lazy" />
             <div class="media-overlay">
               <span>${Utils.escapeHtml(owner?.displayName || 'Friend')}</span>
               <span class="media-time">${Utils.formatRelativeTime(file.createdTime)}</span>
             </div>
           </div>
         `);
-        el.addEventListener('click', () => openLightbox(file.id, folder.id, { canCopy: true, thumbnailLink: file.thumbnailLink }));
+        _loadThumbnail(el.querySelector('img'), file.id, file.thumbnailLink);
+        el.addEventListener('click', () => openLightbox(file.id, folder.id, {
+          canCopy: !folder._isOwn,
+          canDelete: !!folder._isOwn,
+          thumbnailLink: file.thumbnailLink
+        }));
         grid.appendChild(el);
       });
     } catch (err) {
@@ -329,6 +388,7 @@ const UI = (() => {
     const empty = document.getElementById('my-data-empty');
     const items = filter === 'all' ? _myDataItems : _myDataItems.filter(i => i.type === filter);
 
+    _clearThumbBlobs();
     grid.innerHTML = '';
     if (!items.length) { empty.hidden = false; return; }
     empty.hidden = true;
@@ -354,12 +414,13 @@ const UI = (() => {
       g.items.forEach(({ file, folderId }) => {
         const el = _el(`
           <div class="media-item">
-            <img src="${Drive.getThumbnailUrl(file.id, 'w400', file.thumbnailLink)}" alt="" loading="lazy" />
+            <img src="" alt="" loading="lazy" />
             <div class="media-overlay">
               <span class="media-time">${Utils.formatRelativeTime(file.createdTime)}</span>
             </div>
           </div>
         `);
+        _loadThumbnail(el.querySelector('img'), file.id, file.thumbnailLink);
         el.addEventListener('click', () => openLightbox(file.id, folderId, { canDelete: true, thumbnailLink: file.thumbnailLink }));
         grid.appendChild(el);
       });
@@ -524,7 +585,8 @@ const UI = (() => {
       if (!media.length) { document.getElementById('circle-detail-empty').hidden = false; return; }
 
       media.forEach(f => {
-        const el = _el(`<div class="media-item"><img src="${Drive.getThumbnailUrl(f.id, 'w400', f.thumbnailLink)}" alt="" loading="lazy" /></div>`);
+        const el = _el(`<div class="media-item"><img src="" alt="" loading="lazy" /></div>`);
+        _loadThumbnail(el.querySelector('img'), f.id, f.thumbnailLink);
         el.addEventListener('click', () => openLightbox(f.id, folderId, { canDelete: isOwner, thumbnailLink: f.thumbnailLink }));
         grid.appendChild(el);
       });
@@ -671,7 +733,8 @@ const UI = (() => {
       }
 
       media.forEach(f => {
-        const el = _el(`<div class="media-item"><img src="${Drive.getThumbnailUrl(f.id, 'w400', f.thumbnailLink)}" alt="" loading="lazy" /></div>`);
+        const el = _el(`<div class="media-item"><img src="" alt="" loading="lazy" /></div>`);
+        _loadThumbnail(el.querySelector('img'), f.id, f.thumbnailLink);
         el.addEventListener('click', () => openLightbox(f.id, folderId, { canDelete: true, thumbnailLink: f.thumbnailLink }));
         grid.appendChild(el);
       });
@@ -745,6 +808,61 @@ const UI = (() => {
         closeModal(); Utils.showToast('Shared!');
       } catch { Utils.showToast('Failed to share', 'error'); }
       finally   { Utils.hideLoading(); }
+    });
+  }
+
+  /* ── New Post ────────────────────────────────── */
+
+  function _openNewPostModal() {
+    openModal(`
+      <h3>New Post</h3>
+      <form id="mf" class="form-block">
+        <div class="form-field">
+          <label>Photo or Video</label>
+          <input type="file" id="post-file-input" class="input" accept="image/*,video/*" required />
+        </div>
+        <div class="form-field">
+          <label>Caption <span class="muted-text">(optional)</span></label>
+          <textarea name="caption" class="input" rows="3" placeholder="What's on your mind?"></textarea>
+        </div>
+        <div class="form-field">
+          <label>Share with</label>
+          <select name="sharing" class="select-sm" style="width:100%">
+            <option value="friends">Friends</option>
+            <option value="everyone">Anyone with link (Public)</option>
+          </select>
+        </div>
+        <p id="post-status" class="muted-text small"></p>
+        <div class="modal-actions">
+          <button type="button" class="btn btn-ghost btn-sm modal-cancel-btn">Cancel</button>
+          <button type="submit" class="btn btn-primary btn-sm">Post</button>
+        </div>
+      </form>
+    `);
+    document.querySelector('.modal-cancel-btn').addEventListener('click', closeModal);
+    document.getElementById('mf').addEventListener('submit', async e => {
+      e.preventDefault();
+      const fd     = new FormData(e.target);
+      const file   = document.getElementById('post-file-input').files[0];
+      if (!file) return;
+      const v = Utils.validateMediaFile(file);
+      if (!v.ok) { Utils.showToast(v.error, 'error'); return; }
+      const status = document.getElementById('post-status');
+      status.textContent = 'Creating post…';
+      Utils.showLoading();
+      try {
+        const post = await Data.createPost(fd.get('caption') || '', fd.get('sharing'));
+        status.textContent = 'Uploading…';
+        await Drive.uploadMedia(file, post.folderId);
+        closeModal();
+        Utils.showToast('Posted!');
+        _renderFeed();
+      } catch {
+        Utils.showToast('Failed to post', 'error');
+        status.textContent = '';
+      } finally {
+        Utils.hideLoading();
+      }
     });
   }
 
