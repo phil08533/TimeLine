@@ -348,6 +348,63 @@ const Data = (() => {
     return Drive.listSharedWithMe();
   }
 
+  /* ── Hidden files ──────────────────────────── */
+
+  async function getHiddenIds() {
+    try {
+      const f = await Drive.findFile('hidden.json', _folders.rootId);
+      if (!f) return [];
+      const data = await Drive.readJsonFile(f.id);
+      return data.ids || [];
+    } catch { return []; }
+  }
+
+  async function hideFile(fileId) {
+    const ids = await getHiddenIds();
+    if (!ids.includes(fileId)) {
+      ids.push(fileId);
+      await Drive.upsertJsonFile('hidden.json', { ids }, _folders.rootId);
+    }
+  }
+
+  async function unhideFile(fileId) {
+    const ids = await getHiddenIds();
+    const filtered = ids.filter(id => id !== fileId);
+    await Drive.upsertJsonFile('hidden.json', { ids: filtered }, _folders.rootId);
+  }
+
+  /* ── PIN ────────────────────────────────────── */
+
+  async function _hashPin(pin) {
+    const buf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(pin + 'mc_pin_v1'));
+    return Array.from(new Uint8Array(buf)).map(b => b.toString(16).padStart(2, '0')).join('');
+  }
+
+  async function getPin() {
+    try {
+      const f = await Drive.findFile('pin.json', _folders.rootId);
+      if (!f) return null;
+      const data = await Drive.readJsonFile(f.id);
+      return data.hash || null;
+    } catch { return null; }
+  }
+
+  async function setPin(pin) {
+    const hash = await _hashPin(pin);
+    await Drive.upsertJsonFile('pin.json', { hash }, _folders.rootId);
+  }
+
+  async function verifyPin(pin) {
+    const stored = await getPin();
+    if (!stored) return true;
+    return (await _hashPin(pin)) === stored;
+  }
+
+  async function clearPin() {
+    const f = await Drive.findFile('pin.json', _folders.rootId);
+    if (f) await Drive.deleteFile(f.id).catch(() => {});
+  }
+
   /* ── Exports ───────────────────────────────── */
 
   return {
@@ -362,6 +419,8 @@ const Data = (() => {
     listCollections, createCollection, getCollection, updateCollectionMeta, deleteCollection, shareCollection,
     getReactions, toggleLike,
     createPost, listOwnPosts,
-    getFeedFolders
+    getFeedFolders,
+    getHiddenIds, hideFile, unhideFile,
+    getPin, setPin, verifyPin, clearPin
   };
 })();
