@@ -617,6 +617,29 @@ textarea.input { resize: vertical; min-height: 80px; }
 }
 @keyframes spin { to { transform: rotate(360deg); } }
 
+/* ── My Data filter pills ── */
+.my-data-filters { display: flex; gap: .4rem; flex-wrap: wrap; margin-bottom: 1rem; }
+.filter-pill {
+  padding: .28rem .75rem;
+  border-radius: 99px;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--muted);
+  font-size: .8rem;
+  transition: background .15s, color .15s, border-color .15s;
+}
+.filter-pill.active { background: var(--accent); color: var(--accent-fg); border-color: var(--accent); }
+.filter-pill:hover:not(.active) { background: var(--bg); color: var(--text); }
+
+/* ── My Data section heading ── */
+.my-data-section-heading {
+  grid-column: 1 / -1;
+  font-size: .75rem; font-weight: 700; text-transform: uppercase; letter-spacing: .07em;
+  color: var(--muted); padding: .75rem 0 .25rem;
+  border-top: 1px solid var(--border); margin-top: .25rem;
+}
+.my-data-section-heading:first-child { border-top: none; margin-top: 0; }
+
 /* ── Responsive ── */
 @media (max-width: 640px) {
   .topbar-nav { gap: 0; }
