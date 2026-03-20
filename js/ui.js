@@ -209,7 +209,7 @@ const UI = (() => {
 
   function _showPage(id) {
     const el = document.getElementById(id);
-    if (el) el.style.display = 'block';
+    if (el) { el.removeAttribute('hidden'); el.style.display = 'block'; }
   }
 
   /* ── Thumbnail loader ────────────────────────── */
