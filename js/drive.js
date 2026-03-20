@@ -16,7 +16,14 @@ const Drive = (() => {
 
   async function _request(url, options = {}) {
     return Utils.withRetry(async () => {
-      const r = await fetch(url, options);
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), 15000); // 15 s timeout
+      let r;
+      try {
+        r = await fetch(url, { signal: controller.signal, ...options });
+      } finally {
+        clearTimeout(timer);
+      }
       if (r.status === 401) throw Object.assign(new Error('Unauthorized'), { status: 401 });
       if (r.status === 403) {
         const body = await r.clone().json().catch(() => ({}));
