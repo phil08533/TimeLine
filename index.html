@@ -99,10 +99,16 @@
         <a href="#friends"     class="nav-link" data-page="friends">Friends</a>
       </nav>
       <div class="topbar-right">
+        <button id="notif-btn" class="notif-bell" title="Notifications" aria-label="Notifications">
+          🔔
+          <span id="notif-badge" class="notif-badge" hidden>0</span>
+        </button>
         <a href="#profile" class="nav-avatar-link" data-page="profile">
           <span id="nav-avatar" class="nav-avatar">?</span>
         </a>
       </div>
+      <!-- Notification panel (shown on bell click) -->
+      <div id="notif-panel" class="notif-panel" hidden></div>
     </header>
 
     <main id="main">
@@ -132,14 +138,17 @@
         </div>
         <div id="my-data-filters" class="my-data-filters">
           <button class="filter-pill active" data-filter="all">All</button>
-          <button class="filter-pill" data-filter="circles">Circles</button>
-          <button class="filter-pill" data-filter="collections">Collections</button>
-          <button class="filter-pill" data-filter="posts">Posts</button>
+          <button class="filter-pill" data-filter="images">Images</button>
+          <button class="filter-pill" data-filter="videos">Videos</button>
+          <button class="filter-pill" data-filter="documents">Documents</button>
           <button class="filter-pill filter-pill--locked" data-filter="hidden" title="PIN protected">👁 Hidden</button>
         </div>
         <div id="my-data-grid" class="media-grid"></div>
         <div id="my-data-empty" class="empty-state" hidden>
-          <p>No files yet. Upload photos or videos to a circle or collection to see them here.</p>
+          <p>No files found in your Drive.</p>
+        </div>
+        <div style="text-align:center;margin-top:1rem">
+          <button id="my-data-load-more" class="btn btn-ghost btn-sm" hidden>Load more</button>
         </div>
       </section>
 
@@ -163,9 +172,9 @@
           <div id="circle-detail-actions" class="page-header-actions"></div>
         </div>
         <div id="circle-members-strip" class="members-strip"></div>
-        <div id="circle-detail-grid" class="media-grid"></div>
+        <div id="circle-detail-feed" class="feed-list"></div>
         <div id="circle-detail-empty" class="empty-state" hidden>
-          <p>Nothing shared here yet.</p>
+          <p>Nothing posted here yet. Be the first to post!</p>
         </div>
       </section>
 

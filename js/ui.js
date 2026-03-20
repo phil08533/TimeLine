@@ -19,6 +19,14 @@ const UI = (() => {
     const demoSignInLink = document.getElementById('demo-sign-in-link');
     if (demoSignInLink) demoSignInLink.addEventListener('click', e => { e.preventDefault(); Auth.signOut(); });
 
+    // Notification bell
+    const notifBtn = document.getElementById('notif-btn');
+    if (notifBtn) notifBtn.addEventListener('click', e => { e.stopPropagation(); _toggleNotificationPanel(); });
+    document.addEventListener('click', e => {
+      const panel = document.getElementById('notif-panel');
+      if (panel && !panel.hidden && !panel.contains(e.target) && e.target !== notifBtn) panel.hidden = true;
+    });
+
     _initSetupUI();
 
     if (Auth.isSignedIn()) _onSignIn(Auth.getCurrentUser());
@@ -106,11 +114,75 @@ const UI = (() => {
     }
     _setupRouter();
     _navigate(window.location.hash.slice(1) || 'feed');
+    // Poll notifications once after sign-in (no need to hammer the API)
+    _refreshNotificationCount().catch(() => {});
   }
 
   function _onSignOut() {
     _showScreen('auth-screen');
     _currentPage = null;
+  }
+
+  /* ── Notifications ──────────────────────────── */
+
+  async function _refreshNotificationCount() {
+    const requests = await Data.getIncomingFriendRequests().catch(() => []);
+    const badge = document.getElementById('notif-badge');
+    if (!badge) return requests;
+    const count = requests.length;
+    badge.textContent = count > 9 ? '9+' : String(count);
+    badge.hidden = count === 0;
+    return requests;
+  }
+
+  async function _toggleNotificationPanel() {
+    const panel = document.getElementById('notif-panel');
+    if (!panel) return;
+    if (!panel.hidden) { panel.hidden = true; return; }
+    panel.hidden = false;
+    panel.innerHTML = '<p class="notif-empty">Loading…</p>';
+
+    const requests = await _refreshNotificationCount();
+    panel.innerHTML = '';
+
+    if (!requests.length) {
+      panel.innerHTML = '<p class="notif-empty">No new notifications.</p>';
+      return;
+    }
+
+    requests.forEach(req => {
+      const item = _el(`
+        <div class="notif-item">
+          <div class="notif-avatar">${(req.fromName || req.fromEmail)[0].toUpperCase()}</div>
+          <div class="notif-body">
+            <div class="notif-title"><strong>${Utils.escapeHtml(req.fromName || req.fromEmail)}</strong> wants to be your friend</div>
+            <div class="notif-actions">
+              <button class="btn btn-primary btn-sm notif-accept">Accept</button>
+              <button class="btn btn-ghost btn-sm notif-decline">Decline</button>
+            </div>
+          </div>
+        </div>
+      `);
+      item.querySelector('.notif-accept').addEventListener('click', async () => {
+        item.querySelector('.notif-accept').disabled = true;
+        item.querySelector('.notif-decline').disabled = true;
+        try {
+          await Data.acceptFriendRequest(req.fromEmail, req.fromName);
+          item.innerHTML = `<div class="notif-done">✓ Added ${Utils.escapeHtml(req.fromName || req.fromEmail)} as a friend</div>`;
+          Utils.showToast(`Added ${req.fromName || req.fromEmail} as friend`);
+          _refreshNotificationCount().catch(() => {});
+        } catch { Utils.showToast('Could not accept', 'error'); }
+      });
+      item.querySelector('.notif-decline').addEventListener('click', async () => {
+        item.querySelector('.notif-accept').disabled = true;
+        item.querySelector('.notif-decline').disabled = true;
+        await Data.declineFriendRequest(req.fileId).catch(() => {});
+        item.remove();
+        if (!panel.querySelector('.notif-item')) panel.innerHTML = '<p class="notif-empty">No new notifications.</p>';
+        _refreshNotificationCount().catch(() => {});
+      });
+      panel.appendChild(item);
+    });
   }
 
   /* ── Screen / page helpers ─────────────────── */
@@ -622,12 +694,13 @@ const UI = (() => {
 
   /* ── My Data ─────────────────────────────────── */
 
-  // Aggregates all media files from the user's own circles and collections.
-  // Items are grouped by source with section headings and filterable by type.
+  // Shows ALL files from the user's Google Drive with management actions.
 
-  let _myDataItems     = []; // all items (including hidden)
-  let _myDataHiddenIds = []; // set of hidden file IDs
-  let _pinSessionOk    = false; // PIN entered once per session
+  let _myDataItems         = []; // Drive file objects
+  let _myDataNextPageToken = null;
+  let _myDataHiddenIds     = [];
+  let _myDataCurrentFilter = 'all';
+  let _pinSessionOk        = false;
 
   async function _renderMyData() {
     const grid  = document.getElementById('my-data-grid');
@@ -635,6 +708,7 @@ const UI = (() => {
     grid.innerHTML = '<p class="muted-text" style="grid-column:1/-1">Loading…</p>';
     empty.hidden = true;
     _on('my-data-upload-btn', 'click', _openMyDataUploadModal);
+    _on('my-data-load-more', 'click', _loadMoreMyData);
 
     // Filter pills — deduplicate listeners with replacement
     document.querySelectorAll('#my-data-filters .filter-pill').forEach(btn => {
@@ -644,36 +718,14 @@ const UI = (() => {
     });
 
     try {
-      const [circles, colls, hiddenIds] = await Promise.all([
-        Data.listCircles(), Data.listCollections(), Data.getHiddenIds()
+      const [driveResult, hiddenIds] = await Promise.all([
+        Drive.listAllFiles(), Data.getHiddenIds()
       ]);
+      _myDataItems = driveResult.files;
+      _myDataNextPageToken = driveResult.nextPageToken;
       _myDataHiddenIds = hiddenIds;
-      _myDataItems = [];
+      _myDataCurrentFilter = 'all';
 
-      const isMedia = f => f.mimeType?.startsWith('image/') || f.mimeType?.startsWith('video/');
-
-      await Promise.all([
-        ...circles.map(async c => {
-          try {
-            (await Drive.listFiles(c.folderId)).filter(isMedia)
-              .forEach(f => _myDataItems.push({ file: f, source: c.name, type: 'circles', folderId: c.folderId }));
-          } catch { /* skip */ }
-        }),
-        ...colls.filter(c => !c.isPost).map(async c => {
-          try {
-            (await Drive.listFiles(c.folderId)).filter(isMedia)
-              .forEach(f => _myDataItems.push({ file: f, source: c.name, type: 'collections', folderId: c.folderId }));
-          } catch { /* skip */ }
-        }),
-        ...colls.filter(c => c.isPost).map(async c => {
-          try {
-            (await Drive.listFiles(c.folderId)).filter(isMedia)
-              .forEach(f => _myDataItems.push({ file: f, source: c.name || 'Post', type: 'posts', folderId: c.folderId }));
-          } catch { /* skip */ }
-        })
-      ]);
-
-      // Reset to "all"
       document.querySelectorAll('#my-data-filters .filter-pill').forEach(b =>
         b.classList.toggle('active', b.dataset.filter === 'all'));
       _renderMyDataGrid('all');
@@ -685,8 +737,22 @@ const UI = (() => {
     }
   }
 
+  async function _loadMoreMyData() {
+    if (!_myDataNextPageToken) return;
+    const btn = document.getElementById('my-data-load-more');
+    if (btn) { btn.disabled = true; btn.textContent = 'Loading…'; }
+    try {
+      const result = await Drive.listAllFiles(_myDataNextPageToken);
+      _myDataItems = _myDataItems.concat(result.files);
+      _myDataNextPageToken = result.nextPageToken;
+      _renderMyDataGrid(_myDataCurrentFilter);
+    } catch { Utils.showToast('Could not load more files', 'error'); }
+    if (btn) { btn.disabled = false; btn.textContent = 'Load more'; }
+  }
+
   async function _onMyDataFilter(btn) {
     const filter = btn.dataset.filter;
+    _myDataCurrentFilter = filter;
     document.querySelectorAll('#my-data-filters .filter-pill').forEach(b => b.classList.toggle('active', b === btn));
 
     if (filter !== 'hidden') { _renderMyDataGrid(filter); return; }
@@ -696,81 +762,141 @@ const UI = (() => {
 
     const hasPin = !!(await Data.getPin());
     if (!hasPin) {
-      // No PIN set yet — prompt to create one
       _openSetPinModal(() => { _pinSessionOk = true; _renderMyDataGrid('hidden'); });
     } else {
       _openVerifyPinModal(() => { _pinSessionOk = true; _renderMyDataGrid('hidden'); });
     }
   }
 
+  function _fileTypeIcon(mimeType) {
+    if (!mimeType) return '📄';
+    if (mimeType.startsWith('image/')) return '🖼️';
+    if (mimeType.startsWith('video/')) return '🎥';
+    if (mimeType.startsWith('audio/')) return '🎵';
+    if (mimeType.includes('pdf')) return '📕';
+    if (mimeType.includes('spreadsheet') || mimeType.includes('excel') || mimeType === 'text/csv') return '📊';
+    if (mimeType.includes('presentation') || mimeType.includes('powerpoint')) return '📋';
+    if (mimeType.includes('document') || mimeType.includes('word') || mimeType.startsWith('text/')) return '📝';
+    if (mimeType.includes('zip') || mimeType.includes('archive') || mimeType.includes('tar') || mimeType.includes('rar')) return '🗜️';
+    return '📄';
+  }
+
+  function _formatFileSize(bytes) {
+    if (!bytes) return '';
+    const n = parseInt(bytes, 10);
+    if (isNaN(n)) return '';
+    if (n < 1024) return `${n} B`;
+    if (n < 1048576) return `${(n / 1024).toFixed(1)} KB`;
+    if (n < 1073741824) return `${(n / 1048576).toFixed(1)} MB`;
+    return `${(n / 1073741824).toFixed(1)} GB`;
+  }
+
   function _renderMyDataGrid(filter) {
-    const grid  = document.getElementById('my-data-grid');
-    const empty = document.getElementById('my-data-empty');
+    const grid        = document.getElementById('my-data-grid');
+    const empty       = document.getElementById('my-data-empty');
+    const loadMoreBtn = document.getElementById('my-data-load-more');
     _clearThumbBlobs();
     grid.innerHTML = '';
 
     const hiddenSet = new Set(_myDataHiddenIds);
+    const isMedia   = f => f.mimeType?.startsWith('image/') || f.mimeType?.startsWith('video/');
+
     let items;
     if (filter === 'hidden') {
-      items = _myDataItems.filter(i => hiddenSet.has(i.file.id));
+      items = _myDataItems.filter(f => hiddenSet.has(f.id));
+    } else if (filter === 'images') {
+      items = _myDataItems.filter(f => f.mimeType?.startsWith('image/') && !hiddenSet.has(f.id));
+    } else if (filter === 'videos') {
+      items = _myDataItems.filter(f => f.mimeType?.startsWith('video/') && !hiddenSet.has(f.id));
+    } else if (filter === 'documents') {
+      items = _myDataItems.filter(f => !isMedia(f) && !hiddenSet.has(f.id));
     } else {
-      const base = filter === 'all' ? _myDataItems : _myDataItems.filter(i => i.type === filter);
-      items = base.filter(i => !hiddenSet.has(i.file.id));
+      items = _myDataItems.filter(f => !hiddenSet.has(f.id));
     }
 
-    if (!items.length) { empty.hidden = false; return; }
+    if (!items.length) {
+      empty.hidden = false;
+      const p = empty.querySelector('p');
+      if (p) p.textContent = filter === 'hidden' ? 'No hidden files.' : 'No files found in your Drive.';
+      if (loadMoreBtn) loadMoreBtn.hidden = true;
+      return;
+    }
     empty.hidden = true;
 
-    items.sort((a, b) => new Date(b.file.createdTime) - new Date(a.file.createdTime));
+    items.sort((a, b) => new Date(b.modifiedTime || b.createdTime) - new Date(a.modifiedTime || a.createdTime));
 
-    // Group by source
+    // Group by type when showing All or Hidden
     const groups = [];
-    const seen = new Map();
-    items.forEach(item => {
-      const key = `${item.type}:${item.source}`;
-      if (!seen.has(key)) { seen.set(key, []); groups.push({ key, label: item.source, type: item.type, items: seen.get(key) }); }
-      seen.get(key).push(item);
-    });
-
-    const typeIcon = { circles: '◎', collections: '▤', posts: '✦', hidden: '👁' };
+    if (filter === 'all' || filter === 'hidden') {
+      const imgs = items.filter(f => f.mimeType?.startsWith('image/'));
+      const vids = items.filter(f => f.mimeType?.startsWith('video/'));
+      const docs = items.filter(f => !isMedia(f));
+      if (imgs.length) groups.push({ label: '🖼️ Images', items: imgs });
+      if (vids.length) groups.push({ label: '🎥 Videos', items: vids });
+      if (docs.length) groups.push({ label: '📄 Documents & Files', items: docs });
+    } else {
+      groups.push({ label: null, items });
+    }
 
     groups.forEach(g => {
-      const heading = document.createElement('div');
-      heading.className = 'my-data-section-heading';
-      heading.textContent = `${typeIcon[g.type] || '▤'} ${g.label}`;
-      grid.appendChild(heading);
+      if (g.label) {
+        const heading = document.createElement('div');
+        heading.className = 'my-data-section-heading';
+        heading.textContent = g.label;
+        grid.appendChild(heading);
+      }
 
-      g.items.forEach(({ file, folderId, type }) => {
-        const isHidden = new Set(_myDataHiddenIds).has(file.id);
+      g.items.forEach(file => {
+        const isHidden   = hiddenSet.has(file.id);
+        const isMediaFile = isMedia(file);
+        const icon       = _fileTypeIcon(file.mimeType);
+        const sizeStr    = _formatFileSize(file.size);
+        const dateStr    = file.modifiedTime
+          ? new Date(file.modifiedTime).toLocaleDateString()
+          : (file.createdTime ? new Date(file.createdTime).toLocaleDateString() : '');
+
+        const wrapper = document.createElement('div');
+        wrapper.className = 'drive-file-card';
+
         const el = _el(`
-          <div class="media-item media-item--managed">
-            <img src="" alt="" loading="lazy" />
+          <div class="media-item media-item--managed${isMediaFile ? '' : ' drive-file-non-media-item'}">
+            ${isMediaFile
+              ? '<img src="" alt="" loading="lazy" />'
+              : `<div class="drive-file-non-media"><span class="drive-file-icon">${icon}</span></div>`}
             <div class="media-item-actions">
-              <button class="mia-btn mia-post"  title="Post to Feed">↗</button>
-              <button class="mia-btn mia-hide"  title="${isHidden ? 'Unhide' : 'Hide'}">👁</button>
+              <button class="mia-btn mia-share" title="Share">📤</button>
+              <button class="mia-btn mia-add"   title="Add to circle or collection">📁</button>
+              <button class="mia-btn mia-hide"  title="${isHidden ? 'Unhide' : 'Hide (private)'}">👁</button>
               <button class="mia-btn mia-del"   title="Delete">🗑</button>
             </div>
           </div>
         `);
-        _loadThumbnail(el.querySelector('img'), file.id, file.thumbnailLink);
 
-        // View (click image area)
-        el.querySelector('img').addEventListener('click', e => {
+        if (isMediaFile) {
+          _loadThumbnail(el.querySelector('img'), file.id, file.thumbnailLink);
+          el.querySelector('img').addEventListener('click', e => {
+            e.stopPropagation();
+            openLightbox(file.id, null, { canDelete: true, thumbnailLink: file.thumbnailLink });
+          });
+        }
+
+        // Share
+        el.querySelector('.mia-share').addEventListener('click', e => {
           e.stopPropagation();
-          openLightbox(file.id, folderId, { canDelete: true, thumbnailLink: file.thumbnailLink });
+          _openShareFileModal(file.id, file.name);
         });
 
-        // Post to Feed
-        el.querySelector('.mia-post').addEventListener('click', async e => {
+        // Add to collection
+        el.querySelector('.mia-add').addEventListener('click', e => {
           e.stopPropagation();
-          _openPostModal();
+          _openAddToCollectionModal(file.id, file.name);
         });
 
         // Hide / Unhide
         el.querySelector('.mia-hide').addEventListener('click', async e => {
           e.stopPropagation();
-          const btn = e.currentTarget;
-          btn.disabled = true;
+          const hideBtn = e.currentTarget;
+          hideBtn.disabled = true;
           try {
             if (isHidden) {
               await Data.unhideFile(file.id);
@@ -780,25 +906,148 @@ const UI = (() => {
               _myDataHiddenIds.push(file.id);
             }
             _renderMyDataGrid(filter);
-          } catch { Utils.showToast('Could not update hidden status', 'error'); btn.disabled = false; }
+          } catch { Utils.showToast('Could not update hidden status', 'error'); hideBtn.disabled = false; }
         });
 
         // Delete
         el.querySelector('.mia-del').addEventListener('click', async e => {
           e.stopPropagation();
           if (!confirm(`Delete "${file.name}"? This cannot be undone.`)) return;
-          const btn = e.currentTarget;
-          btn.disabled = true;
+          const delBtn = e.currentTarget;
+          delBtn.disabled = true;
           try {
             await Drive.deleteFile(file.id);
-            _myDataItems = _myDataItems.filter(i => i.file.id !== file.id);
+            _myDataItems = _myDataItems.filter(f => f.id !== file.id);
             _renderMyDataGrid(filter);
             Utils.showToast('Deleted');
-          } catch { Utils.showToast('Could not delete file', 'error'); btn.disabled = false; }
+          } catch { Utils.showToast('Could not delete file', 'error'); delBtn.disabled = false; }
         });
 
-        grid.appendChild(el);
+        const label = document.createElement('div');
+        label.className = 'drive-file-label';
+        label.title = file.name;
+        label.textContent = file.name;
+        wrapper.appendChild(el);
+        wrapper.appendChild(label);
+
+        if (sizeStr || dateStr) {
+          const meta = document.createElement('div');
+          meta.className = 'drive-file-meta';
+          meta.textContent = [sizeStr, dateStr].filter(Boolean).join(' · ');
+          wrapper.appendChild(meta);
+        }
+
+        grid.appendChild(wrapper);
       });
+    });
+
+    if (loadMoreBtn) {
+      loadMoreBtn.hidden = !_myDataNextPageToken || filter === 'hidden';
+    }
+  }
+
+  /* ── Share file modal ─────────────────────────── */
+
+  function _openShareFileModal(fileId, fileName) {
+    openModal(`
+      <h3>Share "${Utils.escapeHtml(fileName)}"</h3>
+      <form id="share-form" class="form-block">
+        <div class="form-field">
+          <label>Email address</label>
+          <input type="email" id="share-email" class="input" placeholder="friend@example.com" autocomplete="email" />
+        </div>
+        <div class="form-field">
+          <label>Permission</label>
+          <select id="share-role" class="select-sm" style="width:100%">
+            <option value="reader">Viewer — can view only</option>
+            <option value="commenter">Commenter — can comment</option>
+            <option value="writer">Editor — can edit</option>
+          </select>
+        </div>
+        <div class="form-field">
+          <label class="checkbox-label">
+            <input type="checkbox" id="share-public" />
+            Make public (anyone with the link)
+          </label>
+        </div>
+        <p id="share-status" class="muted-text small" aria-live="polite"></p>
+        <div class="modal-actions">
+          <button type="button" class="btn btn-ghost btn-sm modal-cancel-btn">Cancel</button>
+          <button type="submit" class="btn btn-primary btn-sm">Share</button>
+        </div>
+      </form>
+    `);
+    document.querySelector('.modal-cancel-btn').addEventListener('click', closeModal);
+    document.getElementById('share-public').addEventListener('change', e => {
+      const checked = e.target.checked;
+      document.getElementById('share-email').disabled = checked;
+      document.getElementById('share-role').disabled  = checked;
+    });
+    document.getElementById('share-form').addEventListener('submit', async e => {
+      e.preventDefault();
+      const isPublic = document.getElementById('share-public').checked;
+      const email    = document.getElementById('share-email').value.trim();
+      const role     = document.getElementById('share-role').value;
+      const status   = document.getElementById('share-status');
+      const btn      = e.target.querySelector('[type=submit]');
+      btn.disabled = true; btn.textContent = 'Sharing…';
+      status.textContent = '';
+      try {
+        if (isPublic) {
+          await Drive.makePublic(fileId);
+          Utils.showToast('File is now public');
+        } else {
+          if (!email) { status.textContent = 'Enter an email address.'; btn.disabled = false; btn.textContent = 'Share'; return; }
+          await Drive.shareWithEmail(fileId, email, role);
+          Utils.showToast(`Shared with ${email}`);
+        }
+        closeModal();
+      } catch { status.textContent = 'Could not share. Try again.'; btn.disabled = false; btn.textContent = 'Share'; }
+    });
+  }
+
+  /* ── Add to collection modal ──────────────────── */
+
+  async function _openAddToCollectionModal(fileId, fileName) {
+    let circles = [], colls = [];
+    try {
+      [circles, colls] = await Promise.all([Data.listCircles(), Data.listCollections()]);
+    } catch { Utils.showToast('Could not load destinations', 'error'); return; }
+
+    const destOptions = [
+      ...circles.map(c => `<option value="${Utils.escapeHtml(c.folderId)}">◎ ${Utils.escapeHtml(c.name)} (Circle)</option>`),
+      ...colls.filter(c => !c.isPost).map(c => `<option value="${Utils.escapeHtml(c.folderId)}">▤ ${Utils.escapeHtml(c.name)} (Collection)</option>`)
+    ].join('');
+
+    if (!destOptions) { Utils.showToast('Create a circle or collection first', 'error'); return; }
+
+    openModal(`
+      <h3>Add to Circle or Collection</h3>
+      <p class="muted-text small">A copy of "${Utils.escapeHtml(fileName)}" will be added to the destination.</p>
+      <form id="add-to-coll-form" class="form-block">
+        <div class="form-field">
+          <label>Destination</label>
+          <select id="add-dest" class="select-sm" style="width:100%">${destOptions}</select>
+        </div>
+        <p id="add-status" class="muted-text small" aria-live="polite"></p>
+        <div class="modal-actions">
+          <button type="button" class="btn btn-ghost btn-sm modal-cancel-btn">Cancel</button>
+          <button type="submit" class="btn btn-primary btn-sm">Add</button>
+        </div>
+      </form>
+    `);
+    document.querySelector('.modal-cancel-btn').addEventListener('click', closeModal);
+    document.getElementById('add-to-coll-form').addEventListener('submit', async e => {
+      e.preventDefault();
+      const destFolderId = document.getElementById('add-dest').value;
+      const status       = document.getElementById('add-status');
+      const btn          = e.target.querySelector('[type=submit]');
+      btn.disabled = true; btn.textContent = 'Adding…';
+      try {
+        await Drive.copyFile(fileId, destFolderId);
+        Utils.showToast('Added successfully');
+        closeModal();
+      } catch { status.textContent = 'Could not add file. Try again.'; btn.disabled = false; btn.textContent = 'Add'; }
     });
   }
 
@@ -885,11 +1134,10 @@ const UI = (() => {
 
   /* ── Upload modals ────────────────────────────── */
 
-  // Drag-drop upload to a specific folder (used by circles & collections detail pages)
+  // Drag-drop upload to a specific folder (used by collections detail page)
   function _openUploadModal(folderId) {
-    _openDragDropUpload({ title: 'Add Photos & Videos', folderId, onDone: () => {
-      if (_currentPage === 'circle-detail')     _renderCircleDetail(_currentCircleFolderId);
-      else if (_currentPage === 'collection-detail') _renderCollectionDetail(_currentCollFolderId);
+    _openDragDropUpload({ title: 'Add Files', folderId, onDone: () => {
+      if (_currentPage === 'collection-detail') _renderCollectionDetail(_currentCollFolderId);
     }});
   }
 
@@ -929,7 +1177,7 @@ const UI = (() => {
             <span class="post-dropzone-icon">📷</span>
             <span>Drag photos &amp; videos here, or <span class="link-text">browse</span></span>
           </div>
-          <input type="file" id="up-files" accept="image/*,video/*" multiple hidden />
+          <input type="file" id="up-files" accept="image/*,video/*,.pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.txt,application/pdf" multiple hidden />
         </div>
         <div id="up-previews" class="post-previews" hidden></div>
         <p id="up-status" class="muted-text small" aria-live="polite"></p>
@@ -954,7 +1202,7 @@ const UI = (() => {
     dropzone.addEventListener('drop', e => {
       e.preventDefault();
       dropzone.classList.remove('dropzone--over');
-      _setUpFiles(Array.from(e.dataTransfer.files).filter(f => f.type.startsWith('image/') || f.type.startsWith('video/')));
+      _setUpFiles(Array.from(e.dataTransfer.files));
     });
     fileInput.addEventListener('change', () => _setUpFiles(Array.from(fileInput.files)));
 
@@ -963,8 +1211,12 @@ const UI = (() => {
       previews.innerHTML = '';
       previews.hidden = !files.length;
       files.forEach(f => {
-        const url = URL.createObjectURL(f);
-        previews.appendChild(_el(`<div class="post-preview-item"><img src="${url}" alt="${Utils.escapeHtml(f.name)}" /></div>`));
+        if (f.type.startsWith('image/') || f.type.startsWith('video/')) {
+          const url = URL.createObjectURL(f);
+          previews.appendChild(_el(`<div class="post-preview-item"><img src="${url}" alt="${Utils.escapeHtml(f.name)}" /></div>`));
+        } else {
+          previews.appendChild(_el(`<div class="post-preview-item post-preview-doc"><span>${_fileTypeIcon(f.type)}</span><span class="post-preview-name">${Utils.escapeHtml(f.name)}</span></div>`));
+        }
       });
     }
 
@@ -1043,17 +1295,22 @@ const UI = (() => {
     if (!folderId) { navigate('circles'); return; }
     document.getElementById('circle-detail-name').textContent = '…';
     document.getElementById('circle-members-strip').innerHTML = '';
-    document.getElementById('circle-detail-grid').innerHTML = '<p class="muted-text">Loading…</p>';
+    document.getElementById('circle-detail-feed').innerHTML = '<p class="muted-text">Loading…</p>';
     document.getElementById('circle-detail-empty').hidden = true;
     document.getElementById('circle-detail-actions').innerHTML = '';
 
     try {
-      const circle = await Data.getCircle(folderId);
+      const [circle, mutedIds] = await Promise.all([
+        Data.getCircle(folderId),
+        Data.getMutedCircles()
+      ]);
       document.getElementById('circle-detail-name').textContent = circle.name;
 
       const user    = Auth.getCurrentUser();
       const isOwner = circle.ownerEmail === user.email;
+      const isMuted = mutedIds.includes(folderId);
 
+      // Members strip
       const strip = document.getElementById('circle-members-strip');
       (circle.members || []).forEach(m => {
         const canRemove = isOwner && m.email !== user.email;
@@ -1077,23 +1334,37 @@ const UI = (() => {
         }
         strip.appendChild(chip);
       });
+
       const canAdd  = isOwner || circle.addPolicy === 'any_member';
       const actions = document.getElementById('circle-detail-actions');
 
       if (canAdd) {
-        const addBtn = _el(`<button class="btn btn-ghost btn-sm">+ Add Member</button>`);
+        const addBtn = _el(`<button class="btn btn-ghost btn-sm">+ Member</button>`);
         addBtn.addEventListener('click', () => _openAddMemberModal(folderId, circle));
         actions.appendChild(addBtn);
       }
 
-      const upBtn = _el(`<button class="btn btn-primary btn-sm">Upload</button>`);
-      upBtn.addEventListener('click', () => _openUploadModal(folderId));
-      actions.appendChild(upBtn);
+      // Mute / Unmute
+      const muteBtn = _el(`<button class="btn btn-ghost btn-sm">${isMuted ? '🔔 Unmute' : '🔕 Mute'}</button>`);
+      muteBtn.addEventListener('click', async () => {
+        muteBtn.disabled = true;
+        try {
+          if (isMuted) { await Data.unmuteCircle(folderId); Utils.showToast('Circle unmuted'); }
+          else          { await Data.muteCircle(folderId);   Utils.showToast('Circle muted — posts won\'t appear in your feed'); }
+          _renderCircleDetail(folderId);
+        } catch { muteBtn.disabled = false; }
+      });
+      actions.appendChild(muteBtn);
+
+      // Post button
+      const postBtn = _el(`<button class="btn btn-primary btn-sm">+ Post</button>`);
+      postBtn.addEventListener('click', () => _openCirclePostModal(folderId, circle.name, isOwner));
+      actions.appendChild(postBtn);
 
       if (isOwner) {
-        const delBtn = _el(`<button class="btn btn-ghost btn-sm danger-btn">Delete</button>`);
+        const delBtn = _el(`<button class="btn btn-ghost btn-sm danger-btn">Delete Circle</button>`);
         delBtn.addEventListener('click', async () => {
-          if (!confirm(`Delete circle "${circle.name}"?`)) return;
+          if (!confirm(`Delete circle "${circle.name}"? This cannot be undone.`)) return;
           await Data.deleteCircle(folderId);
           navigate('circles');
           Utils.showToast('Circle deleted');
@@ -1101,23 +1372,192 @@ const UI = (() => {
         actions.appendChild(delBtn);
       }
 
-      const files = await Drive.listFiles(folderId);
-      const media = files.filter(f => f.mimeType?.startsWith('image/') || f.mimeType?.startsWith('video/'));
-      const grid  = document.getElementById('circle-detail-grid');
-      grid.innerHTML = '';
+      // Load posts (mini-feed)
+      const posts  = await Data.listCirclePosts(folderId);
+      const feedEl = document.getElementById('circle-detail-feed');
+      feedEl.innerHTML = '';
 
-      if (!media.length) { document.getElementById('circle-detail-empty').hidden = false; return; }
+      if (!posts.length) { document.getElementById('circle-detail-empty').hidden = false; return; }
 
-      media.forEach(f => {
-        const el = _el(`<div class="media-item"><img src="" alt="" loading="lazy" /></div>`);
-        _loadThumbnail(el.querySelector('img'), f.id, f.thumbnailLink);
-        el.addEventListener('click', () => openLightbox(f.id, folderId, { canDelete: isOwner, thumbnailLink: f.thumbnailLink }));
-        grid.appendChild(el);
+      posts.forEach(post => {
+        const timeStr    = Utils.formatRelativeTime(post.createdAt);
+        const isMedia    = f => f.mimeType?.startsWith('image/') || f.mimeType?.startsWith('video/');
+        const mediaFiles = post.files.filter(isMedia);
+        const docFiles   = post.files.filter(f => !isMedia(f) && f.name !== '_post.json');
+        const canDelete  = isOwner || post.authorEmail === user.email;
+
+        const coverHtml = mediaFiles.length > 0 ? `
+          <div class="feed-album-cover">
+            <img src="" alt="" loading="lazy" />
+            ${mediaFiles.length > 1 ? `<span class="feed-album-count">${mediaFiles.length}</span>` : ''}
+          </div>` : '';
+
+        const docsHtml = docFiles.map(f =>
+          `<div class="circle-doc-chip">${_fileTypeIcon(f.mimeType)} <span>${Utils.escapeHtml(f.name)}</span></div>`
+        ).join('');
+
+        const card = _el(`
+          <div class="feed-album-card${!mediaFiles.length && !post.caption ? '' : ''}">
+            ${coverHtml}
+            <div class="feed-album-meta">
+              <div class="feed-album-byline">
+                <span class="feed-album-sharer">${Utils.escapeHtml(post.authorName || post.authorEmail)}</span>
+                <span class="feed-album-dot">·</span>
+                <span class="feed-album-time">${timeStr}</span>
+                ${canDelete ? `<button class="btn-link circle-del-post" style="margin-left:auto;font-size:.72rem;color:var(--muted)">delete</button>` : ''}
+              </div>
+              ${post.caption ? `<div class="feed-album-caption">${Utils.escapeHtml(post.caption)}</div>` : ''}
+              ${docsHtml ? `<div class="circle-docs-row">${docsHtml}</div>` : ''}
+            </div>
+          </div>
+        `);
+
+        if (mediaFiles.length > 0) {
+          _loadThumbnail(card.querySelector('img'), mediaFiles[0].id, mediaFiles[0].thumbnailLink);
+        }
+
+        // Delete post
+        if (canDelete) {
+          card.querySelector('.circle-del-post')?.addEventListener('click', async e => {
+            e.stopPropagation();
+            if (!confirm('Delete this post?')) return;
+            try {
+              await Data.deleteCirclePost(post.postFolderId);
+              _renderCircleDetail(folderId);
+              Utils.showToast('Post deleted');
+            } catch { Utils.showToast('Could not delete post', 'error'); }
+          });
+        }
+
+        // Expand grid for multi-photo posts
+        const expandGrid = document.createElement('div');
+        expandGrid.className = 'feed-album-grid';
+        expandGrid.hidden = true;
+        let expanded = false;
+
+        if (mediaFiles.length === 1) {
+          const coverEl = card.querySelector('.feed-album-cover');
+          if (coverEl) {
+            coverEl.style.cursor = 'pointer';
+            coverEl.addEventListener('click', e => {
+              e.stopPropagation();
+              openLightbox(mediaFiles[0].id, post.postFolderId, { canDelete, thumbnailLink: mediaFiles[0].thumbnailLink });
+            });
+          }
+        } else if (mediaFiles.length > 1) {
+          const coverEl = card.querySelector('.feed-album-cover');
+          if (coverEl) {
+            coverEl.style.cursor = 'pointer';
+            coverEl.addEventListener('click', e => {
+              e.stopPropagation();
+              expanded = !expanded;
+              expandGrid.hidden = !expanded;
+              if (expanded && !expandGrid.dataset.loaded) {
+                expandGrid.dataset.loaded = '1';
+                mediaFiles.forEach(f => {
+                  const thumb = _el(`<div class="media-item"><img src="" alt="" loading="lazy" /></div>`);
+                  _loadThumbnail(thumb.querySelector('img'), f.id, f.thumbnailLink);
+                  thumb.addEventListener('click', ev => {
+                    ev.stopPropagation();
+                    openLightbox(f.id, post.postFolderId, { canDelete, thumbnailLink: f.thumbnailLink });
+                  });
+                  expandGrid.appendChild(thumb);
+                });
+              }
+            });
+          }
+        }
+
+        const wrapper = document.createElement('div');
+        wrapper.className = 'feed-album-wrapper';
+        wrapper.appendChild(card);
+        wrapper.appendChild(expandGrid);
+        feedEl.appendChild(wrapper);
       });
+
     } catch (err) {
       Utils.showToast('Failed to load circle', 'error');
       console.error(err);
     }
+  }
+
+  function _openCirclePostModal(circleFolderId, circleName, isOwner) {
+    openModal(`
+      <h3>Post to ${Utils.escapeHtml(circleName)}</h3>
+      <form id="cp-form" class="form-block">
+        <div class="post-dropzone" id="cp-dropzone" tabindex="0" role="button" aria-label="Add files">
+          <div class="post-dropzone-inner">
+            <span class="post-dropzone-icon">📎</span>
+            <span>Photos, videos, docs — drag here or <span class="link-text">browse</span></span>
+          </div>
+          <input type="file" id="cp-files" accept="image/*,video/*,.pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.txt,application/pdf" multiple hidden />
+        </div>
+        <div id="cp-previews" class="post-previews" hidden></div>
+        <div class="form-field">
+          <label>Write something <span class="muted-text small">(optional)</span></label>
+          <textarea id="cp-caption" class="input" rows="3" placeholder="What's on your mind?"></textarea>
+        </div>
+        <p id="cp-status" class="muted-text small" aria-live="polite"></p>
+        <div class="modal-actions">
+          <button type="button" class="btn btn-ghost btn-sm modal-cancel-btn">Cancel</button>
+          <button type="submit" class="btn btn-primary btn-sm">Post</button>
+        </div>
+      </form>
+    `);
+    document.querySelector('.modal-cancel-btn').addEventListener('click', closeModal);
+
+    const dropzone   = document.getElementById('cp-dropzone');
+    const fileInput  = document.getElementById('cp-files');
+    const previewBox = document.getElementById('cp-previews');
+    const status     = document.getElementById('cp-status');
+    let selectedFiles = [];
+
+    dropzone.addEventListener('click', () => fileInput.click());
+    dropzone.addEventListener('keydown', e => { if (e.key === 'Enter' || e.key === ' ') fileInput.click(); });
+    dropzone.addEventListener('dragover',  e => { e.preventDefault(); dropzone.classList.add('dropzone--over'); });
+    dropzone.addEventListener('dragleave', () => dropzone.classList.remove('dropzone--over'));
+    dropzone.addEventListener('drop', e => {
+      e.preventDefault();
+      dropzone.classList.remove('dropzone--over');
+      _applyCpFiles(Array.from(e.dataTransfer.files));
+    });
+    fileInput.addEventListener('change', () => _applyCpFiles(Array.from(fileInput.files)));
+
+    function _applyCpFiles(files) {
+      selectedFiles = files;
+      previewBox.innerHTML = '';
+      previewBox.hidden = !files.length;
+      files.forEach(f => {
+        if (f.type.startsWith('image/') || f.type.startsWith('video/')) {
+          const url = URL.createObjectURL(f);
+          previewBox.appendChild(_el(`<div class="post-preview-item"><img src="${url}" alt="${Utils.escapeHtml(f.name)}" /></div>`));
+        } else {
+          previewBox.appendChild(_el(`<div class="post-preview-item post-preview-doc"><span>${_fileTypeIcon(f.type)}</span><span class="post-preview-name">${Utils.escapeHtml(f.name)}</span></div>`));
+        }
+      });
+    }
+
+    document.getElementById('cp-form').addEventListener('submit', async e => {
+      e.preventDefault();
+      const caption = document.getElementById('cp-caption').value.trim();
+      if (!caption && !selectedFiles.length) { status.textContent = 'Write something or add a file first.'; return; }
+      const submitBtn = e.target.querySelector('[type=submit]');
+      submitBtn.disabled = true; submitBtn.textContent = 'Posting…';
+      Utils.showLoading();
+      try {
+        const post = await Data.createCirclePost(circleFolderId, { caption });
+        if (selectedFiles.length) {
+          status.textContent = `Uploading ${selectedFiles.length} file(s)…`;
+          await Promise.all(selectedFiles.map(f => Drive.uploadMedia(f, post.postFolderId)));
+        }
+        closeModal();
+        Utils.showToast('Posted!');
+        _renderCircleDetail(circleFolderId);
+      } catch {
+        Utils.showToast('Failed to post', 'error');
+        submitBtn.disabled = false; submitBtn.textContent = 'Post';
+      } finally { Utils.hideLoading(); }
+    });
   }
 
   function _openCreateCircleModal() {
@@ -1294,20 +1734,45 @@ const UI = (() => {
       actions.appendChild(delBtn);
 
       const files = await Drive.listFiles(folderId);
-      const media = files.filter(f => f.mimeType?.startsWith('image/') || f.mimeType?.startsWith('video/'));
+      const allFiles = files.filter(f => f.mimeType !== 'application/json');
       const grid  = document.getElementById('collection-detail-grid');
       grid.innerHTML = '';
 
-      if (!media.length) {
+      if (!allFiles.length) {
         grid.innerHTML = '<div class="empty-state"><p>No files yet. Upload something!</p></div>';
         return;
       }
 
-      media.forEach(f => {
-        const el = _el(`<div class="media-item"><img src="" alt="" loading="lazy" /></div>`);
-        _loadThumbnail(el.querySelector('img'), f.id, f.thumbnailLink);
-        el.addEventListener('click', () => openLightbox(f.id, folderId, { canDelete: true, thumbnailLink: f.thumbnailLink }));
-        grid.appendChild(el);
+      const isMedia = f => f.mimeType?.startsWith('image/') || f.mimeType?.startsWith('video/');
+      allFiles.forEach(f => {
+        if (isMedia(f)) {
+          const el = _el(`<div class="media-item"><img src="" alt="" loading="lazy" /></div>`);
+          _loadThumbnail(el.querySelector('img'), f.id, f.thumbnailLink);
+          el.addEventListener('click', () => openLightbox(f.id, folderId, { canDelete: true, thumbnailLink: f.thumbnailLink }));
+          grid.appendChild(el);
+        } else {
+          // Non-media file card
+          const wrapper = document.createElement('div');
+          wrapper.className = 'drive-file-card';
+          const el = _el(`
+            <div class="media-item media-item--managed drive-file-non-media-item">
+              <div class="drive-file-non-media"><span class="drive-file-icon">${_fileTypeIcon(f.mimeType)}</span></div>
+              <div class="media-item-actions">
+                <button class="mia-btn mia-del" title="Delete">🗑</button>
+              </div>
+            </div>
+          `);
+          el.querySelector('.mia-del').addEventListener('click', async e => {
+            e.stopPropagation();
+            if (!confirm(`Delete "${f.name}"?`)) return;
+            try { await Drive.deleteFile(f.id); _renderCollectionDetail(folderId); Utils.showToast('Deleted'); }
+            catch { Utils.showToast('Could not delete', 'error'); }
+          });
+          const label = document.createElement('div');
+          label.className = 'drive-file-label'; label.title = f.name; label.textContent = f.name;
+          wrapper.appendChild(el); wrapper.appendChild(label);
+          grid.appendChild(wrapper);
+        }
       });
     } catch (err) {
       Utils.showToast('Failed to load collection', 'error');
@@ -1450,24 +1915,28 @@ const UI = (() => {
     list.innerHTML = '';
     empty.hidden = !!friends.length;
     friends.forEach(f => {
-      const addedLabel = f.addedAt ? Utils.formatRelativeTime(f.addedAt) : '';
+      const isPending  = f.status === 'pending_sent';
+      const timeLabel  = f.addedAt ? Utils.formatRelativeTime(f.addedAt) : '';
+      const statusBadge = isPending
+        ? `<span class="status-badge status-badge--pending">Request sent</span>`
+        : '';
       const row = _el(`
         <div class="person-row">
           <div class="avatar-sm">${(f.displayName || f.email)[0].toUpperCase()}</div>
           <div class="person-info">
-            <div class="person-name">${Utils.escapeHtml(f.displayName || f.email)}</div>
-            <div class="person-email">${Utils.escapeHtml(f.email)}${addedLabel ? ` <span style="opacity:.55">· added ${addedLabel}</span>` : ''}</div>
+            <div class="person-name">${Utils.escapeHtml(f.displayName || f.email)} ${statusBadge}</div>
+            <div class="person-email">${Utils.escapeHtml(f.email)}${timeLabel ? ` <span style="opacity:.55">· ${timeLabel}</span>` : ''}</div>
           </div>
           <div class="person-actions">
-            <button class="btn btn-ghost btn-sm" data-action="block">Block</button>
-            <button class="btn btn-ghost btn-sm danger-btn" data-action="remove">Remove</button>
+            ${!isPending ? `<button class="btn btn-ghost btn-sm" data-action="block">Block</button>` : ''}
+            <button class="btn btn-ghost btn-sm danger-btn" data-action="remove">${isPending ? 'Cancel' : 'Remove'}</button>
           </div>
         </div>
       `);
       row.querySelector('[data-action="remove"]').addEventListener('click', async () => {
         await Data.removeFriend(f.email); _renderFriends();
       });
-      row.querySelector('[data-action="block"]').addEventListener('click', async () => {
+      row.querySelector('[data-action="block"]')?.addEventListener('click', async () => {
         await Data.blockUser(f.email); await Data.removeFriend(f.email);
         _renderFriends(); Utils.showToast(`${f.email} blocked`);
       });
@@ -1504,12 +1973,12 @@ const UI = (() => {
     const name  = nameInput?.value.trim() || '';
     if (!email || !email.includes('@')) { Utils.showToast('Enter a valid email', 'error'); return; }
     try {
-      await Data.addFriend(email, name);
+      await Data.sendFriendRequest(email, name);
       emailInput.value = '';
       if (nameInput) nameInput.value = '';
       _renderFriends();
-      Utils.showToast(`${name || email} added!`);
-    } catch { Utils.showToast('Failed to add friend', 'error'); }
+      Utils.showToast(`Friend request sent to ${name || email}!`);
+    } catch { Utils.showToast('Failed to send friend request', 'error'); }
   }
 
   async function _renderContactSuggestions(friends) {
@@ -1537,9 +2006,9 @@ const UI = (() => {
           </div>
         `);
         row.querySelector('button').addEventListener('click', async () => {
-          await Data.addFriend(c.email, c.name || '');
+          await Data.sendFriendRequest(c.email, c.name || '');
           _renderFriends();
-          Utils.showToast(`${c.name || c.email} added!`);
+          Utils.showToast(`Friend request sent to ${c.name || c.email}!`);
         });
         list.appendChild(row);
       });
