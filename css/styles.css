@@ -909,6 +909,20 @@ textarea.input { resize: vertical; min-height: 80px; }
 /* ── btn-link helper ── */
 .btn-link { background: none; border: none; cursor: pointer; padding: 0; }
 
+/* ── Profile picture avatars in friends list / notifications ── */
+.notif-avatar-img {
+  width: 2rem; height: 2rem;
+  border-radius: 50%; object-fit: cover;
+  flex-shrink: 0;
+}
+.avatar-sm-img {
+  width: 2rem; height: 2rem;
+  border-radius: 50%; object-fit: cover;
+  flex-shrink: 0;
+}
+.person-row--clickable { cursor: pointer; }
+.person-row--clickable:hover { background: var(--surface-hover, rgba(0,0,0,.04)); border-radius: var(--radius); }
+
 /* ── Drive file manager cards ── */
 .drive-file-card {
   display: flex;

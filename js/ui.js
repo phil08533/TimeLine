@@ -126,13 +126,11 @@ const UI = (() => {
   /* ── Notifications ──────────────────────────── */
 
   async function _refreshNotificationCount() {
-    const requests = await Data.getIncomingFriendRequests().catch(() => []);
-    const badge = document.getElementById('notif-badge');
-    if (!badge) return requests;
-    const count = requests.length;
-    badge.textContent = count > 9 ? '9+' : String(count);
-    badge.hidden = count === 0;
-    return requests;
+    try {
+      const { total } = await Data.getNotifications();
+      const badge = document.getElementById('notif-badge');
+      if (badge) { badge.textContent = total > 9 ? '9+' : String(total); badge.hidden = total === 0; }
+    } catch {}
   }
 
   async function _toggleNotificationPanel() {
@@ -142,20 +140,31 @@ const UI = (() => {
     panel.hidden = false;
     panel.innerHTML = '<p class="notif-empty">Loading…</p>';
 
-    const requests = await _refreshNotificationCount();
-    panel.innerHTML = '';
+    let friendReqs = [], circleNotifs = [];
+    try { ({ friendReqs, circleNotifs } = await Data.getNotifications()); } catch {}
+    _refreshNotificationCount().catch(() => {});
 
-    if (!requests.length) {
+    panel.innerHTML = '';
+    if (!friendReqs.length && !circleNotifs.length) {
       panel.innerHTML = '<p class="notif-empty">No new notifications.</p>';
       return;
     }
 
-    requests.forEach(req => {
+    function _clearIfEmpty() {
+      if (!panel.querySelector('.notif-item,.notif-circle')) panel.innerHTML = '<p class="notif-empty">No new notifications.</p>';
+    }
+
+    // ── Friend request items ──────────────────────
+    friendReqs.forEach(req => {
+      const label = req.fromName || req.fromEmail;
+      const avatarHtml = req.fromPicture
+        ? `<img src="${Utils.escapeHtml(req.fromPicture)}" alt="" class="notif-avatar notif-avatar-img" />`
+        : `<div class="notif-avatar">${label[0].toUpperCase()}</div>`;
       const item = _el(`
         <div class="notif-item">
-          <div class="notif-avatar">${(req.fromName || req.fromEmail)[0].toUpperCase()}</div>
+          ${avatarHtml}
           <div class="notif-body">
-            <div class="notif-title"><strong>${Utils.escapeHtml(req.fromName || req.fromEmail)}</strong> wants to be your friend</div>
+            <div class="notif-title"><strong>${Utils.escapeHtml(label)}</strong> wants to be your friend</div>
             <div class="notif-actions">
               <button class="btn btn-primary btn-sm notif-accept">Accept</button>
               <button class="btn btn-ghost btn-sm notif-decline">Decline</button>
@@ -167,9 +176,10 @@ const UI = (() => {
         item.querySelector('.notif-accept').disabled = true;
         item.querySelector('.notif-decline').disabled = true;
         try {
-          await Data.acceptFriendRequest(req.fromEmail, req.fromName);
-          item.innerHTML = `<div class="notif-done">✓ Added ${Utils.escapeHtml(req.fromName || req.fromEmail)} as a friend</div>`;
-          Utils.showToast(`Added ${req.fromName || req.fromEmail} as friend`);
+          await Data.acceptFriendRequest(req.fromEmail, req.fromName, req.fromPicture, req.fileId);
+          item.innerHTML = `<div class="notif-done">✓ Added ${Utils.escapeHtml(label)} as a friend</div>`;
+          setTimeout(() => { item.remove(); _clearIfEmpty(); }, 1800);
+          Utils.showToast(`Added ${label} as friend`);
           _refreshNotificationCount().catch(() => {});
         } catch { Utils.showToast('Could not accept', 'error'); }
       });
@@ -177,8 +187,36 @@ const UI = (() => {
         item.querySelector('.notif-accept').disabled = true;
         item.querySelector('.notif-decline').disabled = true;
         await Data.declineFriendRequest(req.fileId).catch(() => {});
-        item.remove();
-        if (!panel.querySelector('.notif-item')) panel.innerHTML = '<p class="notif-empty">No new notifications.</p>';
+        item.remove(); _clearIfEmpty();
+        _refreshNotificationCount().catch(() => {});
+      });
+      panel.appendChild(item);
+    });
+
+    // ── Circle post notification items ────────────
+    circleNotifs.forEach(notif => {
+      const preview = notif.caption ? `: "${notif.caption.length > 40 ? notif.caption.slice(0, 40) + '…' : notif.caption}"` : '';
+      const item = _el(`
+        <div class="notif-item notif-circle">
+          <div class="notif-avatar" style="font-size:1rem">◎</div>
+          <div class="notif-body">
+            <div class="notif-title"><strong>${Utils.escapeHtml(notif.fromName || notif.fromEmail)}</strong> posted in a circle${Utils.escapeHtml(preview)}</div>
+            <div class="notif-actions">
+              <button class="btn btn-primary btn-sm notif-view">View</button>
+              <button class="btn btn-ghost btn-sm notif-dismiss">Dismiss</button>
+            </div>
+          </div>
+        </div>
+      `);
+      item.querySelector('.notif-view').addEventListener('click', async () => {
+        await Data.declineFriendRequest(notif.fileId).catch(() => {});
+        panel.hidden = true;
+        navigate('circle-detail', { folderId: notif.circleFolderId });
+        _refreshNotificationCount().catch(() => {});
+      });
+      item.querySelector('.notif-dismiss').addEventListener('click', async () => {
+        await Data.declineFriendRequest(notif.fileId).catch(() => {});
+        item.remove(); _clearIfEmpty();
         _refreshNotificationCount().catch(() => {});
       });
       panel.appendChild(item);
@@ -1358,7 +1396,7 @@ const UI = (() => {
 
       // Post button
       const postBtn = _el(`<button class="btn btn-primary btn-sm">+ Post</button>`);
-      postBtn.addEventListener('click', () => _openCirclePostModal(folderId, circle.name, isOwner));
+      postBtn.addEventListener('click', () => _openCirclePostModal(folderId, circle));
       actions.appendChild(postBtn);
 
       if (isOwner) {
@@ -1481,7 +1519,8 @@ const UI = (() => {
     }
   }
 
-  function _openCirclePostModal(circleFolderId, circleName, isOwner) {
+  function _openCirclePostModal(circleFolderId, circle) {
+    const circleName = circle.name || '';
     openModal(`
       <h3>Post to ${Utils.escapeHtml(circleName)}</h3>
       <form id="cp-form" class="form-block">
@@ -1545,7 +1584,7 @@ const UI = (() => {
       submitBtn.disabled = true; submitBtn.textContent = 'Posting…';
       Utils.showLoading();
       try {
-        const post = await Data.createCirclePost(circleFolderId, { caption });
+        const post = await Data.createCirclePost(circleFolderId, { caption, members: circle.members || [] });
         if (selectedFiles.length) {
           status.textContent = `Uploading ${selectedFiles.length} file(s)…`;
           await Promise.all(selectedFiles.map(f => Drive.uploadMedia(f, post.postFolderId)));
@@ -1920,28 +1959,85 @@ const UI = (() => {
       const statusBadge = isPending
         ? `<span class="status-badge status-badge--pending">Request sent</span>`
         : '';
+      const avatarHtml = f.picture
+        ? `<img src="${Utils.escapeHtml(f.picture)}" alt="" class="avatar-sm avatar-sm-img" />`
+        : `<div class="avatar-sm">${(f.displayName || f.email)[0].toUpperCase()}</div>`;
       const row = _el(`
-        <div class="person-row">
-          <div class="avatar-sm">${(f.displayName || f.email)[0].toUpperCase()}</div>
+        <div class="person-row${!isPending ? ' person-row--clickable' : ''}">
+          ${avatarHtml}
           <div class="person-info">
             <div class="person-name">${Utils.escapeHtml(f.displayName || f.email)} ${statusBadge}</div>
             <div class="person-email">${Utils.escapeHtml(f.email)}${timeLabel ? ` <span style="opacity:.55">· ${timeLabel}</span>` : ''}</div>
           </div>
           <div class="person-actions">
-            ${!isPending ? `<button class="btn btn-ghost btn-sm" data-action="block">Block</button>` : ''}
+            ${!isPending ? `<button class="btn btn-ghost btn-sm" data-action="posts">Posts</button><button class="btn btn-ghost btn-sm" data-action="block">Block</button>` : ''}
             <button class="btn btn-ghost btn-sm danger-btn" data-action="remove">${isPending ? 'Cancel' : 'Remove'}</button>
           </div>
         </div>
       `);
-      row.querySelector('[data-action="remove"]').addEventListener('click', async () => {
-        await Data.removeFriend(f.email); _renderFriends();
+      if (!isPending) {
+        row.querySelector('[data-action="posts"]').addEventListener('click', e => {
+          e.stopPropagation(); _openFriendPostsModal(f);
+        });
+        row.addEventListener('click', () => _openFriendPostsModal(f));
+      }
+      row.querySelector('[data-action="remove"]').addEventListener('click', async e => {
+        e.stopPropagation(); await Data.removeFriend(f.email); _renderFriends();
       });
-      row.querySelector('[data-action="block"]')?.addEventListener('click', async () => {
+      row.querySelector('[data-action="block"]')?.addEventListener('click', async e => {
+        e.stopPropagation();
         await Data.blockUser(f.email); await Data.removeFriend(f.email);
         _renderFriends(); Utils.showToast(`${f.email} blocked`);
       });
       list.appendChild(row);
     });
+  }
+
+  async function _openFriendPostsModal(friend) {
+    const name = friend.displayName || friend.email;
+    openModal(`
+      <h3>${Utils.escapeHtml(name)}'s Posts</h3>
+      <div id="fp-list" class="feed-list" style="max-height:60vh;overflow-y:auto;margin-top:.75rem">
+        <p class="muted-text">Loading…</p>
+      </div>
+    `);
+    try {
+      const sharedFolders = await Data.getFeedFolders();
+      const theirs = sharedFolders.filter(f => f.owners?.[0]?.emailAddress === friend.email);
+      const list = document.getElementById('fp-list');
+      if (!list) return;
+      list.innerHTML = '';
+      if (!theirs.length) { list.innerHTML = '<p class="muted-text">No public posts yet.</p>'; return; }
+
+      for (const folder of theirs.slice(0, 30)) {
+        try {
+          const files = await Drive.listFiles(folder.id);
+          const media = files.filter(f => f.mimeType?.startsWith('image/') || f.mimeType?.startsWith('video/'));
+          const cover = media[0];
+          const timeStr = Utils.formatRelativeTime(folder.sharedWithMeTime || folder.createdTime);
+          const card = _el(`
+            <div class="feed-album-card${!cover ? ' feed-album-card--text' : ''}">
+              ${cover ? `<div class="feed-album-cover"><img src="" alt="" loading="lazy" /></div>` : ''}
+              <div class="feed-album-meta">
+                <div class="feed-album-byline">
+                  <span class="feed-album-time">${timeStr}</span>
+                  ${media.length > 1 ? `<span class="feed-album-dot">·</span><span>${media.length} photos</span>` : ''}
+                </div>
+              </div>
+            </div>
+          `);
+          if (cover) {
+            _loadThumbnail(card.querySelector('img'), cover.id, cover.thumbnailLink);
+            card.style.cursor = 'pointer';
+            card.addEventListener('click', () => openLightbox(cover.id, folder.id, { canCopy: true, thumbnailLink: cover.thumbnailLink }));
+          }
+          list.appendChild(card);
+        } catch {}
+      }
+    } catch {
+      const list = document.getElementById('fp-list');
+      if (list) list.innerHTML = '<p class="muted-text">Could not load posts.</p>';
+    }
   }
 
   function _renderBlockedList(blocked) {
@@ -1968,16 +2064,13 @@ const UI = (() => {
 
   async function _addFriend() {
     const emailInput = document.getElementById('add-friend-email');
-    const nameInput  = document.getElementById('add-friend-name');
     const email = emailInput.value.trim();
-    const name  = nameInput?.value.trim() || '';
     if (!email || !email.includes('@')) { Utils.showToast('Enter a valid email', 'error'); return; }
     try {
-      await Data.sendFriendRequest(email, name);
+      await Data.sendFriendRequest(email);
       emailInput.value = '';
-      if (nameInput) nameInput.value = '';
       _renderFriends();
-      Utils.showToast(`Friend request sent to ${name || email}!`);
+      Utils.showToast(`Friend request sent to ${email}!`);
     } catch { Utils.showToast('Failed to send friend request', 'error'); }
   }
 
@@ -2006,9 +2099,9 @@ const UI = (() => {
           </div>
         `);
         row.querySelector('button').addEventListener('click', async () => {
-          await Data.sendFriendRequest(c.email, c.name || '');
+          await Data.sendFriendRequest(c.email);
           _renderFriends();
-          Utils.showToast(`Friend request sent to ${c.name || c.email}!`);
+          Utils.showToast(`Friend request sent to ${c.email}!`);
         });
         list.appendChild(row);
       });
