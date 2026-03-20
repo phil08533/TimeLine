@@ -73,13 +73,20 @@ const UI = (() => {
     _updateNavAvatar(user);
     Utils.showLoading();
     try {
-      await Data.init();
+      // Hard 20 s cap — if Drive setup stalls the user still gets into the app
+      await Promise.race([
+        Data.init(),
+        Utils.sleep(20000).then(() => { throw new Error('timeout'); })
+      ]);
       const settings = await Data.getSettings();
       Theme.init(settings);
       _syncSettingsUI(settings);
     } catch (err) {
       console.error('Init error', err);
-      Utils.showToast('Failed to initialise. Check your connection.', 'error');
+      const msg = err.message === 'timeout'
+        ? 'Setup timed out — working in offline mode.'
+        : 'Could not reach Google Drive. Some features may be unavailable.';
+      Utils.showToast(msg, 'error', 6000);
     } finally {
       Utils.hideLoading();
     }
@@ -212,8 +219,10 @@ const UI = (() => {
         grid.appendChild(el);
       });
     } catch (err) {
+      console.error('Feed load error', err);
       grid.innerHTML = '';
-      Utils.showToast('Failed to load feed', 'error');
+      empty.hidden = false;
+      empty.querySelector('p').textContent = 'Could not load your feed. Check your connection and try again.';
     }
   }
 
