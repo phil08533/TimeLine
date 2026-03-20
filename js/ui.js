@@ -21,46 +21,40 @@ const UI = (() => {
   }
 
   function _initSetupUI() {
-    const hasCredentials = Auth.hasRealCredentials();
-    const authNote       = document.getElementById('auth-note');
-    const setupSection   = document.getElementById('setup-section');
-    const clientIdInput  = document.getElementById('client-id-input');
-    const saveBtn        = document.getElementById('save-client-id-btn');
-    const clearBtn       = document.getElementById('clear-client-id-btn');
-    const statusEl       = document.getElementById('setup-status');
+    const setupSection  = document.getElementById('setup-section');
+    const clientIdInput = document.getElementById('client-id-input');
+    const saveBtn       = document.getElementById('save-client-id-btn');
+    const clearBtn      = document.getElementById('clear-client-id-btn');
+    const statusEl      = document.getElementById('setup-status');
 
-    if (!authNote || !setupSection) return;
+    if (!setupSection) return;
 
-    if (hasCredentials) {
-      authNote.textContent = '';
-      setupSection.removeAttribute('open'); // collapsed when already configured
-    } else {
-      authNote.textContent = 'Demo mode — configure Google login below to use real accounts';
+    // Show setup panel only when no Client ID is configured
+    if (!Auth.hasRealCredentials()) {
+      setupSection.hidden = false;
     }
 
-    // Pre-fill if a Client ID is already saved
+    // Pre-fill if a Client ID is already saved in localStorage
     const saved = localStorage.getItem('mc_client_id');
     if (saved) {
       clientIdInput.value = saved;
       clearBtn.style.display = '';
-      statusEl.textContent = 'Client ID saved — sign in with Google above.';
+      statusEl.textContent = 'Client ID saved. Click Sign in with Google above.';
     }
 
     saveBtn.addEventListener('click', () => {
       const id = clientIdInput.value.trim();
-      if (!id) { statusEl.textContent = 'Please paste a Client ID first.'; return; }
+      if (!id) { statusEl.textContent = 'Paste your Client ID first.'; return; }
       if (!id.includes('.apps.googleusercontent.com')) {
-        statusEl.textContent = 'That doesn\'t look like a Google Client ID. It should end in .apps.googleusercontent.com';
+        statusEl.textContent = 'Should end in .apps.googleusercontent.com — check and try again.';
         return;
       }
-      const ok = Auth.setClientId(id);
-      if (ok) {
-        statusEl.textContent = 'Saved! Click "Sign in with Google" to continue.';
-        authNote.textContent = '';
+      if (Auth.setClientId(id)) {
+        statusEl.textContent = 'Saved. Click Sign in with Google above.';
         clearBtn.style.display = '';
         setupSection.removeAttribute('open');
       } else {
-        statusEl.textContent = 'Invalid Client ID. Please check and try again.';
+        statusEl.textContent = 'Invalid Client ID.';
       }
     });
 
@@ -68,11 +62,9 @@ const UI = (() => {
       Auth.clearClientId();
       clientIdInput.value = '';
       clearBtn.style.display = 'none';
-      statusEl.textContent = 'Credentials removed.';
-      authNote.textContent = 'Demo mode — configure Google login below to use real accounts';
+      statusEl.textContent = 'Removed.';
     });
 
-    // Allow pressing Enter in the input to save
     clientIdInput.addEventListener('keydown', e => { if (e.key === 'Enter') saveBtn.click(); });
   }
 

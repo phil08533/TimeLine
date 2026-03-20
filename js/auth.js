@@ -23,13 +23,14 @@ const Auth = (() => {
     // Restore any token saved this session
     _restoreSession();
 
-    // Build GIS token client once the library has loaded
-    if (typeof google === 'undefined' || !google.accounts) {
-      // GIS not loaded (e.g. demo mode or offline) — handled below
-      return;
+    if (typeof google !== 'undefined' && google.accounts) {
+      _initTokenClient();
+    } else {
+      // GIS hasn't loaded yet — wait for it via the standard callback
+      window.onGoogleLibraryLoad = () => {
+        _initTokenClient();
+      };
     }
-
-    _initTokenClient();
   }
 
   function _initTokenClient() {
@@ -81,24 +82,24 @@ const Auth = (() => {
       return;
     }
 
-    // Ensure GIS is loaded
-    if (!_tokenClient) {
-      if (typeof google !== 'undefined' && google.accounts) {
-        _initTokenClient();
-      } else {
-        Utils.showToast('Google Sign-In library not loaded. Check your network connection.', 'error');
-        return;
-      }
-    }
-
-    // If we have a valid token, proceed directly
+    // If we have a valid token already, proceed directly
     if (_isTokenValid()) {
-      await _fetchUserInfo();
+      if (!_currentUser) await _fetchUserInfo();
       _onSignInCb(_currentUser);
       return;
     }
 
-    // Request a new access token (opens Google pop-up / redirect)
+    // Try to init the token client if GIS loaded after Auth.init()
+    if (!_tokenClient) {
+      if (typeof google !== 'undefined' && google.accounts) {
+        _initTokenClient();
+      } else {
+        Utils.showToast('Google Sign-In is still loading — please try again in a moment.', 'error');
+        return;
+      }
+    }
+
+    // Opens the Google account picker
     _tokenClient.requestAccessToken({ prompt: 'select_account' });
   }
 
