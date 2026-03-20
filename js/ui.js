@@ -250,14 +250,14 @@ const UI = (() => {
       items.forEach(({ file, folder, owner }) => {
         const el = _el(`
           <div class="media-item">
-            <img src="${Drive.getThumbnailUrl(file.id)}" alt="" loading="lazy" />
+            <img src="${Drive.getThumbnailUrl(file.id, 'w400', file.thumbnailLink)}" alt="" loading="lazy" />
             <div class="media-overlay">
               <span>${Utils.escapeHtml(owner?.displayName || 'Friend')}</span>
               <span class="media-time">${Utils.formatRelativeTime(file.createdTime)}</span>
             </div>
           </div>
         `);
-        el.addEventListener('click', () => openLightbox(file.id, folder.id, { canCopy: true }));
+        el.addEventListener('click', () => openLightbox(file.id, folder.id, { canCopy: true, thumbnailLink: file.thumbnailLink }));
         grid.appendChild(el);
       });
     } catch (err) {
@@ -354,13 +354,13 @@ const UI = (() => {
       g.items.forEach(({ file, folderId }) => {
         const el = _el(`
           <div class="media-item">
-            <img src="${Drive.getThumbnailUrl(file.id)}" alt="" loading="lazy" />
+            <img src="${Drive.getThumbnailUrl(file.id, 'w400', file.thumbnailLink)}" alt="" loading="lazy" />
             <div class="media-overlay">
               <span class="media-time">${Utils.formatRelativeTime(file.createdTime)}</span>
             </div>
           </div>
         `);
-        el.addEventListener('click', () => openLightbox(file.id, folderId, { canDelete: true }));
+        el.addEventListener('click', () => openLightbox(file.id, folderId, { canDelete: true, thumbnailLink: file.thumbnailLink }));
         grid.appendChild(el);
       });
     });
@@ -524,8 +524,8 @@ const UI = (() => {
       if (!media.length) { document.getElementById('circle-detail-empty').hidden = false; return; }
 
       media.forEach(f => {
-        const el = _el(`<div class="media-item"><img src="${Drive.getThumbnailUrl(f.id)}" alt="" loading="lazy" /></div>`);
-        el.addEventListener('click', () => openLightbox(f.id, folderId, { canDelete: isOwner }));
+        const el = _el(`<div class="media-item"><img src="${Drive.getThumbnailUrl(f.id, 'w400', f.thumbnailLink)}" alt="" loading="lazy" /></div>`);
+        el.addEventListener('click', () => openLightbox(f.id, folderId, { canDelete: isOwner, thumbnailLink: f.thumbnailLink }));
         grid.appendChild(el);
       });
     } catch (err) {
@@ -671,8 +671,8 @@ const UI = (() => {
       }
 
       media.forEach(f => {
-        const el = _el(`<div class="media-item"><img src="${Drive.getThumbnailUrl(f.id)}" alt="" loading="lazy" /></div>`);
-        el.addEventListener('click', () => openLightbox(f.id, folderId, { canDelete: true }));
+        const el = _el(`<div class="media-item"><img src="${Drive.getThumbnailUrl(f.id, 'w400', f.thumbnailLink)}" alt="" loading="lazy" /></div>`);
+        el.addEventListener('click', () => openLightbox(f.id, folderId, { canDelete: true, thumbnailLink: f.thumbnailLink }));
         grid.appendChild(el);
       });
     } catch (err) {
@@ -992,7 +992,7 @@ const UI = (() => {
     lb.hidden = false;
 
     // Show thumbnail immediately, then upgrade to full-resolution
-    img.src = Drive.getThumbnailUrl(fileId, 'w800');
+    img.src = opts.thumbnailLink || Drive.getThumbnailUrl(fileId, 'w800');
     if (_lightboxBlobUrl) { URL.revokeObjectURL(_lightboxBlobUrl); _lightboxBlobUrl = null; }
     Drive.getFileAsBlob(fileId).then(blobUrl => {
       if (!lb.hidden) { // still open
