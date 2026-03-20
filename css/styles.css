@@ -235,7 +235,7 @@ details[open] .auth-setup-toggle::before { content: '▾ '; }
 .nav-link { padding: .35rem .65rem; border-radius: var(--radius); font-size: .85rem; color: var(--muted); transition: color .15s, background .15s; }
 .nav-link:hover { color: var(--text); background: var(--bg); }
 .nav-link.active { color: var(--text); font-weight: 600; }
-.topbar-right { margin-left: auto; }
+.topbar-right { margin-left: auto; display: flex; align-items: center; gap: .25rem; position: relative; }
 .nav-avatar {
   width: 30px; height: 30px;
   border-radius: 50%;
@@ -827,6 +827,87 @@ textarea.input { resize: vertical; min-height: 80px; }
   border-top: 1px solid var(--border); margin-top: .25rem;
 }
 .my-data-section-heading:first-child { border-top: none; margin-top: 0; }
+
+/* ── Notification bell ── */
+.notif-bell {
+  position: relative;
+  background: none; border: none; cursor: pointer;
+  font-size: 1.1rem; padding: .25rem .35rem;
+  border-radius: var(--radius);
+  transition: background .15s;
+  line-height: 1;
+}
+.notif-bell:hover { background: var(--surface); }
+.notif-badge {
+  position: absolute; top: -.1rem; right: -.1rem;
+  background: #ef4444; color: #fff;
+  font-size: .6rem; font-weight: 700;
+  min-width: 1rem; height: 1rem;
+  border-radius: 99px; padding: 0 .2rem;
+  display: flex; align-items: center; justify-content: center;
+  pointer-events: none;
+}
+.notif-panel {
+  position: absolute; top: calc(100% + .4rem); right: .5rem;
+  width: 320px; max-width: calc(100vw - 1rem);
+  background: var(--card-bg, var(--surface));
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: 0 8px 24px rgba(0,0,0,.12);
+  z-index: 200;
+  overflow: hidden;
+}
+.notif-item {
+  display: flex; gap: .75rem; padding: .75rem 1rem;
+  border-bottom: 1px solid var(--border);
+}
+.notif-item:last-child { border-bottom: none; }
+.notif-avatar {
+  flex-shrink: 0; width: 2rem; height: 2rem;
+  border-radius: 50%; background: var(--accent);
+  color: var(--accent-fg); font-weight: 700;
+  display: flex; align-items: center; justify-content: center;
+  font-size: .85rem;
+}
+.notif-body { flex: 1; min-width: 0; }
+.notif-title { font-size: .85rem; margin-bottom: .4rem; }
+.notif-actions { display: flex; gap: .4rem; }
+.notif-done { padding: .35rem 0; font-size: .82rem; color: var(--muted); }
+.notif-empty { padding: .75rem 1rem; color: var(--muted); font-size: .85rem; margin: 0; }
+
+/* ── Friend status badge ── */
+.status-badge {
+  display: inline-flex; align-items: center;
+  font-size: .65rem; font-weight: 600; padding: .1rem .4rem;
+  border-radius: 99px; vertical-align: middle;
+}
+.status-badge--pending { background: #fef3c7; color: #92400e; }
+
+/* ── Circle doc chips (inside feed posts) ── */
+.circle-docs-row { display: flex; flex-wrap: wrap; gap: .35rem; margin-top: .4rem; }
+.circle-doc-chip {
+  display: inline-flex; align-items: center; gap: .3rem;
+  background: var(--surface); border: 1px solid var(--border);
+  border-radius: var(--radius); padding: .2rem .5rem;
+  font-size: .75rem; color: var(--text);
+}
+.circle-doc-chip span:last-child { max-width: 150px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* ── Post preview for docs ── */
+.post-preview-doc {
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  background: var(--surface); border: 1px solid var(--border);
+  border-radius: var(--radius); padding: .75rem .5rem; gap: .25rem;
+  font-size: 1.8rem;
+}
+.post-preview-name {
+  font-size: .68rem; color: var(--muted);
+  max-width: 80px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  text-align: center;
+}
+
+/* ── btn-link helper ── */
+.btn-link { background: none; border: none; cursor: pointer; padding: 0; }
 
 /* ── Drive file manager cards ── */
 .drive-file-card {

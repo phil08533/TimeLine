@@ -19,6 +19,14 @@ const UI = (() => {
     const demoSignInLink = document.getElementById('demo-sign-in-link');
     if (demoSignInLink) demoSignInLink.addEventListener('click', e => { e.preventDefault(); Auth.signOut(); });
 
+    // Notification bell
+    const notifBtn = document.getElementById('notif-btn');
+    if (notifBtn) notifBtn.addEventListener('click', e => { e.stopPropagation(); _toggleNotificationPanel(); });
+    document.addEventListener('click', e => {
+      const panel = document.getElementById('notif-panel');
+      if (panel && !panel.hidden && !panel.contains(e.target) && e.target !== notifBtn) panel.hidden = true;
+    });
+
     _initSetupUI();
 
     if (Auth.isSignedIn()) _onSignIn(Auth.getCurrentUser());
@@ -106,11 +114,75 @@ const UI = (() => {
     }
     _setupRouter();
     _navigate(window.location.hash.slice(1) || 'feed');
+    // Poll notifications once after sign-in (no need to hammer the API)
+    _refreshNotificationCount().catch(() => {});
   }
 
   function _onSignOut() {
     _showScreen('auth-screen');
     _currentPage = null;
+  }
+
+  /* ── Notifications ──────────────────────────── */
+
+  async function _refreshNotificationCount() {
+    const requests = await Data.getIncomingFriendRequests().catch(() => []);
+    const badge = document.getElementById('notif-badge');
+    if (!badge) return requests;
+    const count = requests.length;
+    badge.textContent = count > 9 ? '9+' : String(count);
+    badge.hidden = count === 0;
+    return requests;
+  }
+
+  async function _toggleNotificationPanel() {
+    const panel = document.getElementById('notif-panel');
+    if (!panel) return;
+    if (!panel.hidden) { panel.hidden = true; return; }
+    panel.hidden = false;
+    panel.innerHTML = '<p class="notif-empty">Loading…</p>';
+
+    const requests = await _refreshNotificationCount();
+    panel.innerHTML = '';
+
+    if (!requests.length) {
+      panel.innerHTML = '<p class="notif-empty">No new notifications.</p>';
+      return;
+    }
+
+    requests.forEach(req => {
+      const item = _el(`
+        <div class="notif-item">
+          <div class="notif-avatar">${(req.fromName || req.fromEmail)[0].toUpperCase()}</div>
+          <div class="notif-body">
+            <div class="notif-title"><strong>${Utils.escapeHtml(req.fromName || req.fromEmail)}</strong> wants to be your friend</div>
+            <div class="notif-actions">
+              <button class="btn btn-primary btn-sm notif-accept">Accept</button>
+              <button class="btn btn-ghost btn-sm notif-decline">Decline</button>
+            </div>
+          </div>
+        </div>
+      `);
+      item.querySelector('.notif-accept').addEventListener('click', async () => {
+        item.querySelector('.notif-accept').disabled = true;
+        item.querySelector('.notif-decline').disabled = true;
+        try {
+          await Data.acceptFriendRequest(req.fromEmail, req.fromName);
+          item.innerHTML = `<div class="notif-done">✓ Added ${Utils.escapeHtml(req.fromName || req.fromEmail)} as a friend</div>`;
+          Utils.showToast(`Added ${req.fromName || req.fromEmail} as friend`);
+          _refreshNotificationCount().catch(() => {});
+        } catch { Utils.showToast('Could not accept', 'error'); }
+      });
+      item.querySelector('.notif-decline').addEventListener('click', async () => {
+        item.querySelector('.notif-accept').disabled = true;
+        item.querySelector('.notif-decline').disabled = true;
+        await Data.declineFriendRequest(req.fileId).catch(() => {});
+        item.remove();
+        if (!panel.querySelector('.notif-item')) panel.innerHTML = '<p class="notif-empty">No new notifications.</p>';
+        _refreshNotificationCount().catch(() => {});
+      });
+      panel.appendChild(item);
+    });
   }
 
   /* ── Screen / page helpers ─────────────────── */
@@ -1062,11 +1134,10 @@ const UI = (() => {
 
   /* ── Upload modals ────────────────────────────── */
 
-  // Drag-drop upload to a specific folder (used by circles & collections detail pages)
+  // Drag-drop upload to a specific folder (used by collections detail page)
   function _openUploadModal(folderId) {
-    _openDragDropUpload({ title: 'Add Photos & Videos', folderId, onDone: () => {
-      if (_currentPage === 'circle-detail')     _renderCircleDetail(_currentCircleFolderId);
-      else if (_currentPage === 'collection-detail') _renderCollectionDetail(_currentCollFolderId);
+    _openDragDropUpload({ title: 'Add Files', folderId, onDone: () => {
+      if (_currentPage === 'collection-detail') _renderCollectionDetail(_currentCollFolderId);
     }});
   }
 
@@ -1106,7 +1177,7 @@ const UI = (() => {
             <span class="post-dropzone-icon">📷</span>
             <span>Drag photos &amp; videos here, or <span class="link-text">browse</span></span>
           </div>
-          <input type="file" id="up-files" accept="image/*,video/*" multiple hidden />
+          <input type="file" id="up-files" accept="image/*,video/*,.pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.txt,application/pdf" multiple hidden />
         </div>
         <div id="up-previews" class="post-previews" hidden></div>
         <p id="up-status" class="muted-text small" aria-live="polite"></p>
@@ -1131,7 +1202,7 @@ const UI = (() => {
     dropzone.addEventListener('drop', e => {
       e.preventDefault();
       dropzone.classList.remove('dropzone--over');
-      _setUpFiles(Array.from(e.dataTransfer.files).filter(f => f.type.startsWith('image/') || f.type.startsWith('video/')));
+      _setUpFiles(Array.from(e.dataTransfer.files));
     });
     fileInput.addEventListener('change', () => _setUpFiles(Array.from(fileInput.files)));
 
@@ -1140,8 +1211,12 @@ const UI = (() => {
       previews.innerHTML = '';
       previews.hidden = !files.length;
       files.forEach(f => {
-        const url = URL.createObjectURL(f);
-        previews.appendChild(_el(`<div class="post-preview-item"><img src="${url}" alt="${Utils.escapeHtml(f.name)}" /></div>`));
+        if (f.type.startsWith('image/') || f.type.startsWith('video/')) {
+          const url = URL.createObjectURL(f);
+          previews.appendChild(_el(`<div class="post-preview-item"><img src="${url}" alt="${Utils.escapeHtml(f.name)}" /></div>`));
+        } else {
+          previews.appendChild(_el(`<div class="post-preview-item post-preview-doc"><span>${_fileTypeIcon(f.type)}</span><span class="post-preview-name">${Utils.escapeHtml(f.name)}</span></div>`));
+        }
       });
     }
 
@@ -1220,17 +1295,22 @@ const UI = (() => {
     if (!folderId) { navigate('circles'); return; }
     document.getElementById('circle-detail-name').textContent = '…';
     document.getElementById('circle-members-strip').innerHTML = '';
-    document.getElementById('circle-detail-grid').innerHTML = '<p class="muted-text">Loading…</p>';
+    document.getElementById('circle-detail-feed').innerHTML = '<p class="muted-text">Loading…</p>';
     document.getElementById('circle-detail-empty').hidden = true;
     document.getElementById('circle-detail-actions').innerHTML = '';
 
     try {
-      const circle = await Data.getCircle(folderId);
+      const [circle, mutedIds] = await Promise.all([
+        Data.getCircle(folderId),
+        Data.getMutedCircles()
+      ]);
       document.getElementById('circle-detail-name').textContent = circle.name;
 
       const user    = Auth.getCurrentUser();
       const isOwner = circle.ownerEmail === user.email;
+      const isMuted = mutedIds.includes(folderId);
 
+      // Members strip
       const strip = document.getElementById('circle-members-strip');
       (circle.members || []).forEach(m => {
         const canRemove = isOwner && m.email !== user.email;
@@ -1254,23 +1334,37 @@ const UI = (() => {
         }
         strip.appendChild(chip);
       });
+
       const canAdd  = isOwner || circle.addPolicy === 'any_member';
       const actions = document.getElementById('circle-detail-actions');
 
       if (canAdd) {
-        const addBtn = _el(`<button class="btn btn-ghost btn-sm">+ Add Member</button>`);
+        const addBtn = _el(`<button class="btn btn-ghost btn-sm">+ Member</button>`);
         addBtn.addEventListener('click', () => _openAddMemberModal(folderId, circle));
         actions.appendChild(addBtn);
       }
 
-      const upBtn = _el(`<button class="btn btn-primary btn-sm">Upload</button>`);
-      upBtn.addEventListener('click', () => _openUploadModal(folderId));
-      actions.appendChild(upBtn);
+      // Mute / Unmute
+      const muteBtn = _el(`<button class="btn btn-ghost btn-sm">${isMuted ? '🔔 Unmute' : '🔕 Mute'}</button>`);
+      muteBtn.addEventListener('click', async () => {
+        muteBtn.disabled = true;
+        try {
+          if (isMuted) { await Data.unmuteCircle(folderId); Utils.showToast('Circle unmuted'); }
+          else          { await Data.muteCircle(folderId);   Utils.showToast('Circle muted — posts won\'t appear in your feed'); }
+          _renderCircleDetail(folderId);
+        } catch { muteBtn.disabled = false; }
+      });
+      actions.appendChild(muteBtn);
+
+      // Post button
+      const postBtn = _el(`<button class="btn btn-primary btn-sm">+ Post</button>`);
+      postBtn.addEventListener('click', () => _openCirclePostModal(folderId, circle.name, isOwner));
+      actions.appendChild(postBtn);
 
       if (isOwner) {
-        const delBtn = _el(`<button class="btn btn-ghost btn-sm danger-btn">Delete</button>`);
+        const delBtn = _el(`<button class="btn btn-ghost btn-sm danger-btn">Delete Circle</button>`);
         delBtn.addEventListener('click', async () => {
-          if (!confirm(`Delete circle "${circle.name}"?`)) return;
+          if (!confirm(`Delete circle "${circle.name}"? This cannot be undone.`)) return;
           await Data.deleteCircle(folderId);
           navigate('circles');
           Utils.showToast('Circle deleted');
@@ -1278,23 +1372,192 @@ const UI = (() => {
         actions.appendChild(delBtn);
       }
 
-      const files = await Drive.listFiles(folderId);
-      const media = files.filter(f => f.mimeType?.startsWith('image/') || f.mimeType?.startsWith('video/'));
-      const grid  = document.getElementById('circle-detail-grid');
-      grid.innerHTML = '';
+      // Load posts (mini-feed)
+      const posts  = await Data.listCirclePosts(folderId);
+      const feedEl = document.getElementById('circle-detail-feed');
+      feedEl.innerHTML = '';
 
-      if (!media.length) { document.getElementById('circle-detail-empty').hidden = false; return; }
+      if (!posts.length) { document.getElementById('circle-detail-empty').hidden = false; return; }
 
-      media.forEach(f => {
-        const el = _el(`<div class="media-item"><img src="" alt="" loading="lazy" /></div>`);
-        _loadThumbnail(el.querySelector('img'), f.id, f.thumbnailLink);
-        el.addEventListener('click', () => openLightbox(f.id, folderId, { canDelete: isOwner, thumbnailLink: f.thumbnailLink }));
-        grid.appendChild(el);
+      posts.forEach(post => {
+        const timeStr    = Utils.formatRelativeTime(post.createdAt);
+        const isMedia    = f => f.mimeType?.startsWith('image/') || f.mimeType?.startsWith('video/');
+        const mediaFiles = post.files.filter(isMedia);
+        const docFiles   = post.files.filter(f => !isMedia(f) && f.name !== '_post.json');
+        const canDelete  = isOwner || post.authorEmail === user.email;
+
+        const coverHtml = mediaFiles.length > 0 ? `
+          <div class="feed-album-cover">
+            <img src="" alt="" loading="lazy" />
+            ${mediaFiles.length > 1 ? `<span class="feed-album-count">${mediaFiles.length}</span>` : ''}
+          </div>` : '';
+
+        const docsHtml = docFiles.map(f =>
+          `<div class="circle-doc-chip">${_fileTypeIcon(f.mimeType)} <span>${Utils.escapeHtml(f.name)}</span></div>`
+        ).join('');
+
+        const card = _el(`
+          <div class="feed-album-card${!mediaFiles.length && !post.caption ? '' : ''}">
+            ${coverHtml}
+            <div class="feed-album-meta">
+              <div class="feed-album-byline">
+                <span class="feed-album-sharer">${Utils.escapeHtml(post.authorName || post.authorEmail)}</span>
+                <span class="feed-album-dot">·</span>
+                <span class="feed-album-time">${timeStr}</span>
+                ${canDelete ? `<button class="btn-link circle-del-post" style="margin-left:auto;font-size:.72rem;color:var(--muted)">delete</button>` : ''}
+              </div>
+              ${post.caption ? `<div class="feed-album-caption">${Utils.escapeHtml(post.caption)}</div>` : ''}
+              ${docsHtml ? `<div class="circle-docs-row">${docsHtml}</div>` : ''}
+            </div>
+          </div>
+        `);
+
+        if (mediaFiles.length > 0) {
+          _loadThumbnail(card.querySelector('img'), mediaFiles[0].id, mediaFiles[0].thumbnailLink);
+        }
+
+        // Delete post
+        if (canDelete) {
+          card.querySelector('.circle-del-post')?.addEventListener('click', async e => {
+            e.stopPropagation();
+            if (!confirm('Delete this post?')) return;
+            try {
+              await Data.deleteCirclePost(post.postFolderId);
+              _renderCircleDetail(folderId);
+              Utils.showToast('Post deleted');
+            } catch { Utils.showToast('Could not delete post', 'error'); }
+          });
+        }
+
+        // Expand grid for multi-photo posts
+        const expandGrid = document.createElement('div');
+        expandGrid.className = 'feed-album-grid';
+        expandGrid.hidden = true;
+        let expanded = false;
+
+        if (mediaFiles.length === 1) {
+          const coverEl = card.querySelector('.feed-album-cover');
+          if (coverEl) {
+            coverEl.style.cursor = 'pointer';
+            coverEl.addEventListener('click', e => {
+              e.stopPropagation();
+              openLightbox(mediaFiles[0].id, post.postFolderId, { canDelete, thumbnailLink: mediaFiles[0].thumbnailLink });
+            });
+          }
+        } else if (mediaFiles.length > 1) {
+          const coverEl = card.querySelector('.feed-album-cover');
+          if (coverEl) {
+            coverEl.style.cursor = 'pointer';
+            coverEl.addEventListener('click', e => {
+              e.stopPropagation();
+              expanded = !expanded;
+              expandGrid.hidden = !expanded;
+              if (expanded && !expandGrid.dataset.loaded) {
+                expandGrid.dataset.loaded = '1';
+                mediaFiles.forEach(f => {
+                  const thumb = _el(`<div class="media-item"><img src="" alt="" loading="lazy" /></div>`);
+                  _loadThumbnail(thumb.querySelector('img'), f.id, f.thumbnailLink);
+                  thumb.addEventListener('click', ev => {
+                    ev.stopPropagation();
+                    openLightbox(f.id, post.postFolderId, { canDelete, thumbnailLink: f.thumbnailLink });
+                  });
+                  expandGrid.appendChild(thumb);
+                });
+              }
+            });
+          }
+        }
+
+        const wrapper = document.createElement('div');
+        wrapper.className = 'feed-album-wrapper';
+        wrapper.appendChild(card);
+        wrapper.appendChild(expandGrid);
+        feedEl.appendChild(wrapper);
       });
+
     } catch (err) {
       Utils.showToast('Failed to load circle', 'error');
       console.error(err);
     }
+  }
+
+  function _openCirclePostModal(circleFolderId, circleName, isOwner) {
+    openModal(`
+      <h3>Post to ${Utils.escapeHtml(circleName)}</h3>
+      <form id="cp-form" class="form-block">
+        <div class="post-dropzone" id="cp-dropzone" tabindex="0" role="button" aria-label="Add files">
+          <div class="post-dropzone-inner">
+            <span class="post-dropzone-icon">📎</span>
+            <span>Photos, videos, docs — drag here or <span class="link-text">browse</span></span>
+          </div>
+          <input type="file" id="cp-files" accept="image/*,video/*,.pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.txt,application/pdf" multiple hidden />
+        </div>
+        <div id="cp-previews" class="post-previews" hidden></div>
+        <div class="form-field">
+          <label>Write something <span class="muted-text small">(optional)</span></label>
+          <textarea id="cp-caption" class="input" rows="3" placeholder="What's on your mind?"></textarea>
+        </div>
+        <p id="cp-status" class="muted-text small" aria-live="polite"></p>
+        <div class="modal-actions">
+          <button type="button" class="btn btn-ghost btn-sm modal-cancel-btn">Cancel</button>
+          <button type="submit" class="btn btn-primary btn-sm">Post</button>
+        </div>
+      </form>
+    `);
+    document.querySelector('.modal-cancel-btn').addEventListener('click', closeModal);
+
+    const dropzone   = document.getElementById('cp-dropzone');
+    const fileInput  = document.getElementById('cp-files');
+    const previewBox = document.getElementById('cp-previews');
+    const status     = document.getElementById('cp-status');
+    let selectedFiles = [];
+
+    dropzone.addEventListener('click', () => fileInput.click());
+    dropzone.addEventListener('keydown', e => { if (e.key === 'Enter' || e.key === ' ') fileInput.click(); });
+    dropzone.addEventListener('dragover',  e => { e.preventDefault(); dropzone.classList.add('dropzone--over'); });
+    dropzone.addEventListener('dragleave', () => dropzone.classList.remove('dropzone--over'));
+    dropzone.addEventListener('drop', e => {
+      e.preventDefault();
+      dropzone.classList.remove('dropzone--over');
+      _applyCpFiles(Array.from(e.dataTransfer.files));
+    });
+    fileInput.addEventListener('change', () => _applyCpFiles(Array.from(fileInput.files)));
+
+    function _applyCpFiles(files) {
+      selectedFiles = files;
+      previewBox.innerHTML = '';
+      previewBox.hidden = !files.length;
+      files.forEach(f => {
+        if (f.type.startsWith('image/') || f.type.startsWith('video/')) {
+          const url = URL.createObjectURL(f);
+          previewBox.appendChild(_el(`<div class="post-preview-item"><img src="${url}" alt="${Utils.escapeHtml(f.name)}" /></div>`));
+        } else {
+          previewBox.appendChild(_el(`<div class="post-preview-item post-preview-doc"><span>${_fileTypeIcon(f.type)}</span><span class="post-preview-name">${Utils.escapeHtml(f.name)}</span></div>`));
+        }
+      });
+    }
+
+    document.getElementById('cp-form').addEventListener('submit', async e => {
+      e.preventDefault();
+      const caption = document.getElementById('cp-caption').value.trim();
+      if (!caption && !selectedFiles.length) { status.textContent = 'Write something or add a file first.'; return; }
+      const submitBtn = e.target.querySelector('[type=submit]');
+      submitBtn.disabled = true; submitBtn.textContent = 'Posting…';
+      Utils.showLoading();
+      try {
+        const post = await Data.createCirclePost(circleFolderId, { caption });
+        if (selectedFiles.length) {
+          status.textContent = `Uploading ${selectedFiles.length} file(s)…`;
+          await Promise.all(selectedFiles.map(f => Drive.uploadMedia(f, post.postFolderId)));
+        }
+        closeModal();
+        Utils.showToast('Posted!');
+        _renderCircleDetail(circleFolderId);
+      } catch {
+        Utils.showToast('Failed to post', 'error');
+        submitBtn.disabled = false; submitBtn.textContent = 'Post';
+      } finally { Utils.hideLoading(); }
+    });
   }
 
   function _openCreateCircleModal() {
@@ -1471,20 +1734,45 @@ const UI = (() => {
       actions.appendChild(delBtn);
 
       const files = await Drive.listFiles(folderId);
-      const media = files.filter(f => f.mimeType?.startsWith('image/') || f.mimeType?.startsWith('video/'));
+      const allFiles = files.filter(f => f.mimeType !== 'application/json');
       const grid  = document.getElementById('collection-detail-grid');
       grid.innerHTML = '';
 
-      if (!media.length) {
+      if (!allFiles.length) {
         grid.innerHTML = '<div class="empty-state"><p>No files yet. Upload something!</p></div>';
         return;
       }
 
-      media.forEach(f => {
-        const el = _el(`<div class="media-item"><img src="" alt="" loading="lazy" /></div>`);
-        _loadThumbnail(el.querySelector('img'), f.id, f.thumbnailLink);
-        el.addEventListener('click', () => openLightbox(f.id, folderId, { canDelete: true, thumbnailLink: f.thumbnailLink }));
-        grid.appendChild(el);
+      const isMedia = f => f.mimeType?.startsWith('image/') || f.mimeType?.startsWith('video/');
+      allFiles.forEach(f => {
+        if (isMedia(f)) {
+          const el = _el(`<div class="media-item"><img src="" alt="" loading="lazy" /></div>`);
+          _loadThumbnail(el.querySelector('img'), f.id, f.thumbnailLink);
+          el.addEventListener('click', () => openLightbox(f.id, folderId, { canDelete: true, thumbnailLink: f.thumbnailLink }));
+          grid.appendChild(el);
+        } else {
+          // Non-media file card
+          const wrapper = document.createElement('div');
+          wrapper.className = 'drive-file-card';
+          const el = _el(`
+            <div class="media-item media-item--managed drive-file-non-media-item">
+              <div class="drive-file-non-media"><span class="drive-file-icon">${_fileTypeIcon(f.mimeType)}</span></div>
+              <div class="media-item-actions">
+                <button class="mia-btn mia-del" title="Delete">🗑</button>
+              </div>
+            </div>
+          `);
+          el.querySelector('.mia-del').addEventListener('click', async e => {
+            e.stopPropagation();
+            if (!confirm(`Delete "${f.name}"?`)) return;
+            try { await Drive.deleteFile(f.id); _renderCollectionDetail(folderId); Utils.showToast('Deleted'); }
+            catch { Utils.showToast('Could not delete', 'error'); }
+          });
+          const label = document.createElement('div');
+          label.className = 'drive-file-label'; label.title = f.name; label.textContent = f.name;
+          wrapper.appendChild(el); wrapper.appendChild(label);
+          grid.appendChild(wrapper);
+        }
       });
     } catch (err) {
       Utils.showToast('Failed to load collection', 'error');
@@ -1627,24 +1915,28 @@ const UI = (() => {
     list.innerHTML = '';
     empty.hidden = !!friends.length;
     friends.forEach(f => {
-      const addedLabel = f.addedAt ? Utils.formatRelativeTime(f.addedAt) : '';
+      const isPending  = f.status === 'pending_sent';
+      const timeLabel  = f.addedAt ? Utils.formatRelativeTime(f.addedAt) : '';
+      const statusBadge = isPending
+        ? `<span class="status-badge status-badge--pending">Request sent</span>`
+        : '';
       const row = _el(`
         <div class="person-row">
           <div class="avatar-sm">${(f.displayName || f.email)[0].toUpperCase()}</div>
           <div class="person-info">
-            <div class="person-name">${Utils.escapeHtml(f.displayName || f.email)}</div>
-            <div class="person-email">${Utils.escapeHtml(f.email)}${addedLabel ? ` <span style="opacity:.55">· added ${addedLabel}</span>` : ''}</div>
+            <div class="person-name">${Utils.escapeHtml(f.displayName || f.email)} ${statusBadge}</div>
+            <div class="person-email">${Utils.escapeHtml(f.email)}${timeLabel ? ` <span style="opacity:.55">· ${timeLabel}</span>` : ''}</div>
           </div>
           <div class="person-actions">
-            <button class="btn btn-ghost btn-sm" data-action="block">Block</button>
-            <button class="btn btn-ghost btn-sm danger-btn" data-action="remove">Remove</button>
+            ${!isPending ? `<button class="btn btn-ghost btn-sm" data-action="block">Block</button>` : ''}
+            <button class="btn btn-ghost btn-sm danger-btn" data-action="remove">${isPending ? 'Cancel' : 'Remove'}</button>
           </div>
         </div>
       `);
       row.querySelector('[data-action="remove"]').addEventListener('click', async () => {
         await Data.removeFriend(f.email); _renderFriends();
       });
-      row.querySelector('[data-action="block"]').addEventListener('click', async () => {
+      row.querySelector('[data-action="block"]')?.addEventListener('click', async () => {
         await Data.blockUser(f.email); await Data.removeFriend(f.email);
         _renderFriends(); Utils.showToast(`${f.email} blocked`);
       });
@@ -1681,12 +1973,12 @@ const UI = (() => {
     const name  = nameInput?.value.trim() || '';
     if (!email || !email.includes('@')) { Utils.showToast('Enter a valid email', 'error'); return; }
     try {
-      await Data.addFriend(email, name);
+      await Data.sendFriendRequest(email, name);
       emailInput.value = '';
       if (nameInput) nameInput.value = '';
       _renderFriends();
-      Utils.showToast(`${name || email} added!`);
-    } catch { Utils.showToast('Failed to add friend', 'error'); }
+      Utils.showToast(`Friend request sent to ${name || email}!`);
+    } catch { Utils.showToast('Failed to send friend request', 'error'); }
   }
 
   async function _renderContactSuggestions(friends) {
@@ -1714,9 +2006,9 @@ const UI = (() => {
           </div>
         `);
         row.querySelector('button').addEventListener('click', async () => {
-          await Data.addFriend(c.email, c.name || '');
+          await Data.sendFriendRequest(c.email, c.name || '');
           _renderFriends();
-          Utils.showToast(`${c.name || c.email} added!`);
+          Utils.showToast(`Friend request sent to ${c.name || c.email}!`);
         });
         list.appendChild(row);
       });

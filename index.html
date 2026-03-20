@@ -99,10 +99,16 @@
         <a href="#friends"     class="nav-link" data-page="friends">Friends</a>
       </nav>
       <div class="topbar-right">
+        <button id="notif-btn" class="notif-bell" title="Notifications" aria-label="Notifications">
+          🔔
+          <span id="notif-badge" class="notif-badge" hidden>0</span>
+        </button>
         <a href="#profile" class="nav-avatar-link" data-page="profile">
           <span id="nav-avatar" class="nav-avatar">?</span>
         </a>
       </div>
+      <!-- Notification panel (shown on bell click) -->
+      <div id="notif-panel" class="notif-panel" hidden></div>
     </header>
 
     <main id="main">
@@ -166,9 +172,9 @@
           <div id="circle-detail-actions" class="page-header-actions"></div>
         </div>
         <div id="circle-members-strip" class="members-strip"></div>
-        <div id="circle-detail-grid" class="media-grid"></div>
+        <div id="circle-detail-feed" class="feed-list"></div>
         <div id="circle-detail-empty" class="empty-state" hidden>
-          <p>Nothing shared here yet.</p>
+          <p>Nothing posted here yet. Be the first to post!</p>
         </div>
       </section>
 

@@ -223,6 +223,14 @@ const Drive = (() => {
 
   /* ── Shared with me ───────────────────────── */
 
+  // Query sharedWithMe files (not folders) whose name contains a given string.
+  async function listSharedFilesWithName(namePart) {
+    const q = `sharedWithMe=true and trashed=false and mimeType!='application/vnd.google-apps.folder' and name contains '${namePart.replace(/'/g, "\\'")}'`;
+    const params = new URLSearchParams({ q, fields: 'files(id,name,createdTime,owners)', spaces: 'drive', pageSize: '50' });
+    const data = await _json(`${BASE}/files?${params}`, { headers: _headers() });
+    return data.files || [];
+  }
+
   async function listSharedWithMe() {
     const q = `sharedWithMe=true and trashed=false and mimeType='application/vnd.google-apps.folder'`;
     const params = new URLSearchParams({ q, fields: 'files(id,name,owners,createdTime,sharedWithMeTime)', spaces: 'drive', pageSize: '50' });
@@ -235,7 +243,8 @@ const Drive = (() => {
   // Returns { files, nextPageToken } for ALL non-folder files in the user's Drive.
   // Pass nextPageToken from a previous call to fetch subsequent pages.
   async function listAllFiles(pageToken = null, pageSize = 50) {
-    const q = `trashed=false and mimeType!='application/vnd.google-apps.folder'`;
+    // 'me' in owners ensures only the user's own files are returned (not files shared with them)
+    const q = `trashed=false and mimeType!='application/vnd.google-apps.folder' and 'me' in owners`;
     const params = new URLSearchParams({
       q,
       fields: 'nextPageToken,files(id,name,mimeType,size,createdTime,modifiedTime,thumbnailLink,shared)',
@@ -356,6 +365,7 @@ const Drive = (() => {
     listPermissions:   _dw(listPermissions, async () => []),
     removePermission:  _dw(removePermission, async () => {}),
     makePublic:        _dw(makePublic,     async () => {}),
+    listSharedFilesWithName: _dw(listSharedFilesWithName, async () => []),
     listSharedWithMe:  _dw(listSharedWithMe, async () => []),
     listAllFiles:      _dw(listAllFiles,   async () => ({ files: [], nextPageToken: null })),
     getQuota:          _dw(getQuota,       async () => ({ limit: '16106127360', usage: '1073741824', usageInDrive: '536870912' })),

@@ -120,12 +120,27 @@ const Data = (() => {
   // with _meta.json inside it.
 
   async function listCircles() {
-    const folders = await Drive.listFiles(_folders.circlesFolderId, `mimeType='application/vnd.google-apps.folder'`);
-    const metas = await Promise.all(folders.map(async f => {
+    // 1. User's own circles (in their mycircle/circles/ folder)
+    const ownFolders = await Drive.listFiles(_folders.circlesFolderId, `mimeType='application/vnd.google-apps.folder'`);
+
+    // 2. Circles shared with this user by others (they were added as a member)
+    let sharedFolders = [];
+    try { sharedFolders = await Drive.listSharedWithMe(); } catch {}
+
+    // Combine and deduplicate
+    const seen = new Set();
+    const allFolders = [];
+    for (const f of [...ownFolders, ...sharedFolders]) {
+      if (!seen.has(f.id)) { seen.add(f.id); allFolders.push(f); }
+    }
+
+    const metas = await Promise.all(allFolders.map(async f => {
       try {
         const metaFile = await Drive.findFile('_meta.json', f.id);
         if (!metaFile) return null;
         const meta = await Drive.readJsonFile(metaFile.id);
+        // Circles have ownerId + members[]; collections have sharing + allowCopying
+        if (!meta.ownerId || !Array.isArray(meta.members)) return null;
         return { ...meta, folderId: f.id };
       } catch { return null; }
     }));
@@ -373,6 +388,135 @@ const Data = (() => {
     await Drive.upsertJsonFile('hidden.json', { ids: filtered }, _folders.rootId);
   }
 
+  /* ── Circle Posts ──────────────────────────── */
+
+  // Each post is a subfolder inside the circle folder, containing _post.json + media/doc files.
+  // This avoids write conflicts — each user creates their own subfolder.
+
+  async function createCirclePost(circleFolderId, { caption = '' }) {
+    const id = Utils.generateId('cpost');
+    const postFolderId = await Drive.getOrCreateFolder(id, circleFolderId);
+    const user = Auth.getCurrentUser();
+    const meta = {
+      id, caption,
+      authorEmail: user.email,
+      authorName:  user.name || user.email,
+      createdAt:   new Date().toISOString()
+    };
+    await Drive.createJsonFile('_post.json', meta, postFolderId);
+    return { ...meta, postFolderId };
+  }
+
+  async function listCirclePosts(circleFolderId) {
+    const subfolders = await Drive.listFiles(circleFolderId, `mimeType='application/vnd.google-apps.folder'`);
+    const posts = await Promise.all(subfolders.map(async sf => {
+      try {
+        const postFile = await Drive.findFile('_post.json', sf.id);
+        if (!postFile) return null; // not a post subfolder (e.g. old structure)
+        const meta  = await Drive.readJsonFile(postFile.id);
+        const files = await Drive.listFiles(sf.id);
+        return { ...meta, postFolderId: sf.id, files };
+      } catch { return null; }
+    }));
+    return posts
+      .filter(Boolean)
+      .sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+  }
+
+  async function deleteCirclePost(postFolderId) {
+    await Drive.deleteFile(postFolderId);
+  }
+
+  /* ── Circle Mute ───────────────────────────── */
+
+  async function getMutedCircles() {
+    const s = await getSettings();
+    return s.mutedCircleIds || [];
+  }
+
+  async function muteCircle(folderId) {
+    const s = await getSettings();
+    const ids = s.mutedCircleIds || [];
+    if (!ids.includes(folderId)) await saveSettings({ ...s, mutedCircleIds: [...ids, folderId] });
+  }
+
+  async function unmuteCircle(folderId) {
+    const s = await getSettings();
+    const ids = (s.mutedCircleIds || []).filter(id => id !== folderId);
+    await saveSettings({ ...s, mutedCircleIds: ids });
+  }
+
+  /* ── Friend Requests ───────────────────────── */
+
+  // Request files are stored in the sender's mycircle/ root and shared with the recipient.
+  // File name: mc-freq-{sanitised_target_email}.json
+  // This lets recipients find them via sharedWithMe queries.
+
+  function _freqKey(targetEmail) {
+    return `mc-freq-${targetEmail.replace(/[^a-zA-Z0-9]/g, '_')}.json`;
+  }
+
+  async function sendFriendRequest(email, displayName = '') {
+    const data = await _getFriendsFile();
+    if (data.friends.find(f => f.email === email)) return; // already in list
+    const user = Auth.getCurrentUser();
+    const reqPayload = {
+      type: 'mc_friend_request',
+      fromEmail: user.email,
+      fromName:  user.name || user.email,
+      toEmail:   email,
+      sentAt:    new Date().toISOString()
+    };
+    const key    = _freqKey(email);
+    const fileId = await Drive.upsertJsonFile(key, reqPayload, _folders.rootId);
+    await Drive.shareWithEmail(fileId, email, 'reader').catch(() => {});
+    data.friends.push({ email, displayName: displayName || email, addedAt: new Date().toISOString(), status: 'pending_sent' });
+    await Drive.upsertJsonFile('friends.json', data, _folders.contactsFolderId);
+  }
+
+  async function getIncomingFriendRequests() {
+    try {
+      const files = await Drive.listSharedFilesWithName('mc-freq-');
+      const me    = Auth.getCurrentUser();
+      const declined = await _getDeclinedRequestIds();
+      const reqs = await Promise.all(files.map(async f => {
+        try {
+          if (declined.includes(f.id)) return null;
+          const d = await Drive.readJsonFile(f.id);
+          if (d.type !== 'mc_friend_request') return null;
+          if (d.toEmail !== me.email) return null;
+          return { ...d, fileId: f.id };
+        } catch { return null; }
+      }));
+      return reqs.filter(Boolean);
+    } catch { return []; }
+  }
+
+  async function _getDeclinedRequestIds() {
+    try {
+      const f = await Drive.findFile('declined-requests.json', _folders.rootId);
+      if (!f) return [];
+      const d = await Drive.readJsonFile(f.id);
+      return d.ids || [];
+    } catch { return []; }
+  }
+
+  async function acceptFriendRequest(fromEmail, fromName) {
+    const data = await _getFriendsFile();
+    if (!data.friends.find(f => f.email === fromEmail)) {
+      data.friends.push({ email: fromEmail, displayName: fromName || fromEmail, addedAt: new Date().toISOString(), status: 'accepted' });
+      await Drive.upsertJsonFile('friends.json', data, _folders.contactsFolderId);
+    }
+  }
+
+  async function declineFriendRequest(fileId) {
+    const ids = await _getDeclinedRequestIds();
+    if (!ids.includes(fileId)) {
+      ids.push(fileId);
+      await Drive.upsertJsonFile('declined-requests.json', { ids }, _folders.rootId);
+    }
+  }
+
   /* ── PIN ────────────────────────────────────── */
 
   async function _hashPin(pin) {
@@ -413,9 +557,12 @@ const Data = (() => {
     getProfile,   saveProfile,
     getSettings,  saveSettings,
     getFriends,   addFriend,    removeFriend,
+    sendFriendRequest, getIncomingFriendRequests, acceptFriendRequest, declineFriendRequest,
     getBlocked,   blockUser,    unblockUser,
     listCircles,  createCircle, getCircle,  updateCircleMeta,  deleteCircle,
     addMemberToCircle, removeMemberFromCircle,
+    createCirclePost, listCirclePosts, deleteCirclePost,
+    getMutedCircles, muteCircle, unmuteCircle,
     listCollections, createCollection, getCollection, updateCollectionMeta, deleteCollection, shareCollection,
     getReactions, toggleLike,
     createPost, listOwnPosts,
