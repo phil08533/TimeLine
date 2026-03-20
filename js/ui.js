@@ -1037,6 +1037,7 @@ const UI = (() => {
       document.getElementById('friends-count').textContent = friends.length;
       _renderFriendsList(friends);
       _renderBlockedList(blocked);
+      _renderContactSuggestions(friends);
     } catch { Utils.showToast('Failed to load friends', 'error'); }
   }
 
@@ -1106,6 +1107,41 @@ const UI = (() => {
       _renderFriends();
       Utils.showToast(`${name || email} added!`);
     } catch { Utils.showToast('Failed to add friend', 'error'); }
+  }
+
+  async function _renderContactSuggestions(friends) {
+    const block = document.getElementById('friend-suggestions-block');
+    const list  = document.getElementById('friend-suggestions-list');
+    block.hidden = true;
+    try {
+      const contacts = await Drive.getContacts();
+      const me = Auth.getCurrentUser();
+      const skip = new Set([me?.email?.toLowerCase(), ...friends.map(f => f.email.toLowerCase())]);
+      const suggestions = contacts.filter(c => !skip.has(c.email.toLowerCase())).slice(0, 8);
+      if (!suggestions.length) return;
+      list.innerHTML = '';
+      suggestions.forEach(c => {
+        const row = _el(`
+          <div class="person-row">
+            <div class="avatar-sm">${(c.name || c.email)[0].toUpperCase()}</div>
+            <div class="person-info">
+              <div class="person-name">${Utils.escapeHtml(c.name || c.email)}</div>
+              <div class="person-email">${Utils.escapeHtml(c.email)}</div>
+            </div>
+            <div class="person-actions">
+              <button class="btn btn-primary btn-sm">Add</button>
+            </div>
+          </div>
+        `);
+        row.querySelector('button').addEventListener('click', async () => {
+          await Data.addFriend(c.email, c.name || '');
+          _renderFriends();
+          Utils.showToast(`${c.name || c.email} added!`);
+        });
+        list.appendChild(row);
+      });
+      block.hidden = false;
+    } catch { /* contacts permission not granted or unavailable — skip silently */ }
   }
 
   /* ── Profile ─────────────────────────────────── */
