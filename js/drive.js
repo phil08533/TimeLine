@@ -247,9 +247,38 @@ const Drive = (() => {
 
   /* ── Media URL ────────────────────────────── */
 
+  // Returns a thumbnail URL usable directly in <img src>.
+  // drive.google.com/thumbnail serves through the user's Google session — no auth header needed.
+  function getThumbnailUrl(fileId, size = 'w400') {
+    if (Auth.isDemoMode()) return _demo.get(fileId) || '';
+    return `https://drive.google.com/thumbnail?id=${encodeURIComponent(fileId)}&sz=${size}`;
+  }
+
+  // Alias kept for backward-compat callsites
   function getMediaUrl(fileId) {
-    if (Auth.isDemoMode()) return _demo.get(fileId);
-    return `https://drive.google.com/uc?export=view&id=${encodeURIComponent(fileId)}`;
+    return getThumbnailUrl(fileId);
+  }
+
+  // Fetches the full-resolution file via the Drive API (needs access token) and
+  // returns an object URL suitable for a high-res <img src> or download.
+  // Caller is responsible for calling URL.revokeObjectURL() when done.
+  async function getFileAsBlob(fileId) {
+    if (Auth.isDemoMode()) {
+      const dataUri = _demo.get(fileId);
+      if (!dataUri) throw new Error('Demo file not found');
+      const res = await fetch(dataUri);
+      const blob = await res.blob();
+      return URL.createObjectURL(blob);
+    }
+    const token = Auth.getAccessToken();
+    if (!token) throw Object.assign(new Error('Not authenticated'), { status: 401 });
+    const r = await fetch(`${BASE}/files/${fileId}?alt=media`, {
+      headers: { Authorization: `Bearer ${token}` }
+    });
+    if (r.status === 401) { window.dispatchEvent(new CustomEvent('mc:session-expired')); throw new Error('Unauthorized'); }
+    if (!r.ok) throw new Error(`HTTP ${r.status}`);
+    const blob = await r.blob();
+    return URL.createObjectURL(blob);
   }
 
   /* ── Demo-mode shims ──────────────────────── */
@@ -298,6 +327,8 @@ const Drive = (() => {
     listLargeFiles:    _dw(listLargeFiles, async () => []),
     getComments:       _dw(getComments,    _demoGetComments),
     addComment:        _dw(addComment,     _demoAddComment),
-    getMediaUrl
+    getThumbnailUrl,
+    getMediaUrl,
+    getFileAsBlob:     _dw(getFileAsBlob, getFileAsBlob)
   };
 })();

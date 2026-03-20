@@ -93,7 +93,8 @@
       </a>
       <nav class="topbar-nav" id="topbar-nav">
         <a href="#feed"        class="nav-link" data-page="feed">Feed</a>
-        <a href="#circles"     class="nav-link" data-page="circles">My Circles</a>
+        <a href="#my-data"     class="nav-link" data-page="my-data">My Data</a>
+        <a href="#circles"     class="nav-link" data-page="circles">Circles</a>
         <a href="#collections" class="nav-link" data-page="collections">Collections</a>
         <a href="#friends"     class="nav-link" data-page="friends">Friends</a>
       </nav>
@@ -110,10 +111,28 @@
       <section id="page-feed" class="page" data-page="feed">
         <div class="page-header">
           <h2>Feed</h2>
+          <span class="muted-text small" style="margin-left:auto">Friends &amp; public shares</span>
         </div>
         <div id="feed-grid" class="media-grid"></div>
         <div id="feed-empty" class="empty-state" hidden>
-          <p>Your feed is empty. Add friends and join circles to see their shared photos here.</p>
+          <p>Your feed is empty. Friends can share public collections or circles with you — their posts will appear here.</p>
+        </div>
+      </section>
+
+      <!-- MY DATA -->
+      <section id="page-my-data" class="page" data-page="my-data" hidden>
+        <div class="page-header">
+          <h2>My Data</h2>
+          <button class="btn btn-primary btn-sm" id="my-data-upload-btn">+ Upload</button>
+        </div>
+        <div id="my-data-filters" class="my-data-filters">
+          <button class="filter-pill active" data-filter="all">All</button>
+          <button class="filter-pill" data-filter="circles">Circles</button>
+          <button class="filter-pill" data-filter="collections">Collections</button>
+        </div>
+        <div id="my-data-grid" class="media-grid"></div>
+        <div id="my-data-empty" class="empty-state" hidden>
+          <p>No files yet. Upload photos or videos to a circle or collection to see them here.</p>
         </div>
       </section>
 

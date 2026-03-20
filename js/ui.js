@@ -158,7 +158,8 @@ const UI = (() => {
   }
 
   const _pageTitles = {
-    feed: 'Feed', circles: 'My Circles', 'circle-detail': 'Circle',
+    feed: 'Feed', 'my-data': 'My Data',
+    circles: 'Circles', 'circle-detail': 'Circle',
     collections: 'Collections', 'collection-detail': 'Collection',
     friends: 'Friends', profile: 'Profile', settings: 'Settings', about: 'About'
   };
@@ -181,6 +182,8 @@ const UI = (() => {
     switch (page) {
       case 'feed':
         _showPage('page-feed');        _renderFeed();             break;
+      case 'my-data':
+        _showPage('page-my-data');     _renderMyData();           break;
       case 'circles':
         _showPage('page-circles');     _renderCircles();          break;
       case 'circle-detail':
@@ -223,7 +226,7 @@ const UI = (() => {
 
       if (!sharedFolders.length) {
         empty.hidden = false;
-        empty.querySelector('p').textContent = 'Your feed is empty. Add friends and ask them to share collections with you.';
+        empty.querySelector('p').textContent = 'Your feed is empty. Friends can share public collections or circles with you — their posts will appear here.';
         return;
       }
 
@@ -247,7 +250,7 @@ const UI = (() => {
       items.forEach(({ file, folder, owner }) => {
         const el = _el(`
           <div class="media-item">
-            <img src="${Drive.getMediaUrl(file.id)}" alt="" loading="lazy" />
+            <img src="${Drive.getThumbnailUrl(file.id)}" alt="" loading="lazy" />
             <div class="media-overlay">
               <span>${Utils.escapeHtml(owner?.displayName || 'Friend')}</span>
               <span class="media-time">${Utils.formatRelativeTime(file.createdTime)}</span>
@@ -263,6 +266,156 @@ const UI = (() => {
       empty.hidden = false;
       empty.querySelector('p').textContent = 'Could not load your feed. Check your connection and try again.';
     }
+  }
+
+  /* ── My Data ─────────────────────────────────── */
+
+  // Aggregates all media files from the user's own circles and collections.
+  // Items are grouped by source with section headings and filterable by type.
+
+  let _myDataItems = []; // cache so filter doesn't re-fetch
+
+  async function _renderMyData() {
+    const grid  = document.getElementById('my-data-grid');
+    const empty = document.getElementById('my-data-empty');
+    grid.innerHTML = '<p class="muted-text" style="grid-column:1/-1">Loading…</p>';
+    empty.hidden = true;
+    _on('my-data-upload-btn', 'click', _openMyDataUploadModal);
+
+    // Filter pills
+    document.querySelectorAll('.filter-pill').forEach(btn => {
+      btn.addEventListener('click', () => {
+        document.querySelectorAll('.filter-pill').forEach(b => b.classList.toggle('active', b === btn));
+        _renderMyDataGrid(btn.dataset.filter);
+      });
+    });
+
+    try {
+      const [circles, colls] = await Promise.all([Data.listCircles(), Data.listCollections()]);
+      _myDataItems = [];
+
+      await Promise.all([
+        ...circles.map(async c => {
+          try {
+            const files = await Drive.listFiles(c.folderId);
+            files
+              .filter(f => f.mimeType?.startsWith('image/') || f.mimeType?.startsWith('video/'))
+              .forEach(f => _myDataItems.push({ file: f, source: c.name, type: 'circles', folderId: c.folderId }));
+          } catch { /* skip inaccessible circle */ }
+        }),
+        ...colls.map(async c => {
+          try {
+            const files = await Drive.listFiles(c.folderId);
+            files
+              .filter(f => f.mimeType?.startsWith('image/') || f.mimeType?.startsWith('video/'))
+              .forEach(f => _myDataItems.push({ file: f, source: c.name, type: 'collections', folderId: c.folderId }));
+          } catch { /* skip inaccessible collection */ }
+        })
+      ]);
+
+      // Reset filter to "all"
+      document.querySelectorAll('.filter-pill').forEach(b => b.classList.toggle('active', b.dataset.filter === 'all'));
+      _renderMyDataGrid('all');
+    } catch (err) {
+      console.error('My Data load error', err);
+      grid.innerHTML = '';
+      empty.hidden = false;
+      empty.querySelector('p').textContent = 'Could not load your files. Check your connection and try again.';
+    }
+  }
+
+  function _renderMyDataGrid(filter) {
+    const grid  = document.getElementById('my-data-grid');
+    const empty = document.getElementById('my-data-empty');
+    const items = filter === 'all' ? _myDataItems : _myDataItems.filter(i => i.type === filter);
+
+    grid.innerHTML = '';
+    if (!items.length) { empty.hidden = false; return; }
+    empty.hidden = true;
+
+    // Sort newest first then group by source
+    items.sort((a, b) => new Date(b.file.createdTime) - new Date(a.file.createdTime));
+
+    // Group by source name so we can render section headings
+    const groups = [];
+    const seen = new Map();
+    items.forEach(item => {
+      const key = `${item.type}:${item.source}`;
+      if (!seen.has(key)) { seen.set(key, []); groups.push({ key, label: item.source, type: item.type, items: seen.get(key) }); }
+      seen.get(key).push(item);
+    });
+
+    groups.forEach(g => {
+      const heading = document.createElement('div');
+      heading.className = 'my-data-section-heading';
+      heading.textContent = `${g.type === 'circles' ? '◎' : '▤'} ${g.label}`;
+      grid.appendChild(heading);
+
+      g.items.forEach(({ file, folderId }) => {
+        const el = _el(`
+          <div class="media-item">
+            <img src="${Drive.getThumbnailUrl(file.id)}" alt="" loading="lazy" />
+            <div class="media-overlay">
+              <span class="media-time">${Utils.formatRelativeTime(file.createdTime)}</span>
+            </div>
+          </div>
+        `);
+        el.addEventListener('click', () => openLightbox(file.id, folderId, { canDelete: true }));
+        grid.appendChild(el);
+      });
+    });
+  }
+
+  async function _openMyDataUploadModal() {
+    // Need circles and collections to present as upload destinations
+    let circles = [], colls = [];
+    try {
+      [circles, colls] = await Promise.all([Data.listCircles(), Data.listCollections()]);
+    } catch { Utils.showToast('Could not load destinations', 'error'); return; }
+
+    const destOptions = [
+      ...circles.map(c => `<option value="${Utils.escapeHtml(c.folderId)}" data-type="circle">${Utils.escapeHtml(c.name)} (Circle)</option>`),
+      ...colls.map(c => `<option value="${Utils.escapeHtml(c.folderId)}" data-type="collection">${Utils.escapeHtml(c.name)} (Collection)</option>`)
+    ].join('');
+
+    if (!destOptions) {
+      Utils.showToast('Create a circle or collection first', 'error');
+      return;
+    }
+
+    openModal(`
+      <h3>Upload Files</h3>
+      <form id="mf" class="form-block">
+        <div class="form-field">
+          <label>Upload to</label>
+          <select name="dest" class="select-sm" style="width:100%" required>${destOptions}</select>
+        </div>
+        <input type="file" id="up-input" class="input" multiple accept="image/*,video/*" />
+        <p id="up-status" class="muted-text small"></p>
+        <div class="modal-actions">
+          <button type="button" class="btn btn-ghost btn-sm modal-cancel-btn">Cancel</button>
+          <button type="submit" class="btn btn-primary btn-sm">Upload</button>
+        </div>
+      </form>
+    `);
+    document.querySelector('.modal-cancel-btn').addEventListener('click', closeModal);
+    document.getElementById('mf').addEventListener('submit', async e => {
+      e.preventDefault();
+      const folderId = new FormData(e.target).get('dest');
+      const files    = document.getElementById('up-input').files;
+      if (!files.length) return;
+      const status = document.getElementById('up-status');
+      let done = 0;
+      for (const file of files) {
+        const v = Utils.validateMediaFile(file);
+        if (!v.ok) { Utils.showToast(v.error, 'error'); continue; }
+        status.textContent = `Uploading ${file.name}…`;
+        try { await Drive.uploadMedia(file, folderId); done++; }
+        catch { Utils.showToast(`Failed: ${file.name}`, 'error'); }
+      }
+      closeModal();
+      if (done) { Utils.showToast(`${done} file${done > 1 ? 's' : ''} uploaded`); _renderMyData(); }
+    });
   }
 
   /* ── Circles ─────────────────────────────────── */
@@ -313,6 +466,9 @@ const UI = (() => {
       const circle = await Data.getCircle(folderId);
       document.getElementById('circle-detail-name').textContent = circle.name;
 
+      const user    = Auth.getCurrentUser();
+      const isOwner = circle.ownerEmail === user.email;
+
       const strip = document.getElementById('circle-members-strip');
       (circle.members || []).forEach(m => {
         const canRemove = isOwner && m.email !== user.email;
@@ -336,9 +492,6 @@ const UI = (() => {
         }
         strip.appendChild(chip);
       });
-
-      const user    = Auth.getCurrentUser();
-      const isOwner = circle.ownerEmail === user.email;
       const canAdd  = isOwner || circle.addPolicy === 'any_member';
       const actions = document.getElementById('circle-detail-actions');
 
@@ -371,7 +524,7 @@ const UI = (() => {
       if (!media.length) { document.getElementById('circle-detail-empty').hidden = false; return; }
 
       media.forEach(f => {
-        const el = _el(`<div class="media-item"><img src="${Drive.getMediaUrl(f.id)}" alt="" loading="lazy" /></div>`);
+        const el = _el(`<div class="media-item"><img src="${Drive.getThumbnailUrl(f.id)}" alt="" loading="lazy" /></div>`);
         el.addEventListener('click', () => openLightbox(f.id, folderId, { canDelete: isOwner }));
         grid.appendChild(el);
       });
@@ -518,7 +671,7 @@ const UI = (() => {
       }
 
       media.forEach(f => {
-        const el = _el(`<div class="media-item"><img src="${Drive.getMediaUrl(f.id)}" alt="" loading="lazy" /></div>`);
+        const el = _el(`<div class="media-item"><img src="${Drive.getThumbnailUrl(f.id)}" alt="" loading="lazy" /></div>`);
         el.addEventListener('click', () => openLightbox(f.id, folderId, { canDelete: true }));
         grid.appendChild(el);
       });
@@ -831,10 +984,24 @@ const UI = (() => {
 
   /* ── Lightbox ─────────────────────────────────── */
 
+  let _lightboxBlobUrl = null;
+
   async function openLightbox(fileId, collectionFolderId, opts = {}) {
-    const lb = document.getElementById('lightbox');
+    const lb  = document.getElementById('lightbox');
+    const img = document.getElementById('lightbox-img');
     lb.hidden = false;
-    document.getElementById('lightbox-img').src = Drive.getMediaUrl(fileId);
+
+    // Show thumbnail immediately, then upgrade to full-resolution
+    img.src = Drive.getThumbnailUrl(fileId, 'w800');
+    if (_lightboxBlobUrl) { URL.revokeObjectURL(_lightboxBlobUrl); _lightboxBlobUrl = null; }
+    Drive.getFileAsBlob(fileId).then(blobUrl => {
+      if (!lb.hidden) { // still open
+        _lightboxBlobUrl = blobUrl;
+        img.src = blobUrl;
+      } else {
+        URL.revokeObjectURL(blobUrl);
+      }
+    }).catch(() => { /* keep thumbnail */ });
 
     const user     = Auth.getCurrentUser();
     const reactBar = document.getElementById('lightbox-reactions');
@@ -934,6 +1101,7 @@ const UI = (() => {
     document.getElementById('lightbox').hidden = true;
     document.getElementById('lightbox-img').src = '';
     document.getElementById('lightbox-comment-input').value = '';
+    if (_lightboxBlobUrl) { URL.revokeObjectURL(_lightboxBlobUrl); _lightboxBlobUrl = null; }
   }
 
   /* ── Modal ───────────────────────────────────── */
