@@ -285,6 +285,45 @@ const Data = (() => {
     return { liked, count: reactions.likes.length };
   }
 
+  /* ── Posts ─────────────────────────────────── */
+
+  // A post is a collection with isPost:true plus an optional caption.
+  // It lives in mycircle/collections/ like any other collection.
+
+  async function createPost(caption, sharing) {
+    const id = Utils.generateId('post');
+    const folderId = await Drive.getOrCreateFolder(id, _folders.collectionsFolderId);
+    const meta = {
+      id,
+      name: `Post ${new Date().toLocaleDateString()}`,
+      caption: caption || '',
+      isPost: true,
+      sharing,
+      sharedWith: [],
+      allowCopying: false,
+      createdAt: new Date().toISOString()
+    };
+    await Drive.createJsonFile('_meta.json', meta, folderId);
+    await Drive.createJsonFile('reactions.json', { likes: [] }, folderId);
+
+    // Auto-share based on audience
+    if (sharing === 'everyone') {
+      await Drive.makePublic(folderId).catch(() => {});
+    } else if (sharing === 'friends') {
+      const friends = await getFriends();
+      await Promise.all(friends.map(f =>
+        Drive.shareWithEmail(folderId, f.email, 'reader').catch(() => {})
+      ));
+    }
+
+    return { ...meta, folderId };
+  }
+
+  async function listOwnPosts() {
+    const colls = await listCollections();
+    return colls.filter(c => c.isPost);
+  }
+
   /* ── Feed ──────────────────────────────────── */
 
   // Returns folders shared with the current user (friends' collections/circles)
@@ -305,6 +344,7 @@ const Data = (() => {
     addMemberToCircle, removeMemberFromCircle,
     listCollections, createCollection, getCollection, updateCollectionMeta, deleteCollection, shareCollection,
     getReactions, toggleLike,
+    createPost, listOwnPosts,
     getFeedFolders
   };
 })();
