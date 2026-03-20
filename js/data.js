@@ -292,29 +292,44 @@ const Data = (() => {
   // A post is a collection with isPost:true plus an optional caption.
   // It lives in mycircle/collections/ like any other collection.
 
-  async function createPost(caption, sharing) {
+  // opts: { caption, name, sharing, circleIds }
+  //   sharing: 'friends' | 'circles' | 'everyone'
+  //   circleIds: array of circle folderIds (used when sharing === 'circles')
+  async function createPost(opts = {}) {
+    const caption   = opts.caption   || '';
+    const name      = opts.name      || `Post ${new Date().toLocaleDateString()}`;
+    const sharing   = opts.sharing   || 'friends';
+    const circleIds = opts.circleIds || [];
+
     const id = Utils.generateId('post');
     const folderId = await Drive.getOrCreateFolder(id, _folders.collectionsFolderId);
     const meta = {
-      id,
-      name: `Post ${new Date().toLocaleDateString()}`,
-      caption: caption || '',
-      isPost: true,
-      sharing,
-      sharedWith: [],
-      allowCopying: false,
+      id, name, caption,
+      isPost: true, sharing,
+      sharedWith: [], allowCopying: false,
       createdAt: new Date().toISOString()
     };
     await Drive.createJsonFile('_meta.json', meta, folderId);
-    await Drive.createJsonFile('reactions.json', { likes: [] }, folderId);
 
-    // Auto-share based on audience
+    // Share based on audience
     if (sharing === 'everyone') {
       await Drive.makePublic(folderId).catch(() => {});
     } else if (sharing === 'friends') {
       const friends = await getFriends();
       await Promise.all(friends.map(f =>
         Drive.shareWithEmail(folderId, f.email, 'commenter').catch(() => {})
+      ));
+    } else if (sharing === 'circles' && circleIds.length) {
+      // Collect all unique member emails across selected circles
+      const circles = await Promise.all(
+        circleIds.map(fid => getCircle(fid).catch(() => null))
+      );
+      const emails = new Set();
+      circles.filter(Boolean).forEach(c => {
+        c.members.filter(m => m.role !== 'owner').forEach(m => emails.add(m.email));
+      });
+      await Promise.all([...emails].map(email =>
+        Drive.shareWithEmail(folderId, email, 'commenter').catch(() => {})
       ));
     }
 
