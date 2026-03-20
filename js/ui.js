@@ -15,14 +15,65 @@ const UI = (() => {
     Auth.init({ onSignIn: _onSignIn, onSignOut: _onSignOut });
     document.getElementById('sign-in-btn').addEventListener('click', () => Auth.signIn());
 
-    const cfg = typeof CONFIG !== 'undefined' && CONFIG.GOOGLE_CLIENT_ID && !CONFIG.GOOGLE_CLIENT_ID.startsWith('YOUR_');
-    if (!cfg) {
-      document.getElementById('auth-note').textContent = 'Demo mode — no Google credentials configured';
-    } else {
-      document.getElementById('auth-note').textContent = '';
-    }
+    _initSetupUI();
 
     if (Auth.isSignedIn()) _onSignIn(Auth.getCurrentUser());
+  }
+
+  function _initSetupUI() {
+    const hasCredentials = Auth.hasRealCredentials();
+    const authNote       = document.getElementById('auth-note');
+    const setupSection   = document.getElementById('setup-section');
+    const clientIdInput  = document.getElementById('client-id-input');
+    const saveBtn        = document.getElementById('save-client-id-btn');
+    const clearBtn       = document.getElementById('clear-client-id-btn');
+    const statusEl       = document.getElementById('setup-status');
+
+    if (!authNote || !setupSection) return;
+
+    if (hasCredentials) {
+      authNote.textContent = '';
+      setupSection.removeAttribute('open'); // collapsed when already configured
+    } else {
+      authNote.textContent = 'Demo mode — configure Google login below to use real accounts';
+    }
+
+    // Pre-fill if a Client ID is already saved
+    const saved = localStorage.getItem('mc_client_id');
+    if (saved) {
+      clientIdInput.value = saved;
+      clearBtn.style.display = '';
+      statusEl.textContent = 'Client ID saved — sign in with Google above.';
+    }
+
+    saveBtn.addEventListener('click', () => {
+      const id = clientIdInput.value.trim();
+      if (!id) { statusEl.textContent = 'Please paste a Client ID first.'; return; }
+      if (!id.includes('.apps.googleusercontent.com')) {
+        statusEl.textContent = 'That doesn\'t look like a Google Client ID. It should end in .apps.googleusercontent.com';
+        return;
+      }
+      const ok = Auth.setClientId(id);
+      if (ok) {
+        statusEl.textContent = 'Saved! Click "Sign in with Google" to continue.';
+        authNote.textContent = '';
+        clearBtn.style.display = '';
+        setupSection.removeAttribute('open');
+      } else {
+        statusEl.textContent = 'Invalid Client ID. Please check and try again.';
+      }
+    });
+
+    clearBtn.addEventListener('click', () => {
+      Auth.clearClientId();
+      clientIdInput.value = '';
+      clearBtn.style.display = 'none';
+      statusEl.textContent = 'Credentials removed.';
+      authNote.textContent = 'Demo mode — configure Google login below to use real accounts';
+    });
+
+    // Allow pressing Enter in the input to save
+    clientIdInput.addEventListener('keydown', e => { if (e.key === 'Enter') saveBtn.click(); });
   }
 
   async function _onSignIn(user) {

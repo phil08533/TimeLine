@@ -41,6 +41,29 @@
         Sign in with Google
       </button>
       <p class="auth-note" id="auth-note">Demo mode — no credentials required</p>
+
+      <details id="setup-section" class="auth-setup">
+        <summary class="auth-setup-toggle">Configure Google login</summary>
+        <div class="auth-setup-body">
+          <p>Paste your <strong>OAuth 2.0 Client ID</strong> from <a href="https://console.cloud.google.com/" target="_blank" rel="noopener" class="link">Google Cloud Console</a>.</p>
+          <ol class="setup-steps">
+            <li>Create a project &amp; enable the <strong>Google Drive API</strong></li>
+            <li>Go to <strong>APIs &amp; Services → Credentials</strong></li>
+            <li>Create an <strong>OAuth 2.0 Client ID</strong> (Web application)</li>
+            <li>Add this page's URL as an <strong>Authorised JavaScript origin</strong></li>
+            <li>Copy the Client ID (ends in <code>.apps.googleusercontent.com</code>)</li>
+          </ol>
+          <div class="setup-input-row">
+            <input id="client-id-input" class="input" type="text"
+              placeholder="xxxx.apps.googleusercontent.com" autocomplete="off" spellcheck="false" />
+            <button id="save-client-id-btn" class="btn btn-primary btn-sm">Save</button>
+          </div>
+          <p id="setup-status" class="auth-note" style="margin-top:.5rem"></p>
+          <button id="clear-client-id-btn" class="btn btn-ghost btn-sm" style="margin-top:.25rem;display:none">
+            Remove saved credentials
+          </button>
+        </div>
+      </details>
     </div>
   </div>
 
