@@ -9,6 +9,7 @@ const Auth = (() => {
   let _currentUser   = null;    // { userId, name, email, picture }
   let _onSignInCb    = null;
   let _onSignOutCb   = null;
+  let _reauthCb      = null;    // one-shot callback used by requestReauth()
 
   const SESSION_KEY_TOKEN  = 'mc_access_token';
   const SESSION_KEY_EXPIRY = 'mc_token_expiry';
@@ -117,6 +118,12 @@ const Auth = (() => {
     _saveSession();
 
     await _fetchUserInfo();
+
+    // If a one-shot reauth callback is pending, consume it instead of the normal sign-in flow
+    const cb = _reauthCb;
+    _reauthCb = null;
+    if (cb) { cb(); return; }
+
     _onSignInCb(_currentUser);
   }
 
@@ -222,6 +229,17 @@ const Auth = (() => {
     return _accessToken === 'DEMO_TOKEN';
   }
 
+  /* ── Re-authenticate (used for PIN reset) ──────── */
+
+  // Triggers a fresh Google sign-in prompt; on success calls onSuccess().
+  // The normal onSignIn callback is NOT fired — only onSuccess.
+  function requestReauth(onSuccess) {
+    if (isDemoMode()) { onSuccess(); return; }
+    if (!_tokenClient) { Utils.showToast('Sign-in not ready', 'error'); return; }
+    _reauthCb = onSuccess;
+    _tokenClient.requestAccessToken({ prompt: 'select_account' });
+  }
+
   /* ── Exports ───────────────────────────────────── */
 
   return {
@@ -234,6 +252,7 @@ const Auth = (() => {
     isDemoMode,
     setClientId,
     clearClientId,
-    hasRealCredentials
+    hasRealCredentials,
+    requestReauth
   };
 })();

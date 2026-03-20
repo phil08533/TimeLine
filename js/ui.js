@@ -625,7 +625,9 @@ const UI = (() => {
   // Aggregates all media files from the user's own circles and collections.
   // Items are grouped by source with section headings and filterable by type.
 
-  let _myDataItems = []; // cache so filter doesn't re-fetch
+  let _myDataItems     = []; // all items (including hidden)
+  let _myDataHiddenIds = []; // set of hidden file IDs
+  let _pinSessionOk    = false; // PIN entered once per session
 
   async function _renderMyData() {
     const grid  = document.getElementById('my-data-grid');
@@ -634,39 +636,46 @@ const UI = (() => {
     empty.hidden = true;
     _on('my-data-upload-btn', 'click', _openMyDataUploadModal);
 
-    // Filter pills
-    document.querySelectorAll('.filter-pill').forEach(btn => {
-      btn.addEventListener('click', () => {
-        document.querySelectorAll('.filter-pill').forEach(b => b.classList.toggle('active', b === btn));
-        _renderMyDataGrid(btn.dataset.filter);
-      });
+    // Filter pills — deduplicate listeners with replacement
+    document.querySelectorAll('#my-data-filters .filter-pill').forEach(btn => {
+      const fresh = btn.cloneNode(true);
+      btn.parentNode.replaceChild(fresh, btn);
+      fresh.addEventListener('click', () => _onMyDataFilter(fresh));
     });
 
     try {
-      const [circles, colls] = await Promise.all([Data.listCircles(), Data.listCollections()]);
+      const [circles, colls, hiddenIds] = await Promise.all([
+        Data.listCircles(), Data.listCollections(), Data.getHiddenIds()
+      ]);
+      _myDataHiddenIds = hiddenIds;
       _myDataItems = [];
+
+      const isMedia = f => f.mimeType?.startsWith('image/') || f.mimeType?.startsWith('video/');
 
       await Promise.all([
         ...circles.map(async c => {
           try {
-            const files = await Drive.listFiles(c.folderId);
-            files
-              .filter(f => f.mimeType?.startsWith('image/') || f.mimeType?.startsWith('video/'))
+            (await Drive.listFiles(c.folderId)).filter(isMedia)
               .forEach(f => _myDataItems.push({ file: f, source: c.name, type: 'circles', folderId: c.folderId }));
-          } catch { /* skip inaccessible circle */ }
+          } catch { /* skip */ }
         }),
-        ...colls.map(async c => {
+        ...colls.filter(c => !c.isPost).map(async c => {
           try {
-            const files = await Drive.listFiles(c.folderId);
-            files
-              .filter(f => f.mimeType?.startsWith('image/') || f.mimeType?.startsWith('video/'))
+            (await Drive.listFiles(c.folderId)).filter(isMedia)
               .forEach(f => _myDataItems.push({ file: f, source: c.name, type: 'collections', folderId: c.folderId }));
-          } catch { /* skip inaccessible collection */ }
+          } catch { /* skip */ }
+        }),
+        ...colls.filter(c => c.isPost).map(async c => {
+          try {
+            (await Drive.listFiles(c.folderId)).filter(isMedia)
+              .forEach(f => _myDataItems.push({ file: f, source: c.name || 'Post', type: 'posts', folderId: c.folderId }));
+          } catch { /* skip */ }
         })
       ]);
 
-      // Reset filter to "all"
-      document.querySelectorAll('.filter-pill').forEach(b => b.classList.toggle('active', b.dataset.filter === 'all'));
+      // Reset to "all"
+      document.querySelectorAll('#my-data-filters .filter-pill').forEach(b =>
+        b.classList.toggle('active', b.dataset.filter === 'all'));
       _renderMyDataGrid('all');
     } catch (err) {
       console.error('My Data load error', err);
@@ -676,20 +685,45 @@ const UI = (() => {
     }
   }
 
+  async function _onMyDataFilter(btn) {
+    const filter = btn.dataset.filter;
+    document.querySelectorAll('#my-data-filters .filter-pill').forEach(b => b.classList.toggle('active', b === btn));
+
+    if (filter !== 'hidden') { _renderMyDataGrid(filter); return; }
+
+    // Hidden tab — require PIN
+    if (_pinSessionOk) { _renderMyDataGrid('hidden'); return; }
+
+    const hasPin = !!(await Data.getPin());
+    if (!hasPin) {
+      // No PIN set yet — prompt to create one
+      _openSetPinModal(() => { _pinSessionOk = true; _renderMyDataGrid('hidden'); });
+    } else {
+      _openVerifyPinModal(() => { _pinSessionOk = true; _renderMyDataGrid('hidden'); });
+    }
+  }
+
   function _renderMyDataGrid(filter) {
     const grid  = document.getElementById('my-data-grid');
     const empty = document.getElementById('my-data-empty');
-    const items = filter === 'all' ? _myDataItems : _myDataItems.filter(i => i.type === filter);
-
     _clearThumbBlobs();
     grid.innerHTML = '';
+
+    const hiddenSet = new Set(_myDataHiddenIds);
+    let items;
+    if (filter === 'hidden') {
+      items = _myDataItems.filter(i => hiddenSet.has(i.file.id));
+    } else {
+      const base = filter === 'all' ? _myDataItems : _myDataItems.filter(i => i.type === filter);
+      items = base.filter(i => !hiddenSet.has(i.file.id));
+    }
+
     if (!items.length) { empty.hidden = false; return; }
     empty.hidden = true;
 
-    // Sort newest first then group by source
     items.sort((a, b) => new Date(b.file.createdTime) - new Date(a.file.createdTime));
 
-    // Group by source name so we can render section headings
+    // Group by source
     const groups = [];
     const seen = new Map();
     items.forEach(item => {
@@ -698,54 +732,207 @@ const UI = (() => {
       seen.get(key).push(item);
     });
 
+    const typeIcon = { circles: '◎', collections: '▤', posts: '✦', hidden: '👁' };
+
     groups.forEach(g => {
       const heading = document.createElement('div');
       heading.className = 'my-data-section-heading';
-      heading.textContent = `${g.type === 'circles' ? '◎' : '▤'} ${g.label}`;
+      heading.textContent = `${typeIcon[g.type] || '▤'} ${g.label}`;
       grid.appendChild(heading);
 
-      g.items.forEach(({ file, folderId }) => {
+      g.items.forEach(({ file, folderId, type }) => {
+        const isHidden = new Set(_myDataHiddenIds).has(file.id);
         const el = _el(`
-          <div class="media-item">
+          <div class="media-item media-item--managed">
             <img src="" alt="" loading="lazy" />
-            <div class="media-overlay">
-              <span class="media-time">${Utils.formatRelativeTime(file.createdTime)}</span>
+            <div class="media-item-actions">
+              <button class="mia-btn mia-post"  title="Post to Feed">↗</button>
+              <button class="mia-btn mia-hide"  title="${isHidden ? 'Unhide' : 'Hide'}">👁</button>
+              <button class="mia-btn mia-del"   title="Delete">🗑</button>
             </div>
           </div>
         `);
         _loadThumbnail(el.querySelector('img'), file.id, file.thumbnailLink);
-        el.addEventListener('click', () => openLightbox(file.id, folderId, { canDelete: true, thumbnailLink: file.thumbnailLink }));
+
+        // View (click image area)
+        el.querySelector('img').addEventListener('click', e => {
+          e.stopPropagation();
+          openLightbox(file.id, folderId, { canDelete: true, thumbnailLink: file.thumbnailLink });
+        });
+
+        // Post to Feed
+        el.querySelector('.mia-post').addEventListener('click', async e => {
+          e.stopPropagation();
+          _openPostModal();
+        });
+
+        // Hide / Unhide
+        el.querySelector('.mia-hide').addEventListener('click', async e => {
+          e.stopPropagation();
+          const btn = e.currentTarget;
+          btn.disabled = true;
+          try {
+            if (isHidden) {
+              await Data.unhideFile(file.id);
+              _myDataHiddenIds = _myDataHiddenIds.filter(id => id !== file.id);
+            } else {
+              await Data.hideFile(file.id);
+              _myDataHiddenIds.push(file.id);
+            }
+            _renderMyDataGrid(filter);
+          } catch { Utils.showToast('Could not update hidden status', 'error'); btn.disabled = false; }
+        });
+
+        // Delete
+        el.querySelector('.mia-del').addEventListener('click', async e => {
+          e.stopPropagation();
+          if (!confirm(`Delete "${file.name}"? This cannot be undone.`)) return;
+          const btn = e.currentTarget;
+          btn.disabled = true;
+          try {
+            await Drive.deleteFile(file.id);
+            _myDataItems = _myDataItems.filter(i => i.file.id !== file.id);
+            _renderMyDataGrid(filter);
+            Utils.showToast('Deleted');
+          } catch { Utils.showToast('Could not delete file', 'error'); btn.disabled = false; }
+        });
+
         grid.appendChild(el);
       });
     });
   }
 
+  /* ── PIN modals ───────────────────────────────── */
+
+  function _openSetPinModal(onSuccess) {
+    openModal(`
+      <h3>Set a PIN for Hidden</h3>
+      <p class="muted-text small">Choose a PIN to lock your hidden items. You'll enter it once per session.</p>
+      <form id="pin-form" class="form-block">
+        <div class="form-field">
+          <label>New PIN</label>
+          <input type="password" id="pin-a" class="input" placeholder="Enter PIN" inputmode="numeric" maxlength="20" autocomplete="new-password" />
+        </div>
+        <div class="form-field">
+          <label>Confirm PIN</label>
+          <input type="password" id="pin-b" class="input" placeholder="Confirm PIN" inputmode="numeric" maxlength="20" autocomplete="new-password" />
+        </div>
+        <p id="pin-status" class="muted-text small" aria-live="polite"></p>
+        <div class="modal-actions">
+          <button type="button" class="btn btn-ghost btn-sm modal-cancel-btn">Cancel</button>
+          <button type="submit" class="btn btn-primary btn-sm">Set PIN</button>
+        </div>
+      </form>
+    `);
+    document.querySelector('.modal-cancel-btn').addEventListener('click', closeModal);
+    document.getElementById('pin-form').addEventListener('submit', async e => {
+      e.preventDefault();
+      const a = document.getElementById('pin-a').value;
+      const b = document.getElementById('pin-b').value;
+      const status = document.getElementById('pin-status');
+      if (!a) { status.textContent = 'Enter a PIN.'; return; }
+      if (a !== b) { status.textContent = 'PINs do not match.'; return; }
+      const btn = e.target.querySelector('[type="submit"]');
+      btn.disabled = true; btn.textContent = 'Saving…';
+      try {
+        await Data.setPin(a);
+        closeModal();
+        onSuccess();
+      } catch { status.textContent = 'Could not save PIN.'; btn.disabled = false; btn.textContent = 'Set PIN'; }
+    });
+  }
+
+  function _openVerifyPinModal(onSuccess) {
+    openModal(`
+      <h3>🔒 Hidden Items</h3>
+      <p class="muted-text small">Enter your PIN to view hidden items.</p>
+      <form id="pin-form" class="form-block">
+        <div class="form-field">
+          <input type="password" id="pin-input" class="input" placeholder="PIN" inputmode="numeric" maxlength="20" autocomplete="current-password" />
+        </div>
+        <p id="pin-status" class="muted-text small" aria-live="polite"></p>
+        <div class="modal-actions">
+          <button type="button" class="btn btn-ghost btn-sm" id="pin-reset-btn">Forgot PIN</button>
+          <button type="button" class="btn btn-ghost btn-sm modal-cancel-btn">Cancel</button>
+          <button type="submit" class="btn btn-primary btn-sm">Unlock</button>
+        </div>
+      </form>
+    `);
+    document.querySelector('.modal-cancel-btn').addEventListener('click', closeModal);
+    document.getElementById('pin-reset-btn').addEventListener('click', () => {
+      if (!confirm('Reset your PIN? Google will verify your identity.')) return;
+      Auth.requestReauth(async () => {
+        await Data.clearPin().catch(() => {});
+        closeModal();
+        Utils.showToast('PIN cleared — set a new one to continue.');
+        _openSetPinModal(onSuccess);
+      });
+    });
+    document.getElementById('pin-form').addEventListener('submit', async e => {
+      e.preventDefault();
+      const pin = document.getElementById('pin-input').value;
+      const status = document.getElementById('pin-status');
+      const btn = e.target.querySelector('[type="submit"]');
+      btn.disabled = true; btn.textContent = 'Checking…';
+      try {
+        const ok = await Data.verifyPin(pin);
+        if (!ok) { status.textContent = 'Incorrect PIN.'; btn.disabled = false; btn.textContent = 'Unlock'; return; }
+        closeModal();
+        onSuccess();
+      } catch { status.textContent = 'Could not verify PIN.'; btn.disabled = false; btn.textContent = 'Unlock'; }
+    });
+  }
+
+  /* ── Upload modals ────────────────────────────── */
+
+  // Drag-drop upload to a specific folder (used by circles & collections detail pages)
+  function _openUploadModal(folderId) {
+    _openDragDropUpload({ title: 'Add Photos & Videos', folderId, onDone: () => {
+      if (_currentPage === 'circle-detail')     _renderCircleDetail(_currentCircleFolderId);
+      else if (_currentPage === 'collection-detail') _renderCollectionDetail(_currentCollFolderId);
+    }});
+  }
+
+  // Drag-drop upload with destination selector (used by My Data page)
   async function _openMyDataUploadModal() {
-    // Need circles and collections to present as upload destinations
     let circles = [], colls = [];
     try {
       [circles, colls] = await Promise.all([Data.listCircles(), Data.listCollections()]);
     } catch { Utils.showToast('Could not load destinations', 'error'); return; }
 
     const destOptions = [
-      ...circles.map(c => `<option value="${Utils.escapeHtml(c.folderId)}" data-type="circle">${Utils.escapeHtml(c.name)} (Circle)</option>`),
-      ...colls.map(c => `<option value="${Utils.escapeHtml(c.folderId)}" data-type="collection">${Utils.escapeHtml(c.name)} (Collection)</option>`)
+      ...circles.map(c => `<option value="${Utils.escapeHtml(c.folderId)}">◎ ${Utils.escapeHtml(c.name)} (Circle)</option>`),
+      ...colls.filter(c => !c.isPost).map(c => `<option value="${Utils.escapeHtml(c.folderId)}">▤ ${Utils.escapeHtml(c.name)} (Collection)</option>`)
     ].join('');
 
-    if (!destOptions) {
-      Utils.showToast('Create a circle or collection first', 'error');
-      return;
-    }
+    if (!destOptions) { Utils.showToast('Create a circle or collection first', 'error'); return; }
 
-    openModal(`
-      <h3>Upload Files</h3>
-      <form id="mf" class="form-block">
+    _openDragDropUpload({
+      title: 'Upload to Circle or Collection',
+      destSelectHtml: `
         <div class="form-field">
-          <label>Upload to</label>
-          <select name="dest" class="select-sm" style="width:100%" required>${destOptions}</select>
+          <label>Add to</label>
+          <select id="up-dest" class="select-sm" style="width:100%">${destOptions}</select>
+        </div>`,
+      getFolderId: () => document.getElementById('up-dest').value,
+      onDone: () => _renderMyData()
+    });
+  }
+
+  function _openDragDropUpload({ title, folderId, destSelectHtml = '', getFolderId, onDone }) {
+    openModal(`
+      <h3>${Utils.escapeHtml(title)}</h3>
+      <form id="up-form" class="form-block">
+        ${destSelectHtml}
+        <div class="post-dropzone" id="up-dropzone" tabindex="0" role="button" aria-label="Add photos or videos">
+          <div class="post-dropzone-inner">
+            <span class="post-dropzone-icon">📷</span>
+            <span>Drag photos &amp; videos here, or <span class="link-text">browse</span></span>
+          </div>
+          <input type="file" id="up-files" accept="image/*,video/*" multiple hidden />
         </div>
-        <input type="file" id="up-input" class="input" multiple accept="image/*,video/*" />
-        <p id="up-status" class="muted-text small"></p>
+        <div id="up-previews" class="post-previews" hidden></div>
+        <p id="up-status" class="muted-text small" aria-live="polite"></p>
         <div class="modal-actions">
           <button type="button" class="btn btn-ghost btn-sm modal-cancel-btn">Cancel</button>
           <button type="submit" class="btn btn-primary btn-sm">Upload</button>
@@ -753,22 +940,53 @@ const UI = (() => {
       </form>
     `);
     document.querySelector('.modal-cancel-btn').addEventListener('click', closeModal);
-    document.getElementById('mf').addEventListener('submit', async e => {
+
+    const dropzone  = document.getElementById('up-dropzone');
+    const fileInput = document.getElementById('up-files');
+    const previews  = document.getElementById('up-previews');
+    const status    = document.getElementById('up-status');
+    let selectedFiles = [];
+
+    dropzone.addEventListener('click', () => fileInput.click());
+    dropzone.addEventListener('keydown', e => { if (e.key === 'Enter' || e.key === ' ') fileInput.click(); });
+    dropzone.addEventListener('dragover', e => { e.preventDefault(); dropzone.classList.add('dropzone--over'); });
+    dropzone.addEventListener('dragleave', () => dropzone.classList.remove('dropzone--over'));
+    dropzone.addEventListener('drop', e => {
       e.preventDefault();
-      const folderId = new FormData(e.target).get('dest');
-      const files    = document.getElementById('up-input').files;
-      if (!files.length) return;
-      const status = document.getElementById('up-status');
+      dropzone.classList.remove('dropzone--over');
+      _setUpFiles(Array.from(e.dataTransfer.files).filter(f => f.type.startsWith('image/') || f.type.startsWith('video/')));
+    });
+    fileInput.addEventListener('change', () => _setUpFiles(Array.from(fileInput.files)));
+
+    function _setUpFiles(files) {
+      selectedFiles = files;
+      previews.innerHTML = '';
+      previews.hidden = !files.length;
+      files.forEach(f => {
+        const url = URL.createObjectURL(f);
+        previews.appendChild(_el(`<div class="post-preview-item"><img src="${url}" alt="${Utils.escapeHtml(f.name)}" /></div>`));
+      });
+    }
+
+    document.getElementById('up-form').addEventListener('submit', async e => {
+      e.preventDefault();
+      if (!selectedFiles.length) { status.textContent = 'Select at least one file.'; return; }
+      const target = folderId || (getFolderId && getFolderId());
+      if (!target) { status.textContent = 'Select a destination.'; return; }
+      const submitBtn = e.target.querySelector('[type="submit"]');
+      submitBtn.disabled = true; submitBtn.textContent = 'Uploading…';
+      Utils.showLoading();
       let done = 0;
-      for (const file of files) {
+      for (const file of selectedFiles) {
         const v = Utils.validateMediaFile(file);
         if (!v.ok) { Utils.showToast(v.error, 'error'); continue; }
         status.textContent = `Uploading ${file.name}…`;
-        try { await Drive.uploadMedia(file, folderId); done++; }
+        try { await Drive.uploadMedia(file, target); done++; }
         catch { Utils.showToast(`Failed: ${file.name}`, 'error'); }
       }
+      Utils.hideLoading();
       closeModal();
-      if (done) { Utils.showToast(`${done} file${done > 1 ? 's' : ''} uploaded`); _renderMyData(); }
+      if (done) { Utils.showToast(`${done} file${done > 1 ? 's' : ''} uploaded`); if (onDone) onDone(); }
     });
   }
 
@@ -1209,45 +1427,6 @@ const UI = (() => {
   }
 
   /* ── New Post ────────────────────────────────── */
-
-  /* ── Upload ─────────────────────────────────── */
-
-  function _openUploadModal(folderId) {
-    openModal(`
-      <h3>Upload Files</h3>
-      <form id="mf" class="form-block">
-        <input type="file" id="up-input" class="input" multiple accept="image/*,video/*" />
-        <p id="up-status" class="muted-text small"></p>
-        <div class="modal-actions">
-          <button type="button" class="btn btn-ghost btn-sm modal-cancel-btn">Cancel</button>
-          <button type="submit" class="btn btn-primary btn-sm">Upload</button>
-        </div>
-      </form>
-    `);
-    document.querySelector('.modal-cancel-btn').addEventListener('click', closeModal);
-    document.getElementById('mf').addEventListener('submit', async e => {
-      e.preventDefault();
-      const files = document.getElementById('up-input').files;
-      if (!files.length) return;
-      const status = document.getElementById('up-status');
-      let done = 0;
-      for (const file of files) {
-        const v = Utils.validateMediaFile(file);
-        if (!v.ok) { Utils.showToast(v.error, 'error'); continue; }
-        status.textContent = `Uploading ${file.name}…`;
-        try {
-          await Drive.uploadMedia(file, folderId);
-          done++;
-        } catch { Utils.showToast(`Failed: ${file.name}`, 'error'); }
-      }
-      closeModal();
-      if (done) {
-        Utils.showToast(`${done} file${done > 1 ? 's' : ''} uploaded`);
-        if (_currentPage === 'circle-detail')     _renderCircleDetail(_currentCircleFolderId);
-        else if (_currentPage === 'collection-detail') _renderCollectionDetail(_currentCollFolderId);
-      }
-    });
-  }
 
   /* ── Friends ─────────────────────────────────── */
 
