@@ -115,7 +115,7 @@ const Drive = (() => {
   async function listFiles(folderId, extraQ = '') {
     let q = `'${folderId}' in parents and trashed=false`;
     if (extraQ) q += ` and ${extraQ}`;
-    const params = new URLSearchParams({ q, fields: 'files(id,name,createdTime,modifiedTime,mimeType,size)', orderBy: 'createdTime desc', spaces: 'drive', pageSize: '100' });
+    const params = new URLSearchParams({ q, fields: 'files(id,name,createdTime,modifiedTime,mimeType,size,thumbnailLink)', orderBy: 'createdTime desc', spaces: 'drive', pageSize: '100' });
     const data = await _json(`${BASE}/files?${params}`, { headers: _headers() });
     return data.files || [];
   }
@@ -248,9 +248,11 @@ const Drive = (() => {
   /* ── Media URL ────────────────────────────── */
 
   // Returns a thumbnail URL usable directly in <img src>.
-  // drive.google.com/thumbnail serves through the user's Google session — no auth header needed.
-  function getThumbnailUrl(fileId, size = 'w400') {
+  // Prefers the Drive API's thumbnailLink (a signed URL that doesn't require browser
+  // Google cookies), falling back to the cookie-based URL if no thumbnailLink is available.
+  function getThumbnailUrl(fileId, size = 'w400', thumbnailLink = null) {
     if (Auth.isDemoMode()) return _demo.get(fileId) || '';
+    if (thumbnailLink) return thumbnailLink;
     return `https://drive.google.com/thumbnail?id=${encodeURIComponent(fileId)}&sz=${size}`;
   }
 
