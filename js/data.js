@@ -69,6 +69,8 @@ const Data = (() => {
   }
 
   async function getFriends() {
+    // Sync any accepted requests first so pending_sent entries get promoted to accepted
+    await syncFriendAcceptances().catch(() => {});
     return (await _getFriendsFile()).friends || [];
   }
 
@@ -393,7 +395,7 @@ const Data = (() => {
   // Each post is a subfolder inside the circle folder, containing _post.json + media/doc files.
   // This avoids write conflicts — each user creates their own subfolder.
 
-  async function createCirclePost(circleFolderId, { caption = '' }) {
+  async function createCirclePost(circleFolderId, { caption = '', members = [] }) {
     const id = Utils.generateId('cpost');
     const postFolderId = await Drive.getOrCreateFolder(id, circleFolderId);
     const user = Auth.getCurrentUser();
@@ -404,6 +406,25 @@ const Data = (() => {
       createdAt:   new Date().toISOString()
     };
     await Drive.createJsonFile('_post.json', meta, postFolderId);
+
+    // Notify other circle members about the new post
+    const others = (members || []).filter(m => m.email !== user.email);
+    if (others.length > 0) {
+      try {
+        const notifPayload = {
+          type:          'mc_circle_post',
+          postId:        id,
+          circleFolderId,
+          fromEmail:     user.email,
+          fromName:      user.name || user.email,
+          caption,
+          createdAt:     meta.createdAt
+        };
+        const notifFileId = await Drive.upsertJsonFile(`mc-circpost-${id}.json`, notifPayload, _folders.rootId);
+        await Promise.all(others.map(m => Drive.shareWithEmail(notifFileId, m.email, 'reader').catch(() => {})));
+      } catch {}
+    }
+
     return { ...meta, postFolderId };
   }
 
@@ -456,32 +477,34 @@ const Data = (() => {
     return `mc-freq-${targetEmail.replace(/[^a-zA-Z0-9]/g, '_')}.json`;
   }
 
-  async function sendFriendRequest(email, displayName = '') {
+  async function sendFriendRequest(email) {
     const data = await _getFriendsFile();
     if (data.friends.find(f => f.email === email)) return; // already in list
     const user = Auth.getCurrentUser();
     const reqPayload = {
-      type: 'mc_friend_request',
-      fromEmail: user.email,
-      fromName:  user.name || user.email,
-      toEmail:   email,
-      sentAt:    new Date().toISOString()
+      type:        'mc_friend_request',
+      fromEmail:   user.email,
+      fromName:    user.name  || user.email,
+      fromPicture: user.picture || null,
+      toEmail:     email,
+      sentAt:      new Date().toISOString()
     };
     const key    = _freqKey(email);
     const fileId = await Drive.upsertJsonFile(key, reqPayload, _folders.rootId);
     await Drive.shareWithEmail(fileId, email, 'reader').catch(() => {});
-    data.friends.push({ email, displayName: displayName || email, addedAt: new Date().toISOString(), status: 'pending_sent' });
+    // Use email as placeholder; displayName is updated when they accept
+    data.friends.push({ email, displayName: email, addedAt: new Date().toISOString(), status: 'pending_sent' });
     await Drive.upsertJsonFile('friends.json', data, _folders.contactsFolderId);
   }
 
   async function getIncomingFriendRequests() {
     try {
-      const files = await Drive.listSharedFilesWithName('mc-freq-');
-      const me    = Auth.getCurrentUser();
-      const declined = await _getDeclinedRequestIds();
+      const files   = await Drive.listSharedFilesWithName('mc-freq-');
+      const me      = Auth.getCurrentUser();
+      const handled = await _getHandledNotifIds();
       const reqs = await Promise.all(files.map(async f => {
         try {
-          if (declined.includes(f.id)) return null;
+          if (handled.includes(f.id)) return null;
           const d = await Drive.readJsonFile(f.id);
           if (d.type !== 'mc_friend_request') return null;
           if (d.toEmail !== me.email) return null;
@@ -492,29 +515,134 @@ const Data = (() => {
     } catch { return []; }
   }
 
-  async function _getDeclinedRequestIds() {
+  async function getIncomingCircleNotifications() {
     try {
-      const f = await Drive.findFile('declined-requests.json', _folders.rootId);
+      const files   = await Drive.listSharedFilesWithName('mc-circpost-');
+      const handled = await _getHandledNotifIds();
+      const notifs = await Promise.all(files.map(async f => {
+        try {
+          if (handled.includes(f.id)) return null;
+          const d = await Drive.readJsonFile(f.id);
+          if (d.type !== 'mc_circle_post') return null;
+          return { ...d, fileId: f.id };
+        } catch { return null; }
+      }));
+      return notifs.filter(Boolean);
+    } catch { return []; }
+  }
+
+  async function getNotifications() {
+    const [friendReqs, circleNotifs] = await Promise.all([
+      getIncomingFriendRequests(),
+      getIncomingCircleNotifications()
+    ]);
+    return { friendReqs, circleNotifs, total: friendReqs.length + circleNotifs.length };
+  }
+
+  // General-purpose "handled notifications" list — covers friend requests, acceptances, circle posts.
+  async function _getHandledNotifIds() {
+    try {
+      const f = await Drive.findFile('handled-notifs.json', _folders.rootId);
       if (!f) return [];
       const d = await Drive.readJsonFile(f.id);
       return d.ids || [];
     } catch { return []; }
   }
 
-  async function acceptFriendRequest(fromEmail, fromName) {
-    const data = await _getFriendsFile();
-    if (!data.friends.find(f => f.email === fromEmail)) {
-      data.friends.push({ email: fromEmail, displayName: fromName || fromEmail, addedAt: new Date().toISOString(), status: 'accepted' });
-      await Drive.upsertJsonFile('friends.json', data, _folders.contactsFolderId);
+  async function _markNotifHandled(fileId) {
+    const ids = await _getHandledNotifIds();
+    if (!ids.includes(fileId)) {
+      ids.push(fileId);
+      await Drive.upsertJsonFile('handled-notifs.json', { ids }, _folders.rootId);
     }
   }
 
-  async function declineFriendRequest(fileId) {
-    const ids = await _getDeclinedRequestIds();
-    if (!ids.includes(fileId)) {
-      ids.push(fileId);
-      await Drive.upsertJsonFile('declined-requests.json', { ids }, _folders.rootId);
+  // Keep old name as alias for backwards compatibility
+  async function _getDeclinedRequestIds() { return _getHandledNotifIds(); }
+
+  async function acceptFriendRequest(fromEmail, fromName, fromPicture, requestFileId) {
+    const data = await _getFriendsFile();
+    const existing = data.friends.find(f => f.email === fromEmail);
+    if (!existing) {
+      data.friends.push({
+        email:       fromEmail,
+        displayName: fromName || fromEmail,
+        picture:     fromPicture || null,
+        addedAt:     new Date().toISOString(),
+        status:      'accepted'
+      });
+      await Drive.upsertJsonFile('friends.json', data, _folders.contactsFolderId);
+    } else if (existing.status !== 'accepted') {
+      existing.status      = 'accepted';
+      existing.displayName = fromName || existing.displayName;
+      if (fromPicture) existing.picture = fromPicture;
+      await Drive.upsertJsonFile('friends.json', data, _folders.contactsFolderId);
     }
+
+    // Mark the request as handled so it won't reappear
+    if (requestFileId) await _markNotifHandled(requestFileId).catch(() => {});
+
+    // Create acceptance notification so the requester knows we accepted
+    const user = Auth.getCurrentUser();
+    const payload = {
+      type:        'mc_friend_accepted',
+      fromEmail:   user.email,
+      fromName:    user.name    || user.email,
+      fromPicture: user.picture || null,
+      toEmail:     fromEmail,
+      acceptedAt:  new Date().toISOString()
+    };
+    try {
+      const key    = `mc-freqacc-${fromEmail.replace(/[^a-zA-Z0-9]/g, '_')}.json`;
+      const fileId = await Drive.upsertJsonFile(key, payload, _folders.rootId);
+      await Drive.shareWithEmail(fileId, fromEmail, 'reader').catch(() => {});
+    } catch {}
+  }
+
+  async function declineFriendRequest(fileId) {
+    await _markNotifHandled(fileId);
+  }
+
+  // Check sharedWithMe for mc-freqacc-* files and promote pending_sent entries to accepted.
+  async function syncFriendAcceptances() {
+    try {
+      const files = await Drive.listSharedFilesWithName('mc-freqacc-');
+      const me    = Auth.getCurrentUser();
+      const handled = await _getHandledNotifIds();
+      const data  = await _getFriendsFile();
+      let changed = false;
+
+      for (const f of files) {
+        if (handled.includes(f.id)) continue;
+        try {
+          const d = await Drive.readJsonFile(f.id);
+          if (d.type !== 'mc_friend_accepted' || d.toEmail !== me.email) continue;
+          const friend = data.friends.find(fr => fr.email === d.fromEmail);
+          if (friend) {
+            if (friend.status === 'pending_sent' || !friend.displayName || friend.displayName === friend.email) {
+              friend.status      = 'accepted';
+              friend.displayName = d.fromName || d.fromEmail;
+              if (d.fromPicture) friend.picture = d.fromPicture;
+              changed = true;
+            }
+          } else {
+            // They accepted but we don't have them in our list yet — add them
+            data.friends.push({
+              email:       d.fromEmail,
+              displayName: d.fromName || d.fromEmail,
+              picture:     d.fromPicture || null,
+              addedAt:     new Date().toISOString(),
+              status:      'accepted'
+            });
+            changed = true;
+          }
+          // Mark this acceptance file as handled
+          await _markNotifHandled(f.id).catch(() => {});
+        } catch {}
+      }
+
+      if (changed) await Drive.upsertJsonFile('friends.json', data, _folders.contactsFolderId);
+    } catch {}
   }
 
   /* ── PIN ────────────────────────────────────── */
@@ -557,7 +685,8 @@ const Data = (() => {
     getProfile,   saveProfile,
     getSettings,  saveSettings,
     getFriends,   addFriend,    removeFriend,
-    sendFriendRequest, getIncomingFriendRequests, acceptFriendRequest, declineFriendRequest,
+    sendFriendRequest, getIncomingFriendRequests, getIncomingCircleNotifications, getNotifications,
+    acceptFriendRequest, declineFriendRequest, syncFriendAcceptances,
     getBlocked,   blockUser,    unblockUser,
     listCircles,  createCircle, getCircle,  updateCircleMeta,  deleteCircle,
     addMemberToCircle, removeMemberFromCircle,
