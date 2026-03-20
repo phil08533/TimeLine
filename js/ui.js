@@ -247,6 +247,22 @@ const UI = (() => {
     }
   }
 
+  // Loads the first media file from a folder and sets it as the card cover image.
+  // thumbEl is the .coll-thumb div; called after the card is in the DOM.
+  async function _loadCardCover(folderId, thumbEl) {
+    try {
+      const files = await Drive.listFiles(folderId);
+      const first = files.find(f => f.mimeType?.startsWith('image/') || f.mimeType?.startsWith('video/'));
+      if (!first) return;
+      const img = document.createElement('img');
+      img.alt = '';
+      img.style.cssText = 'width:100%;height:100%;object-fit:cover';
+      _loadThumbnail(img, first.id, first.thumbnailLink);
+      thumbEl.innerHTML = '';
+      thumbEl.appendChild(img);
+    } catch { /* leave emoji placeholder */ }
+  }
+
   /* ── Feed ───────────────────────────────────── */
 
   async function _renderFeed() {
@@ -493,19 +509,32 @@ const UI = (() => {
       grid.innerHTML = '';
       if (!circles.length) { empty.hidden = false; return; }
       circles.forEach(c => {
+        const user = Auth.getCurrentUser();
+        const isOwner = c.ownerEmail === user.email;
         const card = _el(`
           <div class="card coll-card">
-            <div class="coll-thumb" style="font-size:2.5rem">◎</div>
+            <div class="coll-thumb coll-thumb-cover">◎</div>
             <div class="card-body">
-              <h4>${Utils.escapeHtml(c.name)}</h4>
+              <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:.5rem">
+                <h4>${Utils.escapeHtml(c.name)}</h4>
+                ${isOwner ? `<button class="btn btn-ghost btn-sm card-edit-btn" title="Edit">✎</button>` : ''}
+              </div>
               <div class="card-meta">
                 <span>${c.members?.length || 0} member${c.members?.length !== 1 ? 's' : ''}</span>
-                <span>${c.addPolicy === 'any_member' ? 'Open adds' : 'Owner-managed'}</span>
+                <span>${c.addPolicy === 'any_member' ? 'Open' : 'Managed'}</span>
               </div>
-              ${c.description ? `<p style="font-size:.8rem;color:var(--muted);margin-top:.35rem">${Utils.escapeHtml(c.description)}</p>` : ''}
+              ${c.description ? `<p style="font-size:.78rem;color:var(--muted);margin-top:.35rem">${Utils.escapeHtml(c.description)}</p>` : ''}
             </div>
           </div>
         `);
+        const thumb = card.querySelector('.coll-thumb-cover');
+        _loadCardCover(c.folderId, thumb);
+        if (isOwner) {
+          card.querySelector('.card-edit-btn').addEventListener('click', e => {
+            e.stopPropagation();
+            _openEditCircleModal(c.folderId, c);
+          });
+        }
         card.addEventListener('click', () => navigate('circle-detail', { folderId: c.folderId }));
         grid.appendChild(card);
       });
@@ -653,6 +682,44 @@ const UI = (() => {
     });
   }
 
+  function _openEditCircleModal(folderId, circle) {
+    openModal(`
+      <h3>Edit Circle</h3>
+      <form id="mf" class="form-block">
+        <div class="form-field"><label>Name</label><input name="name" class="input" value="${Utils.escapeHtml(circle.name)}" required /></div>
+        <div class="form-field"><label>Description</label><input name="description" class="input" value="${Utils.escapeHtml(circle.description || '')}" /></div>
+        <div class="form-field">
+          <label>Who can add members?</label>
+          <select name="addPolicy" class="select-sm" style="width:100%">
+            <option value="owner_only" ${circle.addPolicy !== 'any_member' ? 'selected' : ''}>Only me (owner)</option>
+            <option value="any_member" ${circle.addPolicy === 'any_member' ? 'selected' : ''}>Any member</option>
+          </select>
+        </div>
+        <div class="modal-actions">
+          <button type="button" class="btn btn-ghost btn-sm modal-cancel-btn">Cancel</button>
+          <button type="submit" class="btn btn-primary btn-sm">Save</button>
+        </div>
+      </form>
+    `);
+    document.querySelector('.modal-cancel-btn').addEventListener('click', closeModal);
+    document.getElementById('mf').addEventListener('submit', async e => {
+      e.preventDefault();
+      const fd = new FormData(e.target);
+      Utils.showLoading();
+      try {
+        await Data.updateCircleMeta(folderId, {
+          name: fd.get('name'),
+          description: fd.get('description'),
+          addPolicy: fd.get('addPolicy')
+        });
+        closeModal();
+        _renderCircles();
+        Utils.showToast('Circle updated!');
+      } catch { Utils.showToast('Failed to update circle', 'error'); }
+      finally   { Utils.hideLoading(); }
+    });
+  }
+
   /* ── Collections ─────────────────────────────── */
 
   async function _renderCollections() {
@@ -666,20 +733,29 @@ const UI = (() => {
       const colls = await Data.listCollections();
       grid.innerHTML = '';
       if (!colls.length) { empty.hidden = false; return; }
-      colls.forEach(c => {
+      colls.filter(c => !c.isPost).forEach(c => {
         const card = _el(`
           <div class="card coll-card">
-            <div class="coll-thumb" style="font-size:2.5rem">▤</div>
+            <div class="coll-thumb coll-thumb-cover">▤</div>
             <div class="card-body">
-              <h4>${Utils.escapeHtml(c.name)}</h4>
+              <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:.5rem">
+                <h4>${Utils.escapeHtml(c.name)}</h4>
+                <button class="btn btn-ghost btn-sm card-edit-btn" title="Edit">✎</button>
+              </div>
               <div class="card-meta">
                 <span>${_sharingLabel(c.sharing)}</span>
                 ${c.allowCopying ? '<span>Copying ok</span>' : ''}
               </div>
-              ${c.description ? `<p style="font-size:.8rem;color:var(--muted);margin-top:.35rem">${Utils.escapeHtml(c.description)}</p>` : ''}
+              ${c.description ? `<p style="font-size:.78rem;color:var(--muted);margin-top:.35rem">${Utils.escapeHtml(c.description)}</p>` : ''}
             </div>
           </div>
         `);
+        const thumb = card.querySelector('.coll-thumb-cover');
+        _loadCardCover(c.folderId, thumb);
+        card.querySelector('.card-edit-btn').addEventListener('click', e => {
+          e.stopPropagation();
+          _openEditCollectionModal(c.folderId, c);
+        });
         card.addEventListener('click', () => navigate('collection-detail', { folderId: c.folderId }));
         grid.appendChild(card);
       });
@@ -811,6 +887,50 @@ const UI = (() => {
     });
   }
 
+  function _openEditCollectionModal(folderId, coll) {
+    openModal(`
+      <h3>Edit Collection</h3>
+      <form id="mf" class="form-block">
+        <div class="form-field"><label>Name</label><input name="name" class="input" value="${Utils.escapeHtml(coll.name)}" required /></div>
+        <div class="form-field"><label>Description</label><input name="description" class="input" value="${Utils.escapeHtml(coll.description || '')}" /></div>
+        <div class="form-field">
+          <label>Share with</label>
+          <select name="sharing" class="select-sm" style="width:100%">
+            <option value="friends"  ${coll.sharing === 'friends'  ? 'selected' : ''}>Friends</option>
+            <option value="circles"  ${coll.sharing === 'circles'  ? 'selected' : ''}>My circles</option>
+            <option value="everyone" ${coll.sharing === 'everyone' ? 'selected' : ''}>Anyone with link</option>
+            <option value="select"   ${coll.sharing === 'select'   ? 'selected' : ''}>Specific people</option>
+          </select>
+        </div>
+        <label style="display:flex;align-items:center;gap:.5rem;font-size:.875rem;cursor:pointer">
+          <input type="checkbox" name="allowCopying" ${coll.allowCopying ? 'checked' : ''} /> Allow others to copy files
+        </label>
+        <div class="modal-actions">
+          <button type="button" class="btn btn-ghost btn-sm modal-cancel-btn">Cancel</button>
+          <button type="submit" class="btn btn-primary btn-sm">Save</button>
+        </div>
+      </form>
+    `);
+    document.querySelector('.modal-cancel-btn').addEventListener('click', closeModal);
+    document.getElementById('mf').addEventListener('submit', async e => {
+      e.preventDefault();
+      const fd = new FormData(e.target);
+      Utils.showLoading();
+      try {
+        await Data.updateCollectionMeta(folderId, {
+          name:         fd.get('name'),
+          description:  fd.get('description'),
+          sharing:      fd.get('sharing'),
+          allowCopying: !!fd.get('allowCopying')
+        });
+        closeModal();
+        _renderCollections();
+        Utils.showToast('Collection updated!');
+      } catch { Utils.showToast('Failed to update collection', 'error'); }
+      finally   { Utils.hideLoading(); }
+    });
+  }
+
   /* ── New Post ────────────────────────────────── */
 
   function _openNewPostModal() {
@@ -910,6 +1030,7 @@ const UI = (() => {
   async function _renderFriends() {
     _on('add-friend-btn', 'click', _addFriend);
     _on('add-friend-email', 'keydown', e => { if (e.key === 'Enter') _addFriend(); });
+    _on('add-friend-name',  'keydown', e => { if (e.key === 'Enter') _addFriend(); });
 
     try {
       const [friends, blocked] = await Promise.all([Data.getFriends(), Data.getBlocked()]);
@@ -925,12 +1046,13 @@ const UI = (() => {
     list.innerHTML = '';
     empty.hidden = !!friends.length;
     friends.forEach(f => {
+      const addedLabel = f.addedAt ? Utils.formatRelativeTime(f.addedAt) : '';
       const row = _el(`
         <div class="person-row">
           <div class="avatar-sm">${(f.displayName || f.email)[0].toUpperCase()}</div>
           <div class="person-info">
             <div class="person-name">${Utils.escapeHtml(f.displayName || f.email)}</div>
-            <div class="person-email">${Utils.escapeHtml(f.email)}</div>
+            <div class="person-email">${Utils.escapeHtml(f.email)}${addedLabel ? ` <span style="opacity:.55">· added ${addedLabel}</span>` : ''}</div>
           </div>
           <div class="person-actions">
             <button class="btn btn-ghost btn-sm" data-action="block">Block</button>
@@ -972,14 +1094,17 @@ const UI = (() => {
   }
 
   async function _addFriend() {
-    const input = document.getElementById('add-friend-email');
-    const email = input.value.trim();
+    const emailInput = document.getElementById('add-friend-email');
+    const nameInput  = document.getElementById('add-friend-name');
+    const email = emailInput.value.trim();
+    const name  = nameInput?.value.trim() || '';
     if (!email || !email.includes('@')) { Utils.showToast('Enter a valid email', 'error'); return; }
     try {
-      await Data.addFriend(email);
-      input.value = '';
+      await Data.addFriend(email, name);
+      emailInput.value = '';
+      if (nameInput) nameInput.value = '';
       _renderFriends();
-      Utils.showToast(`${email} added!`);
+      Utils.showToast(`${name || email} added!`);
     } catch { Utils.showToast('Failed to add friend', 'error'); }
   }
 
@@ -1004,9 +1129,40 @@ const UI = (() => {
         avatar.textContent = (profile.displayName || user?.name || '?')[0].toUpperCase();
       }
 
-      // Store profile in closure for edit form
-      avatar._profile = profile;
+      // Load stats asynchronously so the profile card renders immediately
+      _renderProfileStats();
     } catch { Utils.showToast('Failed to load profile', 'error'); }
+  }
+
+  async function _renderProfileStats() {
+    // Inject (or update) a stats row just below the profile card
+    let statsEl = document.getElementById('profile-stats');
+    if (!statsEl) {
+      statsEl = document.createElement('div');
+      statsEl.id = 'profile-stats';
+      statsEl.className = 'profile-stats-row';
+      const profileView = document.getElementById('profile-view');
+      profileView.insertAdjacentElement('afterend', statsEl);
+    }
+    statsEl.innerHTML = '<span class="muted-text small">Loading…</span>';
+
+    try {
+      const [circles, colls, friends, posts] = await Promise.all([
+        Data.listCircles(),
+        Data.listCollections(),
+        Data.getFriends(),
+        Data.listOwnPosts()
+      ]);
+      const nonPostColls = colls.filter(c => !c.isPost);
+      statsEl.innerHTML = `
+        <div class="profile-stat"><span class="profile-stat-n">${circles.length}</span><span class="profile-stat-l">Circles</span></div>
+        <div class="profile-stat"><span class="profile-stat-n">${nonPostColls.length}</span><span class="profile-stat-l">Collections</span></div>
+        <div class="profile-stat"><span class="profile-stat-n">${posts.length}</span><span class="profile-stat-l">Posts</span></div>
+        <div class="profile-stat"><span class="profile-stat-n">${friends.length}</span><span class="profile-stat-l">Friends</span></div>
+      `;
+    } catch {
+      statsEl.innerHTML = '';
+    }
   }
 
   async function _openProfileEdit() {

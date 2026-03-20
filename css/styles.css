@@ -617,6 +617,37 @@ textarea.input { resize: vertical; min-height: 80px; }
 }
 @keyframes spin { to { transform: rotate(360deg); } }
 
+/* ── Profile stats ── */
+.profile-stats-row {
+  display: flex; gap: 0; flex-wrap: wrap;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--card-radius, var(--radius));
+  margin-bottom: 1.5rem;
+  overflow: hidden;
+}
+.profile-stat {
+  flex: 1; min-width: 80px;
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  padding: .9rem .5rem;
+  border-right: 1px solid var(--border);
+}
+.profile-stat:last-child { border-right: none; }
+.profile-stat-n { font-size: 1.3rem; font-weight: 700; line-height: 1.2; }
+.profile-stat-l { font-size: .72rem; color: var(--muted); text-transform: uppercase; letter-spacing: .05em; margin-top: .1rem; }
+
+/* ── Card edit button ── */
+.card-edit-btn {
+  flex-shrink: 0;
+  padding: .15rem .4rem !important;
+  font-size: .85rem !important;
+  color: var(--muted) !important;
+  border-color: transparent !important;
+  opacity: 0;
+  transition: opacity .15s;
+}
+.coll-card:hover .card-edit-btn { opacity: 1; }
+
 /* ── My Data filter pills ── */
 .my-data-filters { display: flex; gap: .4rem; flex-wrap: wrap; margin-bottom: 1rem; }
 .filter-pill {
