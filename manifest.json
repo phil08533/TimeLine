@@ -1,0 +1,16 @@
+{
+  "name": "My Circle",
+  "short_name": "My Circle",
+  "description": "Private photo & file sharing via your Google Drive.",
+  "start_url": "./",
+  "display": "standalone",
+  "background_color": "#f8f8f5",
+  "theme_color": "#f8f8f5",
+  "icons": [
+    {
+      "src": "data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>◎</text></svg>",
+      "type": "image/svg+xml",
+      "sizes": "any"
+    }
+  ]
+}

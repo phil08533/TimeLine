@@ -24,7 +24,10 @@ const Drive = (() => {
       } finally {
         clearTimeout(timer);
       }
-      if (r.status === 401) throw Object.assign(new Error('Unauthorized'), { status: 401 });
+      if (r.status === 401) {
+        window.dispatchEvent(new CustomEvent('mc:session-expired'));
+        throw Object.assign(new Error('Unauthorized'), { status: 401 });
+      }
       if (r.status === 403) {
         const body = await r.clone().json().catch(() => ({}));
         const reason = body?.error?.errors?.[0]?.reason || '';

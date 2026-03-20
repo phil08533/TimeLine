@@ -394,6 +394,12 @@ textarea.input { resize: vertical; min-height: 80px; }
   border-radius: 99px;
   font-size: .8rem;
 }
+.chip-remove {
+  background: none; border: none; padding: 0 0 0 .15rem;
+  font-size: .9rem; line-height: 1; color: var(--muted);
+  cursor: pointer; opacity: .6;
+}
+.chip-remove:hover { opacity: 1; color: var(--danger, #c0392b); }
 
 /* ── People list ── */
 .people-list { display: flex; flex-direction: column; gap: .5rem; }
@@ -616,6 +622,9 @@ textarea.input { resize: vertical; min-height: 80px; }
   .topbar-nav { gap: 0; }
   .nav-link { padding: .3rem .45rem; font-size: .78rem; }
   .brand-name-sm { display: none; }
+  .topbar-nav { overflow-x: auto; -webkit-overflow-scrolling: touch; scrollbar-width: none; }
+  .topbar-nav::-webkit-scrollbar { display: none; }
+  .nav-link { white-space: nowrap; }
   #main { padding: 1.25rem .75rem; }
   .media-grid { grid-template-columns: repeat(auto-fill, minmax(120px, 1fr)); gap: .4rem; }
   .card-grid { grid-template-columns: 1fr 1fr; gap: .65rem; }
