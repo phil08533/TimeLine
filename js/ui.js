@@ -194,7 +194,11 @@ const UI = (() => {
       const sharedFolders = await Data.getFeedFolders();
       grid.innerHTML = '';
 
-      if (!sharedFolders.length) { empty.hidden = false; return; }
+      if (!sharedFolders.length) {
+        empty.hidden = false;
+        empty.querySelector('p').textContent = 'Your feed is empty. Add friends and ask them to share collections with you.';
+        return;
+      }
 
       const items = [];
       await Promise.all(sharedFolders.map(async folder => {
@@ -203,19 +207,27 @@ const UI = (() => {
           files.filter(f => f.mimeType?.startsWith('image/') || f.mimeType?.startsWith('video/')).forEach(f => {
             items.push({ file: f, folder, owner: folder.owners?.[0] });
           });
-        } catch {}
+        } catch (err) {
+          console.warn('Feed: could not load folder', folder.id, err);
+        }
       }));
 
       if (!items.length) { empty.hidden = false; return; }
+
+      // Newest first
+      items.sort((a, b) => new Date(b.file.createdTime) - new Date(a.file.createdTime));
 
       items.forEach(({ file, folder, owner }) => {
         const el = _el(`
           <div class="media-item">
             <img src="${Drive.getMediaUrl(file.id)}" alt="" loading="lazy" />
-            <div class="media-overlay"><span>${Utils.escapeHtml(owner?.displayName || 'Friend')}</span></div>
+            <div class="media-overlay">
+              <span>${Utils.escapeHtml(owner?.displayName || 'Friend')}</span>
+              <span class="media-time">${Utils.formatRelativeTime(file.createdTime)}</span>
+            </div>
           </div>
         `);
-        el.addEventListener('click', () => openLightbox(file.id, folder.id));
+        el.addEventListener('click', () => openLightbox(file.id, folder.id, { canCopy: true }));
         grid.appendChild(el);
       });
     } catch (err) {
@@ -314,7 +326,7 @@ const UI = (() => {
 
       media.forEach(f => {
         const el = _el(`<div class="media-item"><img src="${Drive.getMediaUrl(f.id)}" alt="" loading="lazy" /></div>`);
-        el.addEventListener('click', () => openLightbox(f.id, folderId));
+        el.addEventListener('click', () => openLightbox(f.id, folderId, { canDelete: isOwner }));
         grid.appendChild(el);
       });
     } catch (err) {
@@ -461,7 +473,7 @@ const UI = (() => {
 
       media.forEach(f => {
         const el = _el(`<div class="media-item"><img src="${Drive.getMediaUrl(f.id)}" alt="" loading="lazy" /></div>`);
-        el.addEventListener('click', () => openLightbox(f.id, folderId));
+        el.addEventListener('click', () => openLightbox(f.id, folderId, { canDelete: true }));
         grid.appendChild(el);
       });
     } catch (err) {
@@ -773,7 +785,7 @@ const UI = (() => {
 
   /* ── Lightbox ─────────────────────────────────── */
 
-  async function openLightbox(fileId, collectionFolderId) {
+  async function openLightbox(fileId, collectionFolderId, opts = {}) {
     const lb = document.getElementById('lightbox');
     lb.hidden = false;
     document.getElementById('lightbox-img').src = Drive.getMediaUrl(fileId);
@@ -816,6 +828,44 @@ const UI = (() => {
       } catch { commArea.innerHTML = ''; }
     }
     refreshComments();
+
+    // Save to Drive (friends' shared files)
+    if (opts.canCopy) {
+      const copyBtn = _el(`<button class="btn btn-ghost btn-sm">Save to Drive</button>`);
+      copyBtn.addEventListener('click', async () => {
+        copyBtn.disabled = true;
+        copyBtn.textContent = 'Saving…';
+        try {
+          const folders = Data.getFolders();
+          await Drive.copyFile(fileId, folders.rootId);
+          Utils.showToast('Saved to your Drive!');
+          copyBtn.textContent = 'Saved ✓';
+        } catch {
+          Utils.showToast('Could not save file', 'error');
+          copyBtn.disabled = false;
+          copyBtn.textContent = 'Save to Drive';
+        }
+      });
+      reactBar.appendChild(copyBtn);
+    }
+
+    // Delete own file
+    if (opts.canDelete) {
+      const delBtn = _el(`<button class="btn btn-ghost btn-sm danger-btn">Delete</button>`);
+      delBtn.addEventListener('click', async () => {
+        if (!confirm('Delete this file?')) return;
+        try {
+          await Drive.deleteFile(fileId);
+          closeLightbox();
+          Utils.showToast('File deleted');
+          if (_currentPage === 'collection-detail') _renderCollectionDetail(_currentCollFolderId);
+          else if (_currentPage === 'circle-detail') _renderCircleDetail(_currentCircleFolderId);
+        } catch {
+          Utils.showToast('Could not delete file', 'error');
+        }
+      });
+      reactBar.appendChild(delBtn);
+    }
 
     const form  = document.getElementById('lightbox-comment-form');
     const input = document.getElementById('lightbox-comment-input');

@@ -10,6 +10,7 @@
 img, video { max-width: 100%; display: block; }
 button { cursor: pointer; font-family: inherit; }
 a { color: inherit; text-decoration: none; }
+[hidden] { display: none !important; }
 
 /* ── Base color variables (paper default) ── */
 :root {
@@ -297,10 +298,11 @@ details[open] .auth-setup-toggle::before { content: '▾ '; }
   background: linear-gradient(to top, rgba(0,0,0,.45) 0%, transparent 55%);
   opacity: 0;
   transition: opacity .2s;
-  display: flex; align-items: flex-end; padding: .5rem;
+  display: flex; align-items: flex-end; justify-content: space-between; padding: .5rem;
   color: #fff; font-size: .75rem;
 }
 .media-item:hover .media-overlay { opacity: 1; }
+.media-time { opacity: .75; font-size: .7rem; }
 
 /* ── Buttons ── */
 .btn {
