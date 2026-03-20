@@ -46,9 +46,30 @@ const Auth = (() => {
   }
 
   function _getConfig() {
+    // Allow runtime-configured Client ID (stored by setup UI)
+    const storedId = localStorage.getItem('mc_client_id');
+    if (storedId && storedId.includes('.apps.googleusercontent.com')) {
+      return Object.assign({}, typeof CONFIG !== 'undefined' ? CONFIG : {}, { GOOGLE_CLIENT_ID: storedId });
+    }
     if (typeof CONFIG === 'undefined') return null;
     if (!CONFIG.GOOGLE_CLIENT_ID || CONFIG.GOOGLE_CLIENT_ID.startsWith('YOUR_')) return null;
     return CONFIG;
+  }
+
+  function setClientId(clientId) {
+    if (!clientId || !clientId.includes('.apps.googleusercontent.com')) return false;
+    localStorage.setItem('mc_client_id', clientId.trim());
+    _tokenClient = null; // reset so it re-initialises with new ID
+    return true;
+  }
+
+  function clearClientId() {
+    localStorage.removeItem('mc_client_id');
+    _tokenClient = null;
+  }
+
+  function hasRealCredentials() {
+    return !!_getConfig();
   }
 
   /* ── Sign In ───────────────────────────────────── */
@@ -209,6 +230,9 @@ const Auth = (() => {
     getAccessToken,
     getCurrentUser,
     isSignedIn,
-    isDemoMode
+    isDemoMode,
+    setClientId,
+    clearClientId,
+    hasRealCredentials
   };
 })();
