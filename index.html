@@ -40,6 +40,7 @@
         </svg>
         Sign in with Google
       </button>
+      <button id="demo-btn" class="btn btn-ghost btn-sm" hidden>Try Demo</button>
       <p class="auth-note" id="auth-note"></p>
 
       <details id="setup-section" class="auth-setup" hidden>
@@ -69,6 +70,11 @@
 
   <!-- APP SHELL -->
   <div id="app-shell" class="screen">
+
+    <div id="demo-banner" class="demo-banner" hidden>
+      Demo mode — your data is stored locally in this browser, not in Google Drive.
+      <a href="#" id="demo-sign-in-link" class="link">Sign in with Google</a> to sync for real.
+    </div>
 
     <header class="topbar">
       <a href="#feed" class="topbar-brand">
@@ -283,23 +289,25 @@
       <!-- ABOUT -->
       <section id="page-about" class="page" data-page="about" hidden>
         <div class="page-header">
+          <a href="#settings" class="btn btn-ghost btn-sm">← Settings</a>
           <h2>About</h2>
         </div>
         <div class="prose">
           <h3>You own your data.</h3>
-          <p>My Circle is a social sharing app with no backend. Every photo, file, and circle you create lives exclusively in <em>your</em> Google Drive — not on our servers, not in our database, not accessible to us.</p>
-          <p>When you share something with a circle, you're sharing a Drive folder directly with those people via Google's own permission system. When they view it, they're reading from your Drive. Delete it, and it's gone.</p>
+          <p>My Circle is a private photo &amp; file sharing app with no backend. Every photo, file, and circle you create lives exclusively in <em>your</em> Google Drive — not on our servers, not in our database, not accessible to us.</p>
+          <p>When you share something with a circle, you're sharing a Drive folder directly with those people via Google's own permission system. When they view it, they're reading from your Drive. Delete it, and it's gone everywhere.</p>
           <h3>How it works</h3>
           <ul>
             <li>Circles and collections are folders in your Drive under <code>mycircle/</code></li>
-            <li>Sharing = Google Drive's native share permissions</li>
-            <li>Comments use Google Drive's built-in Comments API (stored on the file itself)</li>
+            <li>Sharing = Google Drive's native share permissions — no middleman</li>
+            <li>Comments use the Google Drive Comments API, stored on the file itself</li>
             <li>Likes are a <code>reactions.json</code> file inside each collection folder</li>
+            <li>Your friend list lives in <code>mycircle/contacts/friends.json</code> — readable only by you</li>
           </ul>
-          <h3>License</h3>
-          <p>MIT License. Free to use, modify, and distribute.</p>
           <h3>Privacy</h3>
-          <p>We request the <code>drive</code> scope to enable comments and shared folder access. We only create and read files inside the <code>mycircle/</code> folder we create for you.</p>
+          <p>We request the <code>drive</code> scope to read and write files in your Drive. We only touch files inside the <code>mycircle/</code> folder we create for you. OAuth tokens are stored in <code>sessionStorage</code> only — they are cleared when you close the tab. No telemetry, no analytics, no tracking of any kind.</p>
+          <h3>License</h3>
+          <p>MIT License — free to use, modify, and self-host. <a href="https://github.com/phil08533/TimeLine" target="_blank" rel="noopener" class="link">View source on GitHub →</a></p>
         </div>
       </section>
 

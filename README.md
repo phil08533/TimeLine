@@ -32,15 +32,16 @@ Progress is tracked here. Each stage is pushed separately for review.
 | 3 | **Friends** — add by email, remove, block/unblock | ✅ Done |
 | 4 | **Collections** — create albums, upload files, set sharing | ✅ Done |
 | 5 | **Circles** — group folders, invite members, upload | ✅ Done |
-| 6 | **Feed** — see files friends have shared with you | 🔧 Needs fix |
-| 7 | **Copy & manage** — copy friends' files, delete your own, storage viewer | [ ] Not started |
-| 8 | **Sign-in screen** — clean login UX, site-owner Client ID setup | 🔧 In progress |
+| 6 | **Feed** — see files friends have shared with you | ✅ Done |
+| 7 | **Copy & manage** — copy friends' files, delete your own, storage viewer | ✅ Done |
+| 8 | **Sign-in screen** — clean login UX, site-owner Client ID setup | ✅ Done |
 | 9 | **Theme & polish** — visual themes, colour picker, mobile UX | ✅ Done |
-| 10 | **About & licensing** — ownership pitch, MIT license, how it works | [ ] Not started |
+| 10 | **About & licensing** — ownership pitch, MIT license, how it works | ✅ Done |
 
 ### What "basically working" means
-Stages 1–6 + 8 complete. User can sign in, set up a profile, add friends,
-create circles and collections, upload files, and see what friends share —
+All 10 stages complete. User can sign in (or try a local demo), set up a profile,
+add friends, create circles and collections, upload files, see what friends share,
+copy friends' files to their own Drive, and delete their own files —
 all without touching a config file or knowing what JSON is.
 
 ---

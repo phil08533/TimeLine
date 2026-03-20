@@ -14,6 +14,10 @@ const UI = (() => {
   function boot() {
     Auth.init({ onSignIn: _onSignIn, onSignOut: _onSignOut });
     document.getElementById('sign-in-btn').addEventListener('click', () => Auth.signIn());
+    document.getElementById('demo-btn').addEventListener('click', () => Auth.signIn());
+
+    const demoSignInLink = document.getElementById('demo-sign-in-link');
+    if (demoSignInLink) demoSignInLink.addEventListener('click', e => { e.preventDefault(); Auth.signOut(); });
 
     _initSetupUI();
 
@@ -26,12 +30,20 @@ const UI = (() => {
     const saveBtn       = document.getElementById('save-client-id-btn');
     const clearBtn      = document.getElementById('clear-client-id-btn');
     const statusEl      = document.getElementById('setup-status');
+    const authNote      = document.getElementById('auth-note');
+    const demoBtn       = document.getElementById('demo-btn');
 
     if (!setupSection) return;
 
-    // Show setup panel only when no Client ID is configured
-    if (!Auth.hasRealCredentials()) {
+    const hasCredentials = Auth.hasRealCredentials();
+
+    if (!hasCredentials) {
+      // No Google Client ID — show demo option and setup panel
       setupSection.hidden = false;
+      if (demoBtn) demoBtn.hidden = false;
+      if (authNote) authNote.textContent = 'No Google Client ID configured — Sign in will use a local demo account.';
+    } else {
+      if (authNote) authNote.textContent = 'Your photos stay in your Google Drive. We never see them.';
     }
 
     // Pre-fill if a Client ID is already saved in localStorage
@@ -71,6 +83,8 @@ const UI = (() => {
   async function _onSignIn(user) {
     _showScreen('app-shell');
     _updateNavAvatar(user);
+    const demoBanner = document.getElementById('demo-banner');
+    if (demoBanner) demoBanner.hidden = !Auth.isDemoMode();
     Utils.showLoading();
     try {
       // Hard 20 s cap — if Drive setup stalls the user still gets into the app
@@ -194,7 +208,11 @@ const UI = (() => {
       const sharedFolders = await Data.getFeedFolders();
       grid.innerHTML = '';
 
-      if (!sharedFolders.length) { empty.hidden = false; return; }
+      if (!sharedFolders.length) {
+        empty.hidden = false;
+        empty.querySelector('p').textContent = 'Your feed is empty. Add friends and ask them to share collections with you.';
+        return;
+      }
 
       const items = [];
       await Promise.all(sharedFolders.map(async folder => {
@@ -203,19 +221,27 @@ const UI = (() => {
           files.filter(f => f.mimeType?.startsWith('image/') || f.mimeType?.startsWith('video/')).forEach(f => {
             items.push({ file: f, folder, owner: folder.owners?.[0] });
           });
-        } catch {}
+        } catch (err) {
+          console.warn('Feed: could not load folder', folder.id, err);
+        }
       }));
 
       if (!items.length) { empty.hidden = false; return; }
+
+      // Newest first
+      items.sort((a, b) => new Date(b.file.createdTime) - new Date(a.file.createdTime));
 
       items.forEach(({ file, folder, owner }) => {
         const el = _el(`
           <div class="media-item">
             <img src="${Drive.getMediaUrl(file.id)}" alt="" loading="lazy" />
-            <div class="media-overlay"><span>${Utils.escapeHtml(owner?.displayName || 'Friend')}</span></div>
+            <div class="media-overlay">
+              <span>${Utils.escapeHtml(owner?.displayName || 'Friend')}</span>
+              <span class="media-time">${Utils.formatRelativeTime(file.createdTime)}</span>
+            </div>
           </div>
         `);
-        el.addEventListener('click', () => openLightbox(file.id, folder.id));
+        el.addEventListener('click', () => openLightbox(file.id, folder.id, { canCopy: true }));
         grid.appendChild(el);
       });
     } catch (err) {
@@ -314,7 +340,7 @@ const UI = (() => {
 
       media.forEach(f => {
         const el = _el(`<div class="media-item"><img src="${Drive.getMediaUrl(f.id)}" alt="" loading="lazy" /></div>`);
-        el.addEventListener('click', () => openLightbox(f.id, folderId));
+        el.addEventListener('click', () => openLightbox(f.id, folderId, { canDelete: isOwner }));
         grid.appendChild(el);
       });
     } catch (err) {
@@ -461,7 +487,7 @@ const UI = (() => {
 
       media.forEach(f => {
         const el = _el(`<div class="media-item"><img src="${Drive.getMediaUrl(f.id)}" alt="" loading="lazy" /></div>`);
-        el.addEventListener('click', () => openLightbox(f.id, folderId));
+        el.addEventListener('click', () => openLightbox(f.id, folderId, { canDelete: true }));
         grid.appendChild(el);
       });
     } catch (err) {
@@ -773,7 +799,7 @@ const UI = (() => {
 
   /* ── Lightbox ─────────────────────────────────── */
 
-  async function openLightbox(fileId, collectionFolderId) {
+  async function openLightbox(fileId, collectionFolderId, opts = {}) {
     const lb = document.getElementById('lightbox');
     lb.hidden = false;
     document.getElementById('lightbox-img').src = Drive.getMediaUrl(fileId);
@@ -816,6 +842,44 @@ const UI = (() => {
       } catch { commArea.innerHTML = ''; }
     }
     refreshComments();
+
+    // Save to Drive (friends' shared files)
+    if (opts.canCopy) {
+      const copyBtn = _el(`<button class="btn btn-ghost btn-sm">Save to Drive</button>`);
+      copyBtn.addEventListener('click', async () => {
+        copyBtn.disabled = true;
+        copyBtn.textContent = 'Saving…';
+        try {
+          const folders = Data.getFolders();
+          await Drive.copyFile(fileId, folders.rootId);
+          Utils.showToast('Saved to your Drive!');
+          copyBtn.textContent = 'Saved ✓';
+        } catch {
+          Utils.showToast('Could not save file', 'error');
+          copyBtn.disabled = false;
+          copyBtn.textContent = 'Save to Drive';
+        }
+      });
+      reactBar.appendChild(copyBtn);
+    }
+
+    // Delete own file
+    if (opts.canDelete) {
+      const delBtn = _el(`<button class="btn btn-ghost btn-sm danger-btn">Delete</button>`);
+      delBtn.addEventListener('click', async () => {
+        if (!confirm('Delete this file?')) return;
+        try {
+          await Drive.deleteFile(fileId);
+          closeLightbox();
+          Utils.showToast('File deleted');
+          if (_currentPage === 'collection-detail') _renderCollectionDetail(_currentCollFolderId);
+          else if (_currentPage === 'circle-detail') _renderCircleDetail(_currentCircleFolderId);
+        } catch {
+          Utils.showToast('Could not delete file', 'error');
+        }
+      });
+      reactBar.appendChild(delBtn);
+    }
 
     const form  = document.getElementById('lightbox-comment-form');
     const input = document.getElementById('lightbox-comment-input');
