@@ -268,20 +268,85 @@ const UI = (() => {
   let _feedAlbums = [];   // cached after load for filter re-renders
   let _feedFilter = 'all';
 
+  function _wireComposer() {
+    // De-duplicate by replacing the submit button node
+    const submitBtn = document.getElementById('composer-submit');
+    if (!submitBtn) return;
+    const freshSubmit = submitBtn.cloneNode(true);
+    submitBtn.parentNode.replaceChild(freshSubmit, submitBtn);
+
+    const fileInput   = document.getElementById('composer-files');
+    const caption     = document.getElementById('composer-caption');
+    const previews    = document.getElementById('composer-previews');
+    const sharingEl   = document.getElementById('composer-sharing');
+
+    // De-duplicate file input listener
+    const freshFile = fileInput.cloneNode(true);
+    fileInput.parentNode.replaceChild(freshFile, fileInput);
+
+    let _selectedFiles = [];
+
+    freshFile.addEventListener('change', () => {
+      _selectedFiles = Array.from(freshFile.files);
+      previews.innerHTML = '';
+      previews.hidden = !_selectedFiles.length;
+      _selectedFiles.forEach(f => {
+        const url  = URL.createObjectURL(f);
+        const wrap = _el(`<div class="composer-preview-item"><img src="${url}" alt="${Utils.escapeHtml(f.name)}" /></div>`);
+        previews.appendChild(wrap);
+      });
+    });
+
+    freshSubmit.addEventListener('click', async () => {
+      const text    = caption.value.trim();
+      const sharing = sharingEl.value;
+      if (!text && !_selectedFiles.length) {
+        Utils.showToast('Write something or add a photo first', 'error');
+        return;
+      }
+      freshSubmit.disabled = true;
+      freshSubmit.textContent = 'Posting…';
+      Utils.showLoading();
+      try {
+        const post = await Data.createPost(text, sharing);
+        if (_selectedFiles.length) {
+          await Promise.all(_selectedFiles.map(f => Drive.uploadMedia(f, post.folderId)));
+        }
+        caption.value = '';
+        previews.innerHTML = '';
+        previews.hidden = true;
+        freshFile.value = '';
+        _selectedFiles = [];
+        Utils.showToast('Posted!');
+        await _renderFeed();
+      } catch {
+        Utils.showToast('Failed to post', 'error');
+      } finally {
+        freshSubmit.disabled = false;
+        freshSubmit.textContent = 'Post';
+        Utils.hideLoading();
+      }
+    });
+  }
+
   async function _renderFeed() {
     const list  = document.getElementById('feed-list');
     const empty = document.getElementById('feed-empty');
     list.innerHTML = '<p class="muted-text">Loading…</p>';
     empty.hidden = true;
-    _on('new-post-btn', 'click', _openNewPostModal);
     _clearThumbBlobs();
 
-    // Wire up filter pills
+    // ── Inline post composer ──────────────────────────────
+    _wireComposer();
+
+    // Wire up filter pills (use _on equivalent via replacement to avoid duplicate listeners)
     document.querySelectorAll('#feed-filters .filter-pill').forEach(btn => {
-      btn.addEventListener('click', () => {
+      const fresh = btn.cloneNode(true);
+      btn.parentNode.replaceChild(fresh, btn);
+      fresh.addEventListener('click', () => {
         document.querySelectorAll('#feed-filters .filter-pill').forEach(b => b.classList.remove('active'));
-        btn.classList.add('active');
-        _feedFilter = btn.dataset.filter;
+        fresh.classList.add('active');
+        _feedFilter = fresh.dataset.filter;
         _paintFeedAlbums();
       });
     });
@@ -346,7 +411,7 @@ const UI = (() => {
       if (_feedFilter === 'friends') return !a._isOwn;
       if (_feedFilter === 'mine')    return a._isOwn;
       return true;
-    }).filter(a => a.files.length > 0);
+    }).filter(a => a.files.length > 0 || a.caption);
 
     if (!visible.length) {
       empty.hidden = false;
@@ -362,26 +427,31 @@ const UI = (() => {
       const count   = album.files.length;
       const timeStr = Utils.formatRelativeTime(album.sharedAt);
 
+      const coverHtml = cover ? `
+        <div class="feed-album-cover">
+          <img src="" alt="" loading="lazy" />
+          ${count > 1 ? `<span class="feed-album-count">${count} photos</span>` : ''}
+        </div>` : '';
+
+      const expandHint = count > 1
+        ? `<span class="feed-album-dot">·</span><span class="feed-album-expand-hint">tap to expand</span>` : '';
+
       const card = _el(`
-        <div class="feed-album-card">
-          <div class="feed-album-cover">
-            <img src="" alt="" loading="lazy" />
-            ${count > 1 ? `<span class="feed-album-count">${count} photos</span>` : ''}
-          </div>
+        <div class="feed-album-card${!cover ? ' feed-album-card--text' : ''}">
+          ${coverHtml}
           <div class="feed-album-meta">
-            <div class="feed-album-title">${Utils.escapeHtml(album.name)}</div>
             <div class="feed-album-byline">
               <span class="feed-album-sharer">${Utils.escapeHtml(album.sharer)}</span>
               <span class="feed-album-dot">·</span>
               <span class="feed-album-time">${timeStr}</span>
-              ${count > 1 ? `<span class="feed-album-dot">·</span><span class="feed-album-expand-hint">tap to expand</span>` : ''}
+              ${expandHint}
             </div>
             ${album.caption ? `<div class="feed-album-caption">${Utils.escapeHtml(album.caption)}</div>` : ''}
           </div>
         </div>
       `);
 
-      _loadThumbnail(card.querySelector('img'), cover.id, cover.thumbnailLink);
+      if (cover) _loadThumbnail(card.querySelector('img'), cover.id, cover.thumbnailLink);
 
       // Expanded grid (hidden by default for multi-photo albums)
       let expanded = false;
@@ -395,7 +465,7 @@ const UI = (() => {
         card.addEventListener('click', () => openLightbox(cover.id, album.id, {
           canCopy: !album._isOwn, canDelete: album._isOwn, thumbnailLink: cover.thumbnailLink
         }));
-      } else {
+      } else if (count > 1) {
         // Multi-photo album — click toggles grid
         card.style.cursor = 'pointer';
         card.addEventListener('click', () => {
