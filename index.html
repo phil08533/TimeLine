@@ -1,19 +1,9 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="en" data-theme="minimal" data-color="paper">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>TimeLine</title>
-
-  <!-- Fonts -->
-  <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Courier+Prime:wght@400;700&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
-
-  <!-- Styles -->
-  <link rel="stylesheet" href="css/styles.css">
-
-  <!-- Content Security Policy -->
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>My Circle</title>
   <meta http-equiv="Content-Security-Policy"
     content="default-src 'self';
              script-src 'self' https://apis.google.com https://accounts.google.com;
@@ -23,192 +13,318 @@
              media-src  'self' data: blob: https://drive.google.com;
              connect-src 'self' https://www.googleapis.com https://accounts.google.com;
              frame-src  https://accounts.google.com;">
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;600&family=Playfair+Display:wght@700&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="css/styles.css" />
 </head>
 <body>
 
-  <!-- SVG filter: hand-drawn roughen effect applied to post images -->
-  <svg aria-hidden="true" style="position:absolute;width:0;height:0;overflow:hidden" xmlns="http://www.w3.org/2000/svg">
-    <defs>
-      <filter id="roughen" x="-5%" y="-5%" width="110%" height="110%">
-        <feTurbulence type="fractalNoise" baseFrequency="0.035" numOctaves="4" result="noise" seed="5"/>
-        <feDisplacementMap in="SourceGraphic" in2="noise" scale="3" xChannelSelector="R" yChannelSelector="G"/>
-      </filter>
-    </defs>
-  </svg>
-
-  <!-- ── Auth Screen ───────────────────────────── -->
-  <div class="auth-screen" id="authScreen">
-    <div class="auth-content">
-      <div class="auth-title">TimeLine</div>
-      <p class="auth-subtitle">Share photos and thoughts with friends. Private by default.</p>
-      <button id="signInBtn" class="btn-primary">Sign In with Google</button>
-      <p class="auth-note" id="authNote">Demo mode — no Google credentials required</p>
+  <!-- AUTH SCREEN -->
+  <div id="auth-screen" class="screen active">
+    <div class="auth-inner">
+      <div class="brand">
+        <div class="brand-mark">◎</div>
+        <h1 class="brand-name">My Circle</h1>
+        <p class="brand-tagline">Share with the people who matter.</p>
+      </div>
+      <div class="auth-pitch">
+        <p>Everything lives in <strong>your</strong> Google Drive. No servers, no ads, no middleman — just your circles.</p>
+      </div>
+      <button id="sign-in-btn" class="btn btn-primary btn-lg">
+        <svg width="18" height="18" viewBox="0 0 18 18" fill="none">
+          <path d="M17.64 9.2c0-.637-.057-1.251-.164-1.84H9v3.481h4.844c-.209 1.125-.843 2.078-1.796 2.717v2.258h2.908C16.658 14.013 17.64 11.706 17.64 9.2z" fill="#4285F4"/>
+          <path d="M9 18c2.43 0 4.467-.806 5.956-2.18l-2.908-2.259c-.806.54-1.837.86-3.048.86-2.344 0-4.328-1.584-5.036-3.711H.957v2.332A8.997 8.997 0 0 0 9 18z" fill="#34A853"/>
+          <path d="M3.964 10.71A5.41 5.41 0 0 1 3.682 9c0-.593.102-1.17.282-1.71V4.958H.957A8.996 8.996 0 0 0 0 9c0 1.452.348 2.827.957 4.042l3.007-2.332z" fill="#FBBC05"/>
+          <path d="M9 3.58c1.321 0 2.508.454 3.44 1.345l2.582-2.58C13.463.891 11.426 0 9 0A8.997 8.997 0 0 0 .957 4.958L3.964 6.29C4.672 4.163 6.656 3.58 9 3.58z" fill="#EA4335"/>
+        </svg>
+        Sign in with Google
+      </button>
+      <p class="auth-note" id="auth-note">Demo mode — no credentials required</p>
     </div>
   </div>
 
-  <!-- ── Main App ───────────────────────────────── -->
-  <div id="appView" hidden>
+  <!-- APP SHELL -->
+  <div id="app-shell" class="screen">
 
-    <header>
-      <div class="logo">TimeLine</div>
-      <div class="header-actions">
-        <span class="user-badge" id="userBadge" title="Signed-in user">user</span>
-        <button id="signOutBtn">Sign Out</button>
+    <header class="topbar">
+      <a href="#feed" class="topbar-brand">
+        <span class="brand-mark-sm">◎</span>
+        <span class="brand-name-sm">My Circle</span>
+      </a>
+      <nav class="topbar-nav" id="topbar-nav">
+        <a href="#feed"        class="nav-link" data-page="feed">Feed</a>
+        <a href="#circles"     class="nav-link" data-page="circles">My Circles</a>
+        <a href="#collections" class="nav-link" data-page="collections">Collections</a>
+        <a href="#friends"     class="nav-link" data-page="friends">Friends</a>
+      </nav>
+      <div class="topbar-right">
+        <a href="#profile" class="nav-avatar-link" data-page="profile">
+          <span id="nav-avatar" class="nav-avatar">?</span>
+        </a>
       </div>
     </header>
 
-    <main class="app-container">
+    <main id="main">
 
-      <!-- Friends Sidebar -->
-      <section class="sidebar" aria-label="Friends">
-        <h3>Friends</h3>
-        <div class="friends-list" id="friendsList">
-          <p class="empty-text">No friends yet</p>
+      <!-- FEED -->
+      <section id="page-feed" class="page" data-page="feed">
+        <div class="page-header">
+          <h2>Feed</h2>
+          <select id="feed-filter" class="select-sm">
+            <option value="all">Everyone</option>
+          </select>
         </div>
-        <button id="addFriendBtn" class="full-width" style="margin-top:12px">+ Add Friend</button>
-      </section>
-
-      <!-- Compose -->
-      <section class="compose-section" aria-label="Create post">
-        <h3>Create</h3>
-
-        <!-- Tab bar -->
-        <div class="compose-tabs" role="tablist" aria-label="Post type">
-          <button class="compose-tab active" role="tab" aria-selected="true"  aria-controls="panelText"  data-tab="text">Post</button>
-          <button class="compose-tab"        role="tab" aria-selected="false" aria-controls="panelImage" data-tab="image">Image</button>
-        </div>
-
-        <!-- Text post panel -->
-        <div id="panelText" class="compose-panel" role="tabpanel">
-          <textarea
-            id="postText"
-            placeholder="What's on your mind?"
-            maxlength="500"
-            aria-label="Post content"
-            rows="4"
-          ></textarea>
-          <div class="char-counter"><span id="charCount">0</span>/500</div>
-
-          <div class="friend-selector">
-            <label>Send to friends:</label>
-            <div class="friends-checklist" id="textFriendsList" aria-label="Friends to share with">
-              <p class="empty-text">Add friends to share with them</p>
-            </div>
-          </div>
-
-          <label class="privacy-toggle">
-            <input type="checkbox" id="textPrivate"> Private (only you)
-          </label>
-
-          <div class="compose-actions">
-            <button id="cancelTextBtn" type="button">Cancel</button>
-            <button id="publishTextBtn" type="button" class="btn-primary">Post</button>
-          </div>
-        </div>
-
-        <!-- Image/video post panel -->
-        <div id="panelImage" class="compose-panel" role="tabpanel" hidden>
-          <div class="file-input-wrapper">
-            <input
-              type="file"
-              id="imageInput"
-              accept=".jpg,.jpeg,.png,.gif,.webp,.mp4,.webm"
-              aria-label="Select photo or video"
-            >
-            <label class="file-input-label" for="imageInput">
-              Click to select a photo or video
-            </label>
-          </div>
-
-          <div id="mediaPreview" aria-live="polite"></div>
-
-          <div class="friend-selector">
-            <label>Send to friends:</label>
-            <div class="friends-checklist" id="imageFriendsList" aria-label="Friends to share with">
-              <p class="empty-text">Add friends to share with them</p>
-            </div>
-          </div>
-
-          <label class="privacy-toggle">
-            <input type="checkbox" id="imagePrivate"> Private (only you)
-          </label>
-
-          <div class="compose-actions">
-            <button id="cancelImageBtn" type="button">Cancel</button>
-            <button id="publishImageBtn" type="button" class="btn-primary">Post</button>
-          </div>
+        <div id="feed-grid" class="media-grid"></div>
+        <div id="feed-empty" class="empty-state" hidden>
+          <p>Your feed is empty. Add friends and join circles to see their shared photos here.</p>
         </div>
       </section>
 
-      <!-- Timeline -->
-      <section class="timeline" id="timeline" aria-label="Timeline">
-        <div class="empty-state" id="emptyState">
-          <p>Your timeline is empty. Create your first post!</p>
+      <!-- MY CIRCLES -->
+      <section id="page-circles" class="page" data-page="circles" hidden>
+        <div class="page-header">
+          <h2>My Circles</h2>
+          <button class="btn btn-primary btn-sm" id="create-circle-btn">+ New Circle</button>
+        </div>
+        <div id="circles-grid" class="card-grid"></div>
+        <div id="circles-empty" class="empty-state" hidden>
+          <p>No circles yet. Create one and invite friends to share together.</p>
+        </div>
+      </section>
+
+      <!-- CIRCLE DETAIL -->
+      <section id="page-circle-detail" class="page" data-page="circle-detail" hidden>
+        <div class="page-header">
+          <button class="btn btn-ghost btn-sm" id="back-from-circle">← Circles</button>
+          <h2 id="circle-detail-name"></h2>
+          <div id="circle-detail-actions" class="page-header-actions"></div>
+        </div>
+        <div id="circle-members-strip" class="members-strip"></div>
+        <div id="circle-detail-grid" class="media-grid"></div>
+        <div id="circle-detail-empty" class="empty-state" hidden>
+          <p>Nothing shared here yet.</p>
+        </div>
+      </section>
+
+      <!-- COLLECTIONS -->
+      <section id="page-collections" class="page" data-page="collections" hidden>
+        <div class="page-header">
+          <h2>Collections</h2>
+          <button class="btn btn-primary btn-sm" id="create-collection-btn">+ New Collection</button>
+        </div>
+        <div id="collections-grid" class="card-grid"></div>
+        <div id="collections-empty" class="empty-state" hidden>
+          <p>No collections yet. Create one and share it with friends or circles.</p>
+        </div>
+      </section>
+
+      <!-- COLLECTION DETAIL -->
+      <section id="page-collection-detail" class="page" data-page="collection-detail" hidden>
+        <div class="page-header">
+          <button class="btn btn-ghost btn-sm" id="back-from-collection">← Collections</button>
+          <h2 id="collection-detail-name"></h2>
+          <div id="collection-detail-actions" class="page-header-actions"></div>
+        </div>
+        <div id="collection-detail-grid" class="media-grid"></div>
+      </section>
+
+      <!-- FRIENDS -->
+      <section id="page-friends" class="page" data-page="friends" hidden>
+        <div class="page-header">
+          <h2>Friends</h2>
+        </div>
+        <div class="section-block">
+          <h3>Add a Friend</h3>
+          <div class="input-row">
+            <input id="add-friend-email" type="email" class="input" placeholder="friend@example.com" />
+            <button id="add-friend-btn" class="btn btn-primary btn-sm">Add</button>
+          </div>
+        </div>
+        <div class="section-block">
+          <h3>Friends <span id="friends-count" class="badge">0</span></h3>
+          <div id="friends-list" class="people-list"></div>
+          <p id="friends-empty" class="muted-text" hidden>No friends added yet.</p>
+        </div>
+        <div class="section-block">
+          <h3>Blocked</h3>
+          <div id="blocked-list" class="people-list"></div>
+          <p id="blocked-empty" class="muted-text">Nobody blocked.</p>
+        </div>
+      </section>
+
+      <!-- PROFILE -->
+      <section id="page-profile" class="page" data-page="profile" hidden>
+        <div class="page-header">
+          <h2>Profile</h2>
+          <button class="btn btn-ghost btn-sm" id="edit-profile-btn">Edit</button>
+        </div>
+        <div class="profile-card" id="profile-view">
+          <div id="profile-avatar" class="avatar-xl">?</div>
+          <div class="profile-info">
+            <h3 id="profile-display-name">—</h3>
+            <p id="profile-handle" class="muted-text">@—</p>
+            <p id="profile-bio"></p>
+          </div>
+        </div>
+        <form id="profile-form" class="form-block" hidden>
+          <div class="form-field">
+            <label>Display name</label>
+            <input name="displayName" class="input" type="text" />
+          </div>
+          <div class="form-field">
+            <label>Handle <span class="muted-text">(no @)</span></label>
+            <input name="handle" class="input" type="text" />
+          </div>
+          <div class="form-field">
+            <label>Bio</label>
+            <textarea name="bio" class="input" rows="3"></textarea>
+          </div>
+          <div class="form-actions">
+            <button type="submit" class="btn btn-primary btn-sm">Save</button>
+            <button type="button" class="btn btn-ghost btn-sm" id="cancel-profile-btn">Cancel</button>
+          </div>
+        </form>
+        <div class="section-block">
+          <a href="#settings" class="btn btn-ghost btn-sm">Settings →</a>
+          <button id="sign-out-btn" class="btn btn-ghost btn-sm danger-btn">Sign out</button>
+        </div>
+      </section>
+
+      <!-- SETTINGS -->
+      <section id="page-settings" class="page" data-page="settings" hidden>
+        <div class="page-header">
+          <h2>Settings</h2>
+        </div>
+
+        <div class="section-block">
+          <h3>Visual Theme</h3>
+          <div class="theme-row" id="visual-theme-row">
+            <button class="theme-pill active" data-vtheme="minimal">Minimal</button>
+            <button class="theme-pill" data-vtheme="brutalist">Brutalist</button>
+            <button class="theme-pill" data-vtheme="soft">Soft</button>
+            <button class="theme-pill" data-vtheme="editorial">Editorial</button>
+          </div>
+        </div>
+
+        <div class="section-block">
+          <h3>Color</h3>
+          <div class="color-row" id="color-theme-row">
+            <button class="color-dot active" data-ctheme="paper"    title="Paper"    style="--dot-bg:#f8f8f5;--dot-border:#bbb"></button>
+            <button class="color-dot"        data-ctheme="midnight" title="Midnight" style="--dot-bg:#0f0f0f;--dot-border:#333"></button>
+            <button class="color-dot"        data-ctheme="forest"   title="Forest"   style="--dot-bg:#1a2e1a;--dot-border:#4a7c59"></button>
+            <button class="color-dot"        data-ctheme="coral"    title="Coral"    style="--dot-bg:#fff5f2;--dot-border:#e74c3c"></button>
+            <button class="color-dot"        data-ctheme="slate"    title="Slate"    style="--dot-bg:#e8f0fb;--dot-border:#4a90d9"></button>
+          </div>
+          <p id="color-theme-label" class="muted-text small">Paper</p>
+        </div>
+
+        <div class="section-block">
+          <h3>Sharing Defaults</h3>
+          <div class="setting-row">
+            <label>Default sharing</label>
+            <select id="default-sharing" class="select-sm">
+              <option value="friends">Friends only</option>
+              <option value="circles">Circles only</option>
+              <option value="everyone">Anyone with link</option>
+            </select>
+          </div>
+          <div class="setting-row">
+            <label>Allow copying my files</label>
+            <select id="allow-copying" class="select-sm">
+              <option value="friends">Friends only</option>
+              <option value="circles">Circle members</option>
+              <option value="everyone">Anyone</option>
+              <option value="nobody">Nobody</option>
+            </select>
+          </div>
+        </div>
+
+        <div class="section-block">
+          <h3>Storage</h3>
+          <div class="storage-wrap">
+            <div class="storage-bar-track">
+              <div id="storage-bar-fill" class="storage-bar-fill"></div>
+            </div>
+            <p id="storage-label" class="muted-text small">Loading…</p>
+          </div>
+          <div id="large-files-list"></div>
+        </div>
+
+        <div class="section-block">
+          <h3>About</h3>
+          <p class="muted-text">My Circle — MIT licensed. <a href="#about" class="link">Learn more →</a></p>
+        </div>
+      </section>
+
+      <!-- ABOUT -->
+      <section id="page-about" class="page" data-page="about" hidden>
+        <div class="page-header">
+          <h2>About</h2>
+        </div>
+        <div class="prose">
+          <h3>You own your data.</h3>
+          <p>My Circle is a social sharing app with no backend. Every photo, file, and circle you create lives exclusively in <em>your</em> Google Drive — not on our servers, not in our database, not accessible to us.</p>
+          <p>When you share something with a circle, you're sharing a Drive folder directly with those people via Google's own permission system. When they view it, they're reading from your Drive. Delete it, and it's gone.</p>
+          <h3>How it works</h3>
+          <ul>
+            <li>Circles and collections are folders in your Drive under <code>mycircle/</code></li>
+            <li>Sharing = Google Drive's native share permissions</li>
+            <li>Comments use Google Drive's built-in Comments API (stored on the file itself)</li>
+            <li>Likes are a <code>reactions.json</code> file inside each collection folder</li>
+          </ul>
+          <h3>License</h3>
+          <p>MIT License. Free to use, modify, and distribute.</p>
+          <h3>Privacy</h3>
+          <p>We request the <code>drive</code> scope to enable comments and shared folder access. We only create and read files inside the <code>mycircle/</code> folder we create for you.</p>
         </div>
       </section>
 
     </main>
-  </div><!-- /#appView -->
+  </div>
 
-  <!-- ── Modal: Add Friend ──────────────────────── -->
-  <div
-    class="modal"
-    id="addFriendModal"
-    role="dialog"
-    aria-modal="true"
-    aria-labelledby="addFriendTitle"
-    hidden
-  >
-    <div class="modal-content">
-      <div class="modal-header" id="addFriendTitle">Add Friend</div>
-      <input
-        type="email"
-        class="modal-input"
-        id="friendEmailInput"
-        placeholder="friend@example.com"
-        autocomplete="email"
-        aria-label="Friend email address"
-      >
-      <p class="modal-error" id="friendModalError" role="alert" hidden></p>
-      <div class="modal-buttons">
-        <button id="cancelFriendBtn" type="button">Cancel</button>
-        <button id="confirmAddFriendBtn" type="button" class="btn-primary">Add</button>
+  <!-- MODAL -->
+  <div id="modal-overlay" class="modal-overlay" hidden>
+    <div id="modal-box" class="modal-box" role="dialog" aria-modal="true">
+      <button id="modal-close" class="modal-close-btn">✕</button>
+      <div id="modal-content"></div>
+    </div>
+  </div>
+
+  <!-- LIGHTBOX -->
+  <div id="lightbox" class="lightbox" hidden>
+    <div class="lightbox-backdrop" id="lightbox-backdrop"></div>
+    <div class="lightbox-inner">
+      <button class="lightbox-close" id="lightbox-close">✕</button>
+      <img id="lightbox-img" src="" alt="" />
+      <div class="lightbox-meta">
+        <div id="lightbox-reactions" class="reactions-bar"></div>
+        <div id="lightbox-comments" class="comments-area"></div>
+        <form id="lightbox-comment-form" class="comment-form">
+          <input id="lightbox-comment-input" class="input" placeholder="Add a comment…" />
+          <button type="submit" class="btn btn-primary btn-sm">Post</button>
+        </form>
       </div>
     </div>
   </div>
 
-  <!-- ── Toast Container ────────────────────────── -->
-  <div id="toastContainer" aria-live="polite" aria-atomic="false"></div>
+  <!-- TOAST -->
+  <div id="toast-container" aria-live="polite" aria-atomic="false"></div>
 
-  <!-- ── Loading Overlay ────────────────────────── -->
-  <div id="loadingOverlay" role="status" aria-label="Loading" hidden>
+  <!-- LOADING -->
+  <div id="loading-overlay" hidden role="status" aria-label="Loading">
     <div class="spinner"></div>
   </div>
 
-  <!-- ── Scripts ────────────────────────────────── -->
-
-  <!--
-    Load user's config.js first (contains real CLIENT_ID & API_KEY).
-    Falls back to config.example.js (demo mode) if config.js is absent.
-  -->
-  <script>
-    // Attempt to load the real config; if it fails, set a flag
-    window._configLoadAttempted = true;
-  </script>
-  <script src="js/config.js" onerror="window._configMissing = true"></script>
   <script src="config.example.js"></script>
-
-  <!-- Google API Client Library -->
+  <script src="config.js" onerror="/* demo mode */"></script>
   <script src="https://apis.google.com/js/api.js" async defer></script>
-  <!-- Google Identity Services -->
   <script src="https://accounts.google.com/gsi/client" async defer></script>
-
-  <!-- App modules (order matters) -->
   <script src="js/utils.js"></script>
   <script src="js/auth.js"></script>
   <script src="js/drive.js"></script>
-  <script src="js/posts.js"></script>
+  <script src="js/data.js"></script>
+  <script src="js/theme.js"></script>
   <script src="js/ui.js"></script>
-
 </body>
 </html>

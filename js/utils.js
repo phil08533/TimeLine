@@ -1,4 +1,4 @@
-// js/utils.js — Shared helpers for TimeLine
+// js/utils.js — Shared helpers for My Circle
 'use strict';
 
 const Utils = (() => {
@@ -88,10 +88,19 @@ const Utils = (() => {
     return { ok: true, isVideo };
   }
 
+  /* ── Format bytes ────────────────────────────────── */
+
+  function formatBytes(bytes) {
+    if (!bytes || bytes === 0) return '0 B';
+    const units = ['B', 'KB', 'MB', 'GB', 'TB'];
+    const i = Math.floor(Math.log(bytes) / Math.log(1024));
+    return `${(bytes / Math.pow(1024, i)).toFixed(1)} ${units[i]}`;
+  }
+
   /* ── Toast Notifications ─────────────────────────── */
 
   function showToast(message, type = 'info', durationMs = 3500) {
-    const container = document.getElementById('toastContainer');
+    const container = document.getElementById('toast-container');
     if (!container) return;
 
     const toast = document.createElement('div');
@@ -112,12 +121,12 @@ const Utils = (() => {
   /* ── Loading Overlay ─────────────────────────────── */
 
   function showLoading() {
-    const el = document.getElementById('loadingOverlay');
+    const el = document.getElementById('loading-overlay');
     if (el) el.hidden = false;
   }
 
   function hideLoading() {
-    const el = document.getElementById('loadingOverlay');
+    const el = document.getElementById('loading-overlay');
     if (el) el.hidden = true;
   }
 
@@ -165,6 +174,7 @@ const Utils = (() => {
   return {
     escapeHtml,
     formatRelativeTime,
+    formatBytes,
     generateId,
     debounce,
     validateMediaFile,

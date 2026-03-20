@@ -1,512 +1,830 @@
-// js/ui.js — DOM rendering & event wiring for TimeLine
+// js/ui.js — SPA router + all page renderers for My Circle
 'use strict';
 
 const UI = (() => {
 
-  /* ── App-level state ──────────────────────────── */
-  let _friends   = [];   // array of friend objects
-  let _posts     = [];   // array of post objects
-  let _mediaFile = null; // staged file for image compose
+  /* ── State ──────────────────────────────────── */
 
-  // Debounced publish to prevent double-clicks
-  const _debouncedPublishText  = Utils.debounce(_doPublishText,  600);
-  const _debouncedPublishImage = Utils.debounce(_doPublishImage, 600);
+  let _currentPage = null;
+  let _currentCircleFolderId = null;
+  let _currentCollFolderId   = null;
 
-  /* ── Bootstrap ────────────────────────────────── */
+  /* ── Boot ───────────────────────────────────── */
 
-  async function init() {
-    _bindStaticEvents();
+  function boot() {
+    Auth.init({ onSignIn: _onSignIn, onSignOut: _onSignOut });
+    document.getElementById('sign-in-btn').addEventListener('click', () => Auth.signIn());
 
-    Auth.init({
-      onSignIn:  _handleSignIn,
-      onSignOut: _handleSignOut
-    });
-
-    // If already signed in from this session, restore app
-    if (Auth.isSignedIn()) {
-      await _handleSignIn(Auth.getCurrentUser());
+    const cfg = typeof CONFIG !== 'undefined' && CONFIG.GOOGLE_CLIENT_ID && !CONFIG.GOOGLE_CLIENT_ID.startsWith('YOUR_');
+    if (!cfg) {
+      document.getElementById('auth-note').textContent = 'Demo mode — no Google credentials configured';
+    } else {
+      document.getElementById('auth-note').textContent = '';
     }
+
+    if (Auth.isSignedIn()) _onSignIn(Auth.getCurrentUser());
   }
 
-  function _bindStaticEvents() {
-    // Auth
-    document.getElementById('signInBtn').addEventListener('click', () => Auth.signIn());
-    document.getElementById('signOutBtn').addEventListener('click', () => Auth.signOut());
-
-    // Compose tabs
-    document.querySelectorAll('.compose-tab').forEach(btn => {
-      btn.addEventListener('click', () => switchCompose(btn.dataset.tab));
-    });
-
-    // Character counter
-    document.getElementById('postText').addEventListener('input', _updateCharCount);
-
-    // Publish buttons
-    document.getElementById('publishTextBtn').addEventListener('click',  () => _debouncedPublishText());
-    document.getElementById('publishImageBtn').addEventListener('click', () => _debouncedPublishImage());
-
-    // Cancel buttons
-    document.getElementById('cancelTextBtn').addEventListener('click',  _clearTextCompose);
-    document.getElementById('cancelImageBtn').addEventListener('click', _clearImageCompose);
-
-    // File input
-    document.getElementById('imageInput').addEventListener('change', _previewMedia);
-
-    // Add friend modal
-    document.getElementById('addFriendBtn').addEventListener('click', openAddFriendModal);
-    document.getElementById('confirmAddFriendBtn').addEventListener('click', _doAddFriend);
-    document.getElementById('cancelFriendBtn').addEventListener('click', () => closeModal('addFriendModal'));
-    document.getElementById('friendEmailInput').addEventListener('keydown', e => {
-      if (e.key === 'Enter') _doAddFriend();
-    });
-
-    // Close modal on backdrop click
-    document.getElementById('addFriendModal').addEventListener('click', e => {
-      if (e.target === e.currentTarget) closeModal('addFriendModal');
-    });
-
-    // Escape key closes modals
-    document.addEventListener('keydown', e => {
-      if (e.key === 'Escape') closeModal('addFriendModal');
-    });
-  }
-
-  /* ── Auth transitions ─────────────────────────── */
-
-  async function _handleSignIn(user) {
-    updateUserBadge(user);
-
-    document.getElementById('authScreen').style.display = 'none';
-    document.getElementById('appView').hidden = false;
-
+  async function _onSignIn(user) {
+    _showScreen('app-shell');
+    _updateNavAvatar(user);
     Utils.showLoading();
     try {
-      await Posts.initUserData();
-      await _loadAllData();
+      await Data.init();
+      const settings = await Data.getSettings();
+      Theme.init(settings);
+      _syncSettingsUI(settings);
     } catch (err) {
-      console.error('Init error:', err);
-      Utils.showToast('Failed to load your data. Please try again.', 'error');
+      console.error('Init error', err);
+      Utils.showToast('Failed to initialise. Check your connection.', 'error');
     } finally {
       Utils.hideLoading();
     }
+    _setupRouter();
+    _navigate(window.location.hash.slice(1) || 'feed');
   }
 
-  function _handleSignOut() {
-    _friends = [];
-    _posts   = [];
-    _mediaFile = null;
-
-    document.getElementById('authScreen').style.display = '';
-    document.getElementById('appView').hidden = true;
-    document.getElementById('userBadge').textContent = 'user';
+  function _onSignOut() {
+    _showScreen('auth-screen');
+    _currentPage = null;
   }
 
-  async function _loadAllData() {
-    const [friends, posts] = await Promise.all([
-      Posts.loadFriends().catch(() => []),
-      Posts.loadOwnPosts().catch(() => [])
-    ]);
+  /* ── Screen / page helpers ─────────────────── */
 
-    _friends = friends;
-    _posts   = posts;
-
-    renderFriendsList();
-    renderFriendsChecklist('textFriendsList');
-    renderFriendsChecklist('imageFriendsList');
-    renderTimeline();
+  function _showScreen(id) {
+    document.querySelectorAll('.screen').forEach(s => s.classList.remove('active'));
+    document.getElementById(id).classList.add('active');
   }
 
-  /* ── User Badge ───────────────────────────────── */
-
-  function updateUserBadge(user) {
-    const badge = document.getElementById('userBadge');
-    badge.textContent = user ? (user.name || user.email) : 'user';
-  }
-
-  /* ── Friends List (sidebar) ───────────────────── */
-
-  function renderFriendsList() {
-    const container = document.getElementById('friendsList');
-    container.innerHTML = '';
-
-    if (_friends.length === 0) {
-      const p = document.createElement('p');
-      p.className = 'empty-text';
-      p.textContent = 'No friends yet';
-      container.appendChild(p);
-      return;
+  function _updateNavAvatar(user) {
+    const el = document.getElementById('nav-avatar');
+    if (!el) return;
+    if (user?.picture) {
+      el.innerHTML = `<img src="${Utils.escapeHtml(user.picture)}" alt="" />`;
+    } else {
+      el.textContent = (user?.name || '?')[0].toUpperCase();
     }
-
-    _friends.forEach(friend => {
-      const item = document.createElement('div');
-      item.className = 'friend-item';
-
-      const name = document.createElement('span');
-      name.className = 'friend-item-name';
-      name.textContent = friend.name || friend.email;
-      name.title = friend.email;
-
-      const removeBtn = document.createElement('button');
-      removeBtn.textContent = 'Remove';
-      removeBtn.setAttribute('aria-label', `Remove ${friend.name || friend.email}`);
-      removeBtn.addEventListener('click', () => _doRemoveFriend(friend.email));
-
-      item.appendChild(name);
-      item.appendChild(removeBtn);
-      container.appendChild(item);
-    });
   }
 
-  /* ── Friends Checklist (compose) ─────────────── */
+  /* ── Router ─────────────────────────────────── */
 
-  function renderFriendsChecklist(containerId) {
-    const container = document.getElementById(containerId);
-    container.innerHTML = '';
+  function _setupRouter() {
+    window.addEventListener('hashchange', () => _navigate(window.location.hash.slice(1) || 'feed'));
 
-    if (_friends.length === 0) {
-      const p = document.createElement('p');
-      p.className = 'empty-text';
-      p.textContent = 'Add friends to share with them';
-      container.appendChild(p);
-      return;
+    _on('back-from-circle',    'click', () => navigate('circles'));
+    _on('back-from-collection','click', () => navigate('collections'));
+    _on('sign-out-btn',        'click', () => Auth.signOut());
+  }
+
+  function navigate(page, params = {}) {
+    if (page === 'circle-detail' && params.folderId) {
+      _currentCircleFolderId = params.folderId;
+      window.location.hash = `circle-detail/${params.folderId}`;
+    } else if (page === 'collection-detail' && params.folderId) {
+      _currentCollFolderId = params.folderId;
+      window.location.hash = `collection-detail/${params.folderId}`;
+    } else {
+      window.location.hash = page;
     }
-
-    _friends.forEach(friend => {
-      const label = document.createElement('label');
-      label.className = 'friend-checkbox';
-
-      const cb = document.createElement('input');
-      cb.type = 'checkbox';
-      cb.value = friend.email;
-      cb.dataset.friendEmail = friend.email;
-
-      const span = document.createElement('span');
-      span.textContent = friend.name || friend.email;
-
-      label.appendChild(cb);
-      label.appendChild(span);
-      container.appendChild(label);
-    });
   }
 
-  /* ── Timeline ─────────────────────────────────── */
+  function _navigate(hash) {
+    const parts = hash.split('/');
+    const page  = parts[0];
+    const id    = parts[1];
 
-  function renderTimeline() {
-    const timeline  = document.getElementById('timeline');
-    const emptyState = document.getElementById('emptyState');
-
-    // Remove old items (keep empty state element)
-    Array.from(timeline.children).forEach(child => {
-      if (child !== emptyState) child.remove();
+    document.querySelectorAll('.nav-link').forEach(a => {
+      const match = a.dataset.page === page || (page.startsWith(a.dataset.page) && a.dataset.page !== 'feed');
+      a.classList.toggle('active', match);
     });
 
-    if (_posts.length === 0) {
-      emptyState.hidden = false;
-      return;
+    document.querySelectorAll('.page').forEach(p => { p.style.display = 'none'; });
+    _currentPage = page;
+
+    switch (page) {
+      case 'feed':
+        _showPage('page-feed');        _renderFeed();             break;
+      case 'circles':
+        _showPage('page-circles');     _renderCircles();          break;
+      case 'circle-detail':
+        _currentCircleFolderId = id || _currentCircleFolderId;
+        _showPage('page-circle-detail'); _renderCircleDetail(_currentCircleFolderId); break;
+      case 'collections':
+        _showPage('page-collections'); _renderCollections();      break;
+      case 'collection-detail':
+        _currentCollFolderId = id || _currentCollFolderId;
+        _showPage('page-collection-detail'); _renderCollectionDetail(_currentCollFolderId); break;
+      case 'friends':
+        _showPage('page-friends');     _renderFriends();          break;
+      case 'profile':
+        _showPage('page-profile');     _renderProfile();          break;
+      case 'settings':
+        _showPage('page-settings');    _renderSettings();         break;
+      case 'about':
+        _showPage('page-about');                                  break;
+      default:
+        _showPage('page-feed');        _renderFeed();
     }
-
-    emptyState.hidden = true;
-
-    _posts.forEach(post => {
-      const item = document.createElement('div');
-      item.className = 'timeline-item';
-      item.appendChild(_renderPost(post));
-      timeline.appendChild(item);
-    });
   }
 
-  function _renderPost(post) {
-    const card = document.createElement('article');
-    card.className = 'post';
-    card.dataset.postId = post.id;
+  function _showPage(id) {
+    const el = document.getElementById(id);
+    if (el) el.style.display = 'block';
+  }
 
-    // Author line
-    const author = document.createElement('div');
-    author.className = 'post-author';
-    author.textContent = post.author?.name || 'Unknown';
-    if (post.isPrivate) {
-      const tag = document.createElement('span');
-      tag.className = 'post-private-tag';
-      tag.textContent = 'private';
-      author.appendChild(tag);
+  /* ── Feed ───────────────────────────────────── */
+
+  async function _renderFeed() {
+    const grid  = document.getElementById('feed-grid');
+    const empty = document.getElementById('feed-empty');
+    grid.innerHTML = '<p class="muted-text" style="grid-column:1/-1">Loading…</p>';
+    empty.hidden = true;
+
+    try {
+      const sharedFolders = await Data.getFeedFolders();
+      grid.innerHTML = '';
+
+      if (!sharedFolders.length) { empty.hidden = false; return; }
+
+      const items = [];
+      await Promise.all(sharedFolders.map(async folder => {
+        try {
+          const files = await Drive.listFiles(folder.id);
+          files.filter(f => f.mimeType?.startsWith('image/') || f.mimeType?.startsWith('video/')).forEach(f => {
+            items.push({ file: f, folder, owner: folder.owners?.[0] });
+          });
+        } catch {}
+      }));
+
+      if (!items.length) { empty.hidden = false; return; }
+
+      items.forEach(({ file, folder, owner }) => {
+        const el = _el(`
+          <div class="media-item">
+            <img src="${Drive.getMediaUrl(file.id)}" alt="" loading="lazy" />
+            <div class="media-overlay"><span>${Utils.escapeHtml(owner?.displayName || 'Friend')}</span></div>
+          </div>
+        `);
+        el.addEventListener('click', () => openLightbox(file.id, folder.id));
+        grid.appendChild(el);
+      });
+    } catch (err) {
+      grid.innerHTML = '';
+      Utils.showToast('Failed to load feed', 'error');
     }
-    card.appendChild(author);
+  }
 
-    // Media
-    if (post.type === 'image' && post.mediaFileId) {
-      const wrapper = document.createElement('div');
-      wrapper.className = 'post-image';
-      const frame = document.createElement('div');
-      frame.className = 'frame';
+  /* ── Circles ─────────────────────────────────── */
 
-      if (post.isVideo) {
-        const video = document.createElement('video');
-        video.controls = true;
-        video.preload = 'metadata';
-        video.setAttribute('aria-label', 'Video post');
-        _setMediaSrc(video, post);
-        frame.appendChild(video);
-      } else {
-        const img = document.createElement('img');
-        img.alt = post.content || 'Photo';
-        _setMediaSrc(img, post);
-        frame.appendChild(img);
+  async function _renderCircles() {
+    const grid  = document.getElementById('circles-grid');
+    const empty = document.getElementById('circles-empty');
+    grid.innerHTML = '<p class="muted-text">Loading…</p>';
+    empty.hidden = true;
+    _on('create-circle-btn', 'click', _openCreateCircleModal);
+
+    try {
+      const circles = await Data.listCircles();
+      grid.innerHTML = '';
+      if (!circles.length) { empty.hidden = false; return; }
+      circles.forEach(c => {
+        const card = _el(`
+          <div class="card coll-card">
+            <div class="coll-thumb" style="font-size:2.5rem">◎</div>
+            <div class="card-body">
+              <h4>${Utils.escapeHtml(c.name)}</h4>
+              <div class="card-meta">
+                <span>${c.members?.length || 0} member${c.members?.length !== 1 ? 's' : ''}</span>
+                <span>${c.addPolicy === 'any_member' ? 'Open adds' : 'Owner-managed'}</span>
+              </div>
+              ${c.description ? `<p style="font-size:.8rem;color:var(--muted);margin-top:.35rem">${Utils.escapeHtml(c.description)}</p>` : ''}
+            </div>
+          </div>
+        `);
+        card.addEventListener('click', () => navigate('circle-detail', { folderId: c.folderId }));
+        grid.appendChild(card);
+      });
+    } catch {
+      grid.innerHTML = '';
+      Utils.showToast('Failed to load circles', 'error');
+    }
+  }
+
+  async function _renderCircleDetail(folderId) {
+    if (!folderId) { navigate('circles'); return; }
+    document.getElementById('circle-detail-name').textContent = '…';
+    document.getElementById('circle-members-strip').innerHTML = '';
+    document.getElementById('circle-detail-grid').innerHTML = '<p class="muted-text">Loading…</p>';
+    document.getElementById('circle-detail-empty').hidden = true;
+    document.getElementById('circle-detail-actions').innerHTML = '';
+
+    try {
+      const circle = await Data.getCircle(folderId);
+      document.getElementById('circle-detail-name').textContent = circle.name;
+
+      const strip = document.getElementById('circle-members-strip');
+      (circle.members || []).forEach(m => {
+        strip.appendChild(_el(`<span class="member-chip">${Utils.escapeHtml(m.displayName || m.email)}</span>`));
+      });
+
+      const user    = Auth.getCurrentUser();
+      const isOwner = circle.ownerEmail === user.email;
+      const canAdd  = isOwner || circle.addPolicy === 'any_member';
+      const actions = document.getElementById('circle-detail-actions');
+
+      if (canAdd) {
+        const addBtn = _el(`<button class="btn btn-ghost btn-sm">+ Add Member</button>`);
+        addBtn.addEventListener('click', () => _openAddMemberModal(folderId, circle));
+        actions.appendChild(addBtn);
       }
 
-      wrapper.appendChild(frame);
-      card.appendChild(wrapper);
+      const upBtn = _el(`<button class="btn btn-primary btn-sm">Upload</button>`);
+      upBtn.addEventListener('click', () => _openUploadModal(folderId));
+      actions.appendChild(upBtn);
+
+      if (isOwner) {
+        const delBtn = _el(`<button class="btn btn-ghost btn-sm danger-btn">Delete</button>`);
+        delBtn.addEventListener('click', async () => {
+          if (!confirm(`Delete circle "${circle.name}"?`)) return;
+          await Data.deleteCircle(folderId);
+          navigate('circles');
+          Utils.showToast('Circle deleted');
+        });
+        actions.appendChild(delBtn);
+      }
+
+      const files = await Drive.listFiles(folderId);
+      const media = files.filter(f => f.mimeType?.startsWith('image/') || f.mimeType?.startsWith('video/'));
+      const grid  = document.getElementById('circle-detail-grid');
+      grid.innerHTML = '';
+
+      if (!media.length) { document.getElementById('circle-detail-empty').hidden = false; return; }
+
+      media.forEach(f => {
+        const el = _el(`<div class="media-item"><img src="${Drive.getMediaUrl(f.id)}" alt="" loading="lazy" /></div>`);
+        el.addEventListener('click', () => openLightbox(f.id, folderId));
+        grid.appendChild(el);
+      });
+    } catch (err) {
+      Utils.showToast('Failed to load circle', 'error');
+      console.error(err);
     }
-
-    // Text content
-    if (post.content) {
-      const text = document.createElement('p');
-      text.className = 'post-text';
-      text.textContent = post.content; // textContent prevents XSS
-      card.appendChild(text);
-    }
-
-    // Meta line (timestamp)
-    const meta = document.createElement('div');
-    meta.className = 'post-meta';
-    meta.textContent = Utils.formatRelativeTime(post.createdAt);
-    card.appendChild(meta);
-
-    // Shared-with line
-    if (post.sharedWith && post.sharedWith.length > 0) {
-      const shared = document.createElement('div');
-      shared.className = 'post-shared';
-      shared.textContent = 'Shared with: ' + post.sharedWith.map(Utils.escapeHtml).join(', ');
-      card.appendChild(shared);
-    }
-
-    return card;
   }
 
-  function _setMediaSrc(el, post) {
-    // Demo: data URL stored directly
-    if (post._mediaDataUrl) {
-      el.src = post._mediaDataUrl;
-      return;
+  function _openCreateCircleModal() {
+    openModal(`
+      <h3>New Circle</h3>
+      <form id="mf" class="form-block">
+        <div class="form-field"><label>Name</label><input name="name" class="input" placeholder="e.g. Family, Hiking Crew…" required /></div>
+        <div class="form-field"><label>Description (optional)</label><input name="description" class="input" /></div>
+        <div class="form-field">
+          <label>Who can add members?</label>
+          <select name="addPolicy" class="select-sm" style="width:100%">
+            <option value="owner_only">Only me (owner)</option>
+            <option value="any_member">Any member</option>
+          </select>
+        </div>
+        <div class="modal-actions">
+          <button type="button" class="btn btn-ghost btn-sm modal-cancel-btn">Cancel</button>
+          <button type="submit" class="btn btn-primary btn-sm">Create</button>
+        </div>
+      </form>
+    `);
+    document.querySelector('.modal-cancel-btn').addEventListener('click', closeModal);
+    document.getElementById('mf').addEventListener('submit', async e => {
+      e.preventDefault();
+      const fd = new FormData(e.target);
+      Utils.showLoading();
+      try {
+        await Data.createCircle(fd.get('name'), fd.get('description'), fd.get('addPolicy'));
+        closeModal(); _renderCircles(); Utils.showToast('Circle created!');
+      } catch { Utils.showToast('Failed to create circle', 'error'); }
+      finally   { Utils.hideLoading(); }
+    });
+  }
+
+  function _openAddMemberModal(folderId, circle) {
+    openModal(`
+      <h3>Add Member to ${Utils.escapeHtml(circle.name)}</h3>
+      <form id="mf" class="form-block">
+        <div class="form-field"><label>Email</label><input name="email" type="email" class="input" required /></div>
+        <div class="form-field"><label>Display name (optional)</label><input name="displayName" class="input" /></div>
+        <div class="modal-actions">
+          <button type="button" class="btn btn-ghost btn-sm modal-cancel-btn">Cancel</button>
+          <button type="submit" class="btn btn-primary btn-sm">Add</button>
+        </div>
+      </form>
+    `);
+    document.querySelector('.modal-cancel-btn').addEventListener('click', closeModal);
+    document.getElementById('mf').addEventListener('submit', async e => {
+      e.preventDefault();
+      const fd = new FormData(e.target);
+      Utils.showLoading();
+      try {
+        await Data.addMemberToCircle(folderId, fd.get('email'), fd.get('displayName'));
+        closeModal(); _renderCircleDetail(folderId); Utils.showToast('Member added!');
+      } catch { Utils.showToast('Failed to add member', 'error'); }
+      finally   { Utils.hideLoading(); }
+    });
+  }
+
+  /* ── Collections ─────────────────────────────── */
+
+  async function _renderCollections() {
+    const grid  = document.getElementById('collections-grid');
+    const empty = document.getElementById('collections-empty');
+    grid.innerHTML = '<p class="muted-text">Loading…</p>';
+    empty.hidden = true;
+    _on('create-collection-btn', 'click', _openCreateCollectionModal);
+
+    try {
+      const colls = await Data.listCollections();
+      grid.innerHTML = '';
+      if (!colls.length) { empty.hidden = false; return; }
+      colls.forEach(c => {
+        const card = _el(`
+          <div class="card coll-card">
+            <div class="coll-thumb" style="font-size:2.5rem">▤</div>
+            <div class="card-body">
+              <h4>${Utils.escapeHtml(c.name)}</h4>
+              <div class="card-meta">
+                <span>${_sharingLabel(c.sharing)}</span>
+                ${c.allowCopying ? '<span>Copying ok</span>' : ''}
+              </div>
+              ${c.description ? `<p style="font-size:.8rem;color:var(--muted);margin-top:.35rem">${Utils.escapeHtml(c.description)}</p>` : ''}
+            </div>
+          </div>
+        `);
+        card.addEventListener('click', () => navigate('collection-detail', { folderId: c.folderId }));
+        grid.appendChild(card);
+      });
+    } catch {
+      grid.innerHTML = '';
+      Utils.showToast('Failed to load collections', 'error');
     }
-    // Real Drive: async load
-    Drive.getMediaUrl(post.mediaFileId).then(url => {
-      if (url) el.src = url;
+  }
+
+  function _sharingLabel(s) {
+    return { everyone: 'Public', friends: 'Friends', circles: 'Circles', select: 'Select people' }[s] || s;
+  }
+
+  async function _renderCollectionDetail(folderId) {
+    if (!folderId) { navigate('collections'); return; }
+    document.getElementById('collection-detail-name').textContent = '…';
+    document.getElementById('collection-detail-grid').innerHTML = '<p class="muted-text">Loading…</p>';
+    document.getElementById('collection-detail-actions').innerHTML = '';
+
+    try {
+      const coll = await Data.getCollection(folderId);
+      document.getElementById('collection-detail-name').textContent = coll.name;
+
+      const actions = document.getElementById('collection-detail-actions');
+
+      const upBtn = _el(`<button class="btn btn-primary btn-sm">Upload</button>`);
+      upBtn.addEventListener('click', () => _openUploadModal(folderId));
+      actions.appendChild(upBtn);
+
+      const shareBtn = _el(`<button class="btn btn-ghost btn-sm">Share</button>`);
+      shareBtn.addEventListener('click', () => _openShareModal(folderId, coll));
+      actions.appendChild(shareBtn);
+
+      const delBtn = _el(`<button class="btn btn-ghost btn-sm danger-btn">Delete</button>`);
+      delBtn.addEventListener('click', async () => {
+        if (!confirm(`Delete collection "${coll.name}"?`)) return;
+        await Data.deleteCollection(folderId);
+        navigate('collections');
+        Utils.showToast('Collection deleted');
+      });
+      actions.appendChild(delBtn);
+
+      const files = await Drive.listFiles(folderId);
+      const media = files.filter(f => f.mimeType?.startsWith('image/') || f.mimeType?.startsWith('video/'));
+      const grid  = document.getElementById('collection-detail-grid');
+      grid.innerHTML = '';
+
+      if (!media.length) {
+        grid.innerHTML = '<div class="empty-state"><p>No files yet. Upload something!</p></div>';
+        return;
+      }
+
+      media.forEach(f => {
+        const el = _el(`<div class="media-item"><img src="${Drive.getMediaUrl(f.id)}" alt="" loading="lazy" /></div>`);
+        el.addEventListener('click', () => openLightbox(f.id, folderId));
+        grid.appendChild(el);
+      });
+    } catch (err) {
+      Utils.showToast('Failed to load collection', 'error');
+      console.error(err);
+    }
+  }
+
+  function _openCreateCollectionModal() {
+    openModal(`
+      <h3>New Collection</h3>
+      <form id="mf" class="form-block">
+        <div class="form-field"><label>Name</label><input name="name" class="input" placeholder="e.g. Summer 2025…" required /></div>
+        <div class="form-field"><label>Description (optional)</label><input name="description" class="input" /></div>
+        <div class="form-field">
+          <label>Share with</label>
+          <select name="sharing" class="select-sm" style="width:100%">
+            <option value="friends">Friends</option>
+            <option value="circles">My circles</option>
+            <option value="everyone">Anyone with link</option>
+            <option value="select">Specific people</option>
+          </select>
+        </div>
+        <label style="display:flex;align-items:center;gap:.5rem;font-size:.875rem;cursor:pointer">
+          <input type="checkbox" name="allowCopying" checked /> Allow others to copy files
+        </label>
+        <div class="modal-actions">
+          <button type="button" class="btn btn-ghost btn-sm modal-cancel-btn">Cancel</button>
+          <button type="submit" class="btn btn-primary btn-sm">Create</button>
+        </div>
+      </form>
+    `);
+    document.querySelector('.modal-cancel-btn').addEventListener('click', closeModal);
+    document.getElementById('mf').addEventListener('submit', async e => {
+      e.preventDefault();
+      const fd = new FormData(e.target);
+      Utils.showLoading();
+      try {
+        const coll = await Data.createCollection(fd.get('name'), fd.get('description'), fd.get('sharing'), !!fd.get('allowCopying'));
+        closeModal();
+        navigate('collection-detail', { folderId: coll.folderId });
+        Utils.showToast('Collection created!');
+      } catch { Utils.showToast('Failed to create collection', 'error'); }
+      finally   { Utils.hideLoading(); }
+    });
+  }
+
+  function _openShareModal(folderId, coll) {
+    openModal(`
+      <h3>Share "${Utils.escapeHtml(coll.name)}"</h3>
+      <form id="mf" class="form-block">
+        <div class="form-field">
+          <label>Email addresses (comma-separated)</label>
+          <textarea name="emails" class="input" rows="3" placeholder="friend@example.com, another@example.com"></textarea>
+        </div>
+        <div class="modal-actions">
+          <button type="button" class="btn btn-ghost btn-sm modal-cancel-btn">Cancel</button>
+          <button type="submit" class="btn btn-primary btn-sm">Share</button>
+        </div>
+      </form>
+    `);
+    document.querySelector('.modal-cancel-btn').addEventListener('click', closeModal);
+    document.getElementById('mf').addEventListener('submit', async e => {
+      e.preventDefault();
+      const emails = new FormData(e.target).get('emails').split(',').map(s => s.trim()).filter(Boolean);
+      if (!emails.length) return;
+      Utils.showLoading();
+      try {
+        await Data.shareCollection(folderId, emails);
+        closeModal(); Utils.showToast('Shared!');
+      } catch { Utils.showToast('Failed to share', 'error'); }
+      finally   { Utils.hideLoading(); }
+    });
+  }
+
+  /* ── Upload ─────────────────────────────────── */
+
+  function _openUploadModal(folderId) {
+    openModal(`
+      <h3>Upload Files</h3>
+      <form id="mf" class="form-block">
+        <input type="file" id="up-input" class="input" multiple accept="image/*,video/*" />
+        <p id="up-status" class="muted-text small"></p>
+        <div class="modal-actions">
+          <button type="button" class="btn btn-ghost btn-sm modal-cancel-btn">Cancel</button>
+          <button type="submit" class="btn btn-primary btn-sm">Upload</button>
+        </div>
+      </form>
+    `);
+    document.querySelector('.modal-cancel-btn').addEventListener('click', closeModal);
+    document.getElementById('mf').addEventListener('submit', async e => {
+      e.preventDefault();
+      const files = document.getElementById('up-input').files;
+      if (!files.length) return;
+      const status = document.getElementById('up-status');
+      let done = 0;
+      for (const file of files) {
+        const v = Utils.validateMediaFile(file);
+        if (!v.ok) { Utils.showToast(v.error, 'error'); continue; }
+        status.textContent = `Uploading ${file.name}…`;
+        try {
+          await Drive.uploadMedia(file, folderId);
+          done++;
+        } catch { Utils.showToast(`Failed: ${file.name}`, 'error'); }
+      }
+      closeModal();
+      if (done) {
+        Utils.showToast(`${done} file${done > 1 ? 's' : ''} uploaded`);
+        if (_currentPage === 'circle-detail')     _renderCircleDetail(_currentCircleFolderId);
+        else if (_currentPage === 'collection-detail') _renderCollectionDetail(_currentCollFolderId);
+      }
+    });
+  }
+
+  /* ── Friends ─────────────────────────────────── */
+
+  async function _renderFriends() {
+    _on('add-friend-btn', 'click', _addFriend);
+    _on('add-friend-email', 'keydown', e => { if (e.key === 'Enter') _addFriend(); });
+
+    try {
+      const [friends, blocked] = await Promise.all([Data.getFriends(), Data.getBlocked()]);
+      document.getElementById('friends-count').textContent = friends.length;
+      _renderFriendsList(friends);
+      _renderBlockedList(blocked);
+    } catch { Utils.showToast('Failed to load friends', 'error'); }
+  }
+
+  function _renderFriendsList(friends) {
+    const list  = document.getElementById('friends-list');
+    const empty = document.getElementById('friends-empty');
+    list.innerHTML = '';
+    empty.hidden = !!friends.length;
+    friends.forEach(f => {
+      const row = _el(`
+        <div class="person-row">
+          <div class="avatar-sm">${(f.displayName || f.email)[0].toUpperCase()}</div>
+          <div class="person-info">
+            <div class="person-name">${Utils.escapeHtml(f.displayName || f.email)}</div>
+            <div class="person-email">${Utils.escapeHtml(f.email)}</div>
+          </div>
+          <div class="person-actions">
+            <button class="btn btn-ghost btn-sm" data-action="block">Block</button>
+            <button class="btn btn-ghost btn-sm danger-btn" data-action="remove">Remove</button>
+          </div>
+        </div>
+      `);
+      row.querySelector('[data-action="remove"]').addEventListener('click', async () => {
+        await Data.removeFriend(f.email); _renderFriends();
+      });
+      row.querySelector('[data-action="block"]').addEventListener('click', async () => {
+        await Data.blockUser(f.email); await Data.removeFriend(f.email);
+        _renderFriends(); Utils.showToast(`${f.email} blocked`);
+      });
+      list.appendChild(row);
+    });
+  }
+
+  function _renderBlockedList(blocked) {
+    const list  = document.getElementById('blocked-list');
+    const empty = document.getElementById('blocked-empty');
+    list.innerHTML = '';
+    empty.hidden = !!blocked.length;
+    blocked.forEach(b => {
+      const row = _el(`
+        <div class="person-row">
+          <div class="avatar-sm">✕</div>
+          <div class="person-info"><div class="person-name">${Utils.escapeHtml(b.email)}</div></div>
+          <div class="person-actions">
+            <button class="btn btn-ghost btn-sm">Unblock</button>
+          </div>
+        </div>
+      `);
+      row.querySelector('button').addEventListener('click', async () => {
+        await Data.unblockUser(b.email); _renderFriends();
+      });
+      list.appendChild(row);
+    });
+  }
+
+  async function _addFriend() {
+    const input = document.getElementById('add-friend-email');
+    const email = input.value.trim();
+    if (!email || !email.includes('@')) { Utils.showToast('Enter a valid email', 'error'); return; }
+    try {
+      await Data.addFriend(email);
+      input.value = '';
+      _renderFriends();
+      Utils.showToast(`${email} added!`);
+    } catch { Utils.showToast('Failed to add friend', 'error'); }
+  }
+
+  /* ── Profile ─────────────────────────────────── */
+
+  async function _renderProfile() {
+    _on('edit-profile-btn',    'click', () => _openProfileEdit());
+    _on('cancel-profile-btn',  'click', _closeProfileEdit);
+
+    try {
+      const profile = await Data.getProfile();
+      const user    = Auth.getCurrentUser();
+
+      document.getElementById('profile-display-name').textContent = profile.displayName || user?.name || '—';
+      document.getElementById('profile-handle').textContent = profile.handle ? `@${profile.handle}` : '@—';
+      document.getElementById('profile-bio').textContent   = profile.bio || '';
+
+      const avatar = document.getElementById('profile-avatar');
+      if (user?.picture) {
+        avatar.innerHTML = `<img src="${Utils.escapeHtml(user.picture)}" alt="" />`;
+      } else {
+        avatar.textContent = (profile.displayName || user?.name || '?')[0].toUpperCase();
+      }
+
+      // Store profile in closure for edit form
+      avatar._profile = profile;
+    } catch { Utils.showToast('Failed to load profile', 'error'); }
+  }
+
+  async function _openProfileEdit() {
+    const profile = await Data.getProfile();
+    document.getElementById('profile-view').style.display = 'none';
+    const form = document.getElementById('profile-form');
+    form.hidden = false;
+    form.elements.displayName.value = profile.displayName || '';
+    form.elements.handle.value      = profile.handle || '';
+    form.elements.bio.value         = profile.bio || '';
+    form.onsubmit = async e => {
+      e.preventDefault();
+      const fd = new FormData(form);
+      Utils.showLoading();
+      try {
+        await Data.saveProfile({ displayName: fd.get('displayName'), handle: fd.get('handle'), bio: fd.get('bio') });
+        _closeProfileEdit(); _renderProfile(); Utils.showToast('Profile saved!');
+      } catch { Utils.showToast('Failed to save profile', 'error'); }
+      finally   { Utils.hideLoading(); }
+    };
+  }
+
+  function _closeProfileEdit() {
+    document.getElementById('profile-view').style.display = '';
+    document.getElementById('profile-form').hidden = true;
+  }
+
+  /* ── Settings ─────────────────────────────────── */
+
+  async function _renderSettings() {
+    Drive.getQuota().then(q => {
+      if (!q) return;
+      const used  = parseInt(q.usage || 0);
+      const limit = parseInt(q.limit || 1);
+      const pct   = Math.min(100, Math.round(used / limit * 100));
+      document.getElementById('storage-bar-fill').style.width = pct + '%';
+      document.getElementById('storage-label').textContent = `${Utils.formatBytes(used)} of ${Utils.formatBytes(limit)} used (${pct}%)`;
     }).catch(() => {});
+
+    Drive.listLargeFiles(5).then(files => {
+      const el = document.getElementById('large-files-list');
+      el.innerHTML = files.map(f => `
+        <div class="large-file-row">
+          <span>${Utils.escapeHtml(f.name)}</span>
+          <span>${Utils.formatBytes(parseInt(f.size || 0))}</span>
+        </div>
+      `).join('');
+    }).catch(() => {});
+
+    document.querySelectorAll('.theme-pill').forEach(btn => {
+      btn.addEventListener('click', async () => {
+        Theme.setVisual(btn.dataset.vtheme);
+        document.querySelectorAll('.theme-pill').forEach(b => b.classList.toggle('active', b === btn));
+        await _saveSettingsFromUI();
+      });
+    });
+
+    document.querySelectorAll('.color-dot').forEach(btn => {
+      btn.addEventListener('click', async () => {
+        Theme.setColor(btn.dataset.ctheme);
+        document.querySelectorAll('.color-dot').forEach(b => b.classList.toggle('active', b === btn));
+        const lbl = document.getElementById('color-theme-label');
+        if (lbl) lbl.textContent = Theme.getColorName(btn.dataset.ctheme);
+        await _saveSettingsFromUI();
+      });
+    });
+
+    ['default-sharing', 'allow-copying'].forEach(id => {
+      document.getElementById(id)?.addEventListener('change', _saveSettingsFromUI);
+    });
   }
 
-  /* ── Compose ──────────────────────────────────── */
-
-  function switchCompose(tab) {
-    const tabs   = document.querySelectorAll('.compose-tab');
-    const panels = document.querySelectorAll('.compose-panel');
-
-    tabs.forEach(t => t.classList.toggle('active', t.dataset.tab === tab));
-    panels.forEach(p => { p.hidden = (p.id !== `panel${tab.charAt(0).toUpperCase() + tab.slice(1)}`); });
+  function _syncSettingsUI(settings) {
+    document.querySelectorAll('.theme-pill').forEach(b => b.classList.toggle('active', b.dataset.vtheme === settings.theme));
+    document.querySelectorAll('.color-dot').forEach(b => b.classList.toggle('active', b.dataset.ctheme === settings.colorTheme));
+    const lbl = document.getElementById('color-theme-label');
+    if (lbl) lbl.textContent = Theme.getColorName(settings.colorTheme || 'paper');
+    const ds = document.getElementById('default-sharing');
+    if (ds) ds.value = settings.defaultSharing || 'friends';
+    const ac = document.getElementById('allow-copying');
+    if (ac) ac.value = settings.allowCopying || 'friends';
   }
 
-  function _updateCharCount() {
-    const ta      = document.getElementById('postText');
-    const counter = document.getElementById('charCount');
-    const len = ta.value.length;
-    counter.textContent = len;
-    counter.parentElement.classList.toggle('warn', len > 450);
+  async function _saveSettingsFromUI() {
+    const settings = {
+      theme:          Theme.getVisual(),
+      colorTheme:     Theme.getColor(),
+      defaultSharing: document.getElementById('default-sharing')?.value || 'friends',
+      allowCopying:   document.getElementById('allow-copying')?.value   || 'friends'
+    };
+    await Data.saveSettings(settings).catch(() => {});
   }
 
-  function _clearTextCompose() {
-    document.getElementById('postText').value = '';
-    _updateCharCount();
-    _uncheckAll('textFriendsList');
-    document.getElementById('textPrivate').checked = false;
-  }
+  /* ── Lightbox ─────────────────────────────────── */
 
-  function _clearImageCompose() {
-    document.getElementById('imageInput').value = '';
-    document.getElementById('mediaPreview').innerHTML = '';
-    _mediaFile = null;
-    _uncheckAll('imageFriendsList');
-    document.getElementById('imagePrivate').checked = false;
-    // Reset label text
-    const label = document.querySelector('label[for="imageInput"]');
-    if (label) label.textContent = 'Click to select a photo or video';
-  }
+  async function openLightbox(fileId, collectionFolderId) {
+    const lb = document.getElementById('lightbox');
+    lb.hidden = false;
+    document.getElementById('lightbox-img').src = Drive.getMediaUrl(fileId);
 
-  function _uncheckAll(containerId) {
-    document.querySelectorAll(`#${containerId} input[type="checkbox"]`)
-      .forEach(cb => { cb.checked = false; });
-  }
+    const user     = Auth.getCurrentUser();
+    const reactBar = document.getElementById('lightbox-reactions');
+    const commArea = document.getElementById('lightbox-comments');
+    reactBar.innerHTML = '';
+    commArea.innerHTML = '<span class="muted-text small">Loading…</span>';
 
-  function _selectedFriends(containerId) {
-    return Array.from(
-      document.querySelectorAll(`#${containerId} input[type="checkbox"]:checked`)
-    ).map(cb => cb.value);
-  }
-
-  /* ── Media Preview ────────────────────────────── */
-
-  function _previewMedia(e) {
-    const file = e.target.files?.[0];
-    if (!file) return;
-
-    const validation = Utils.validateMediaFile(file);
-    if (!validation.ok) {
-      Utils.showToast(validation.error, 'error');
-      e.target.value = '';
-      return;
+    // Reactions
+    async function refreshReactions() {
+      try {
+        const r     = await Data.getReactions(collectionFolderId);
+        const liked = r.likes.some(l => l.userId === user.userId);
+        reactBar.innerHTML = '';
+        const likeBtn = _el(`<button class="react-btn ${liked ? 'liked' : ''}">♥ ${r.likes.length}</button>`);
+        likeBtn.addEventListener('click', async () => { await Data.toggleLike(collectionFolderId); refreshReactions(); });
+        reactBar.appendChild(likeBtn);
+      } catch { reactBar.innerHTML = ''; }
     }
+    refreshReactions();
 
-    _mediaFile = file;
-
-    const preview = document.getElementById('mediaPreview');
-    preview.innerHTML = '';
-
-    const url = URL.createObjectURL(file);
-
-    if (validation.isVideo) {
-      const video = document.createElement('video');
-      video.src = url;
-      video.controls = true;
-      video.preload = 'metadata';
-      preview.appendChild(video);
-    } else {
-      const img = document.createElement('img');
-      img.src = url;
-      img.alt = 'Preview';
-      preview.appendChild(img);
+    // Comments
+    async function refreshComments() {
+      try {
+        const comments = await Drive.getComments(fileId);
+        if (!comments.length) {
+          commArea.innerHTML = '<span class="muted-text small">No comments yet.</span>';
+          return;
+        }
+        commArea.innerHTML = '';
+        comments.forEach(c => {
+          commArea.appendChild(_el(`
+            <div class="comment-row">
+              <span class="comment-author">${Utils.escapeHtml(c.author?.displayName || 'Someone')}</span>${Utils.escapeHtml(c.content)}
+            </div>
+          `));
+        });
+      } catch { commArea.innerHTML = ''; }
     }
+    refreshComments();
 
-    const fname = document.createElement('p');
-    fname.className = 'preview-filename';
-    fname.textContent = file.name;
-    preview.appendChild(fname);
+    const form  = document.getElementById('lightbox-comment-form');
+    const input = document.getElementById('lightbox-comment-input');
+    form.onsubmit = async e => {
+      e.preventDefault();
+      const text = input.value.trim();
+      if (!text) return;
+      try {
+        await Drive.addComment(fileId, text);
+        input.value = '';
+        refreshComments();
+      } catch { Utils.showToast('Failed to post comment', 'error'); }
+    };
 
-    // Update label
-    const label = document.querySelector('label[for="imageInput"]');
-    if (label) label.textContent = 'Change photo / video';
+    document.getElementById('lightbox-close').onclick    = closeLightbox;
+    document.getElementById('lightbox-backdrop').onclick = closeLightbox;
   }
 
-  /* ── Publish ──────────────────────────────────── */
-
-  async function _doPublishText() {
-    const content   = document.getElementById('postText').value;
-    const sharedWith = _selectedFriends('textFriendsList');
-    const isPrivate = document.getElementById('textPrivate').checked;
-
-    const publishBtn = document.getElementById('publishTextBtn');
-    publishBtn.disabled = true;
-
-    Utils.showLoading();
-    try {
-      const post = await Posts.createTextPost(content, sharedWith, isPrivate);
-      _posts.unshift(post);
-      renderTimeline();
-      _clearTextCompose();
-      Utils.showToast('Post published!', 'success');
-    } catch (err) {
-      Utils.showToast(err.message || 'Failed to publish post.', 'error');
-    } finally {
-      publishBtn.disabled = false;
-      Utils.hideLoading();
-    }
+  function closeLightbox() {
+    document.getElementById('lightbox').hidden = true;
+    document.getElementById('lightbox-img').src = '';
+    document.getElementById('lightbox-comment-input').value = '';
   }
 
-  async function _doPublishImage() {
-    if (!_mediaFile) {
-      Utils.showToast('Please select a photo or video first.', 'error');
-      return;
-    }
+  /* ── Modal ───────────────────────────────────── */
 
-    const caption    = '';    // could add a caption textarea in a future iteration
-    const sharedWith = _selectedFriends('imageFriendsList');
-    const isPrivate  = document.getElementById('imagePrivate').checked;
-
-    const publishBtn = document.getElementById('publishImageBtn');
-    publishBtn.disabled = true;
-
-    Utils.showLoading();
-    try {
-      const post = await Posts.createMediaPost(_mediaFile, caption, sharedWith, isPrivate);
-      _posts.unshift(post);
-      renderTimeline();
-      _clearImageCompose();
-      Utils.showToast('Photo posted!', 'success');
-    } catch (err) {
-      Utils.showToast(err.message || 'Failed to upload media.', 'error');
-    } finally {
-      publishBtn.disabled = false;
-      Utils.hideLoading();
-    }
+  function openModal(html) {
+    document.getElementById('modal-content').innerHTML = html;
+    document.getElementById('modal-overlay').hidden = false;
+    document.getElementById('modal-close').onclick = closeModal;
   }
 
-  /* ── Add Friend ───────────────────────────────── */
-
-  function openAddFriendModal() {
-    document.getElementById('friendEmailInput').value = '';
-    _setFriendModalError('');
-    const modal = document.getElementById('addFriendModal');
-    modal.hidden = false;
-    modal.querySelector('input').focus();
+  function closeModal() {
+    document.getElementById('modal-overlay').hidden = true;
+    document.getElementById('modal-content').innerHTML = '';
   }
 
-  function closeModal(id) {
-    const modal = document.getElementById(id);
-    if (modal) modal.hidden = true;
+  /* ── DOM helpers ─────────────────────────────── */
+
+  function _el(html) {
+    const d = document.createElement('div');
+    d.innerHTML = html.trim();
+    return d.firstElementChild;
   }
 
-  function _setFriendModalError(msg) {
-    const el = document.getElementById('friendModalError');
-    el.textContent = msg;
-    el.hidden = !msg;
+  // Replace event listener each call (prevents duplicate bindings on re-render)
+  function _on(id, event, handler) {
+    const el = document.getElementById(id);
+    if (!el) return;
+    const clone = el.cloneNode(true);
+    el.parentNode.replaceChild(clone, el);
+    clone.addEventListener(event, handler);
   }
 
-  async function _doAddFriend() {
-    const email = document.getElementById('friendEmailInput').value.trim();
-    if (!email) {
-      _setFriendModalError('Please enter an email address.');
-      return;
-    }
+  /* ── Public ──────────────────────────────────── */
 
-    const confirmBtn = document.getElementById('confirmAddFriendBtn');
-    confirmBtn.disabled = true;
-
-    try {
-      const friend = await Posts.addFriend(email);
-      _friends.push(friend);
-      renderFriendsList();
-      renderFriendsChecklist('textFriendsList');
-      renderFriendsChecklist('imageFriendsList');
-      closeModal('addFriendModal');
-      Utils.showToast(`${friend.name || friend.email} added!`, 'success');
-    } catch (err) {
-      _setFriendModalError(err.message || 'Failed to add friend.');
-    } finally {
-      confirmBtn.disabled = false;
-    }
-  }
-
-  async function _doRemoveFriend(email) {
-    try {
-      _friends = await Posts.removeFriend(email);
-      renderFriendsList();
-      renderFriendsChecklist('textFriendsList');
-      renderFriendsChecklist('imageFriendsList');
-      Utils.showToast('Friend removed.', 'info');
-    } catch (err) {
-      Utils.showToast(err.message || 'Failed to remove friend.', 'error');
-    }
-  }
-
-  /* ── Exports ──────────────────────────────────── */
-
-  return {
-    init,
-    switchCompose,
-    openAddFriendModal,
-    closeModal,
-    updateUserBadge,
-    renderTimeline,
-    renderFriendsList
-  };
+  return { boot, navigate, openModal, closeModal, openLightbox, closeLightbox };
 })();
 
-// Boot the app once DOM is ready
-document.addEventListener('DOMContentLoaded', () => UI.init());
+if (document.readyState === 'loading') {
+  document.addEventListener('DOMContentLoaded', () => UI.boot());
+} else {
+  UI.boot();
+}

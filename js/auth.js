@@ -1,21 +1,18 @@
 // js/auth.js — Google OAuth 2.0 via Google Identity Services (GIS)
-// Uses the token model (access token) suitable for a pure client-side app.
-// Access tokens are stored in sessionStorage (not localStorage) so they
-// expire when the browser tab is closed.
 'use strict';
 
 const Auth = (() => {
 
   let _tokenClient   = null;
   let _accessToken   = null;
-  let _tokenExpiry   = 0;       // epoch ms
+  let _tokenExpiry   = 0;
   let _currentUser   = null;    // { userId, name, email, picture }
   let _onSignInCb    = null;
   let _onSignOutCb   = null;
 
-  const SESSION_KEY_TOKEN  = 'tl_access_token';
-  const SESSION_KEY_EXPIRY = 'tl_token_expiry';
-  const SESSION_KEY_USER   = 'tl_user';
+  const SESSION_KEY_TOKEN  = 'mc_access_token';
+  const SESSION_KEY_EXPIRY = 'mc_token_expiry';
+  const SESSION_KEY_USER   = 'mc_user';
 
   /* ── Initialise ────────────────────────────────── */
 
