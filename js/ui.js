@@ -135,6 +135,11 @@ const UI = (() => {
   function _setupRouter() {
     window.addEventListener('hashchange', () => _navigate(window.location.hash.slice(1) || 'feed'));
 
+    window.addEventListener('mc:session-expired', () => {
+      Utils.showToast('Your session expired — please sign in again.', 'error', 6000);
+      Auth.signOut();
+    });
+
     _on('back-from-circle',    'click', () => navigate('circles'));
     _on('back-from-collection','click', () => navigate('collections'));
     _on('sign-out-btn',        'click', () => Auth.signOut());
@@ -152,10 +157,18 @@ const UI = (() => {
     }
   }
 
+  const _pageTitles = {
+    feed: 'Feed', circles: 'My Circles', 'circle-detail': 'Circle',
+    collections: 'Collections', 'collection-detail': 'Collection',
+    friends: 'Friends', profile: 'Profile', settings: 'Settings', about: 'About'
+  };
+
   function _navigate(hash) {
     const parts = hash.split('/');
     const page  = parts[0];
     const id    = parts[1];
+
+    document.title = (_pageTitles[page] ? _pageTitles[page] + ' — ' : '') + 'My Circle';
 
     document.querySelectorAll('.nav-link').forEach(a => {
       const match = a.dataset.page === page || (page.startsWith(a.dataset.page) && a.dataset.page !== 'feed');
@@ -302,7 +315,26 @@ const UI = (() => {
 
       const strip = document.getElementById('circle-members-strip');
       (circle.members || []).forEach(m => {
-        strip.appendChild(_el(`<span class="member-chip">${Utils.escapeHtml(m.displayName || m.email)}</span>`));
+        const canRemove = isOwner && m.email !== user.email;
+        const chip = _el(`
+          <span class="member-chip">
+            ${Utils.escapeHtml(m.displayName || m.email)}
+            ${canRemove ? `<button class="chip-remove" title="Remove member">×</button>` : ''}
+          </span>
+        `);
+        if (canRemove) {
+          chip.querySelector('.chip-remove').addEventListener('click', async e => {
+            e.stopPropagation();
+            const label = m.displayName || m.email;
+            if (!confirm(`Remove ${label} from this circle?`)) return;
+            try {
+              await Data.removeMemberFromCircle(folderId, m.email);
+              _renderCircleDetail(folderId);
+              Utils.showToast(`${label} removed`);
+            } catch { Utils.showToast('Could not remove member', 'error'); }
+          });
+        }
+        strip.appendChild(chip);
       });
 
       const user    = Auth.getCurrentUser();

@@ -4,6 +4,16 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>My Circle</title>
+  <meta name="description" content="Private photo &amp; file sharing. Everything lives in your Google Drive — no servers, no ads, no middleman." />
+  <meta property="og:type"        content="website" />
+  <meta property="og:title"       content="My Circle" />
+  <meta property="og:description" content="Private photo &amp; file sharing. Everything lives in your Google Drive — no servers, no ads, no middleman." />
+  <meta name="twitter:card"       content="summary" />
+  <meta name="twitter:title"      content="My Circle" />
+  <meta name="twitter:description" content="Private photo &amp; file sharing. Everything lives in your Google Drive." />
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>◎</text></svg>" />
+  <link rel="manifest" href="manifest.json" />
+  <meta name="theme-color" content="#f8f8f5" />
   <meta http-equiv="Content-Security-Policy"
     content="default-src 'self';
              script-src 'self' https://apis.google.com https://accounts.google.com;
@@ -100,9 +110,6 @@
       <section id="page-feed" class="page" data-page="feed">
         <div class="page-header">
           <h2>Feed</h2>
-          <select id="feed-filter" class="select-sm">
-            <option value="all">Everyone</option>
-          </select>
         </div>
         <div id="feed-grid" class="media-grid"></div>
         <div id="feed-empty" class="empty-state" hidden>
