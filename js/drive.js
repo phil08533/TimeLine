@@ -230,6 +230,24 @@ const Drive = (() => {
     return data.files || [];
   }
 
+  /* ── All files listing ────────────────────── */
+
+  // Returns { files, nextPageToken } for ALL non-folder files in the user's Drive.
+  // Pass nextPageToken from a previous call to fetch subsequent pages.
+  async function listAllFiles(pageToken = null, pageSize = 50) {
+    const q = `trashed=false and mimeType!='application/vnd.google-apps.folder'`;
+    const params = new URLSearchParams({
+      q,
+      fields: 'nextPageToken,files(id,name,mimeType,size,createdTime,modifiedTime,thumbnailLink,shared)',
+      orderBy: 'modifiedTime desc',
+      spaces: 'drive',
+      pageSize: String(pageSize)
+    });
+    if (pageToken) params.set('pageToken', pageToken);
+    const data = await _json(`${BASE}/files?${params}`, { headers: _headers() });
+    return { files: data.files || [], nextPageToken: data.nextPageToken || null };
+  }
+
   /* ── Quota ────────────────────────────────── */
 
   async function getQuota() {
@@ -339,6 +357,7 @@ const Drive = (() => {
     removePermission:  _dw(removePermission, async () => {}),
     makePublic:        _dw(makePublic,     async () => {}),
     listSharedWithMe:  _dw(listSharedWithMe, async () => []),
+    listAllFiles:      _dw(listAllFiles,   async () => ({ files: [], nextPageToken: null })),
     getQuota:          _dw(getQuota,       async () => ({ limit: '16106127360', usage: '1073741824', usageInDrive: '536870912' })),
     listLargeFiles:    _dw(listLargeFiles, async () => []),
     getComments:       _dw(getComments,    _demoGetComments),

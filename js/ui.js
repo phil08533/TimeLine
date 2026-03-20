@@ -622,12 +622,13 @@ const UI = (() => {
 
   /* ── My Data ─────────────────────────────────── */
 
-  // Aggregates all media files from the user's own circles and collections.
-  // Items are grouped by source with section headings and filterable by type.
+  // Shows ALL files from the user's Google Drive with management actions.
 
-  let _myDataItems     = []; // all items (including hidden)
-  let _myDataHiddenIds = []; // set of hidden file IDs
-  let _pinSessionOk    = false; // PIN entered once per session
+  let _myDataItems         = []; // Drive file objects
+  let _myDataNextPageToken = null;
+  let _myDataHiddenIds     = [];
+  let _myDataCurrentFilter = 'all';
+  let _pinSessionOk        = false;
 
   async function _renderMyData() {
     const grid  = document.getElementById('my-data-grid');
@@ -635,6 +636,7 @@ const UI = (() => {
     grid.innerHTML = '<p class="muted-text" style="grid-column:1/-1">Loading…</p>';
     empty.hidden = true;
     _on('my-data-upload-btn', 'click', _openMyDataUploadModal);
+    _on('my-data-load-more', 'click', _loadMoreMyData);
 
     // Filter pills — deduplicate listeners with replacement
     document.querySelectorAll('#my-data-filters .filter-pill').forEach(btn => {
@@ -644,36 +646,14 @@ const UI = (() => {
     });
 
     try {
-      const [circles, colls, hiddenIds] = await Promise.all([
-        Data.listCircles(), Data.listCollections(), Data.getHiddenIds()
+      const [driveResult, hiddenIds] = await Promise.all([
+        Drive.listAllFiles(), Data.getHiddenIds()
       ]);
+      _myDataItems = driveResult.files;
+      _myDataNextPageToken = driveResult.nextPageToken;
       _myDataHiddenIds = hiddenIds;
-      _myDataItems = [];
+      _myDataCurrentFilter = 'all';
 
-      const isMedia = f => f.mimeType?.startsWith('image/') || f.mimeType?.startsWith('video/');
-
-      await Promise.all([
-        ...circles.map(async c => {
-          try {
-            (await Drive.listFiles(c.folderId)).filter(isMedia)
-              .forEach(f => _myDataItems.push({ file: f, source: c.name, type: 'circles', folderId: c.folderId }));
-          } catch { /* skip */ }
-        }),
-        ...colls.filter(c => !c.isPost).map(async c => {
-          try {
-            (await Drive.listFiles(c.folderId)).filter(isMedia)
-              .forEach(f => _myDataItems.push({ file: f, source: c.name, type: 'collections', folderId: c.folderId }));
-          } catch { /* skip */ }
-        }),
-        ...colls.filter(c => c.isPost).map(async c => {
-          try {
-            (await Drive.listFiles(c.folderId)).filter(isMedia)
-              .forEach(f => _myDataItems.push({ file: f, source: c.name || 'Post', type: 'posts', folderId: c.folderId }));
-          } catch { /* skip */ }
-        })
-      ]);
-
-      // Reset to "all"
       document.querySelectorAll('#my-data-filters .filter-pill').forEach(b =>
         b.classList.toggle('active', b.dataset.filter === 'all'));
       _renderMyDataGrid('all');
@@ -685,8 +665,22 @@ const UI = (() => {
     }
   }
 
+  async function _loadMoreMyData() {
+    if (!_myDataNextPageToken) return;
+    const btn = document.getElementById('my-data-load-more');
+    if (btn) { btn.disabled = true; btn.textContent = 'Loading…'; }
+    try {
+      const result = await Drive.listAllFiles(_myDataNextPageToken);
+      _myDataItems = _myDataItems.concat(result.files);
+      _myDataNextPageToken = result.nextPageToken;
+      _renderMyDataGrid(_myDataCurrentFilter);
+    } catch { Utils.showToast('Could not load more files', 'error'); }
+    if (btn) { btn.disabled = false; btn.textContent = 'Load more'; }
+  }
+
   async function _onMyDataFilter(btn) {
     const filter = btn.dataset.filter;
+    _myDataCurrentFilter = filter;
     document.querySelectorAll('#my-data-filters .filter-pill').forEach(b => b.classList.toggle('active', b === btn));
 
     if (filter !== 'hidden') { _renderMyDataGrid(filter); return; }
@@ -696,81 +690,141 @@ const UI = (() => {
 
     const hasPin = !!(await Data.getPin());
     if (!hasPin) {
-      // No PIN set yet — prompt to create one
       _openSetPinModal(() => { _pinSessionOk = true; _renderMyDataGrid('hidden'); });
     } else {
       _openVerifyPinModal(() => { _pinSessionOk = true; _renderMyDataGrid('hidden'); });
     }
   }
 
+  function _fileTypeIcon(mimeType) {
+    if (!mimeType) return '📄';
+    if (mimeType.startsWith('image/')) return '🖼️';
+    if (mimeType.startsWith('video/')) return '🎥';
+    if (mimeType.startsWith('audio/')) return '🎵';
+    if (mimeType.includes('pdf')) return '📕';
+    if (mimeType.includes('spreadsheet') || mimeType.includes('excel') || mimeType === 'text/csv') return '📊';
+    if (mimeType.includes('presentation') || mimeType.includes('powerpoint')) return '📋';
+    if (mimeType.includes('document') || mimeType.includes('word') || mimeType.startsWith('text/')) return '📝';
+    if (mimeType.includes('zip') || mimeType.includes('archive') || mimeType.includes('tar') || mimeType.includes('rar')) return '🗜️';
+    return '📄';
+  }
+
+  function _formatFileSize(bytes) {
+    if (!bytes) return '';
+    const n = parseInt(bytes, 10);
+    if (isNaN(n)) return '';
+    if (n < 1024) return `${n} B`;
+    if (n < 1048576) return `${(n / 1024).toFixed(1)} KB`;
+    if (n < 1073741824) return `${(n / 1048576).toFixed(1)} MB`;
+    return `${(n / 1073741824).toFixed(1)} GB`;
+  }
+
   function _renderMyDataGrid(filter) {
-    const grid  = document.getElementById('my-data-grid');
-    const empty = document.getElementById('my-data-empty');
+    const grid        = document.getElementById('my-data-grid');
+    const empty       = document.getElementById('my-data-empty');
+    const loadMoreBtn = document.getElementById('my-data-load-more');
     _clearThumbBlobs();
     grid.innerHTML = '';
 
     const hiddenSet = new Set(_myDataHiddenIds);
+    const isMedia   = f => f.mimeType?.startsWith('image/') || f.mimeType?.startsWith('video/');
+
     let items;
     if (filter === 'hidden') {
-      items = _myDataItems.filter(i => hiddenSet.has(i.file.id));
+      items = _myDataItems.filter(f => hiddenSet.has(f.id));
+    } else if (filter === 'images') {
+      items = _myDataItems.filter(f => f.mimeType?.startsWith('image/') && !hiddenSet.has(f.id));
+    } else if (filter === 'videos') {
+      items = _myDataItems.filter(f => f.mimeType?.startsWith('video/') && !hiddenSet.has(f.id));
+    } else if (filter === 'documents') {
+      items = _myDataItems.filter(f => !isMedia(f) && !hiddenSet.has(f.id));
     } else {
-      const base = filter === 'all' ? _myDataItems : _myDataItems.filter(i => i.type === filter);
-      items = base.filter(i => !hiddenSet.has(i.file.id));
+      items = _myDataItems.filter(f => !hiddenSet.has(f.id));
     }
 
-    if (!items.length) { empty.hidden = false; return; }
+    if (!items.length) {
+      empty.hidden = false;
+      const p = empty.querySelector('p');
+      if (p) p.textContent = filter === 'hidden' ? 'No hidden files.' : 'No files found in your Drive.';
+      if (loadMoreBtn) loadMoreBtn.hidden = true;
+      return;
+    }
     empty.hidden = true;
 
-    items.sort((a, b) => new Date(b.file.createdTime) - new Date(a.file.createdTime));
+    items.sort((a, b) => new Date(b.modifiedTime || b.createdTime) - new Date(a.modifiedTime || a.createdTime));
 
-    // Group by source
+    // Group by type when showing All or Hidden
     const groups = [];
-    const seen = new Map();
-    items.forEach(item => {
-      const key = `${item.type}:${item.source}`;
-      if (!seen.has(key)) { seen.set(key, []); groups.push({ key, label: item.source, type: item.type, items: seen.get(key) }); }
-      seen.get(key).push(item);
-    });
-
-    const typeIcon = { circles: '◎', collections: '▤', posts: '✦', hidden: '👁' };
+    if (filter === 'all' || filter === 'hidden') {
+      const imgs = items.filter(f => f.mimeType?.startsWith('image/'));
+      const vids = items.filter(f => f.mimeType?.startsWith('video/'));
+      const docs = items.filter(f => !isMedia(f));
+      if (imgs.length) groups.push({ label: '🖼️ Images', items: imgs });
+      if (vids.length) groups.push({ label: '🎥 Videos', items: vids });
+      if (docs.length) groups.push({ label: '📄 Documents & Files', items: docs });
+    } else {
+      groups.push({ label: null, items });
+    }
 
     groups.forEach(g => {
-      const heading = document.createElement('div');
-      heading.className = 'my-data-section-heading';
-      heading.textContent = `${typeIcon[g.type] || '▤'} ${g.label}`;
-      grid.appendChild(heading);
+      if (g.label) {
+        const heading = document.createElement('div');
+        heading.className = 'my-data-section-heading';
+        heading.textContent = g.label;
+        grid.appendChild(heading);
+      }
 
-      g.items.forEach(({ file, folderId, type }) => {
-        const isHidden = new Set(_myDataHiddenIds).has(file.id);
+      g.items.forEach(file => {
+        const isHidden   = hiddenSet.has(file.id);
+        const isMediaFile = isMedia(file);
+        const icon       = _fileTypeIcon(file.mimeType);
+        const sizeStr    = _formatFileSize(file.size);
+        const dateStr    = file.modifiedTime
+          ? new Date(file.modifiedTime).toLocaleDateString()
+          : (file.createdTime ? new Date(file.createdTime).toLocaleDateString() : '');
+
+        const wrapper = document.createElement('div');
+        wrapper.className = 'drive-file-card';
+
         const el = _el(`
-          <div class="media-item media-item--managed">
-            <img src="" alt="" loading="lazy" />
+          <div class="media-item media-item--managed${isMediaFile ? '' : ' drive-file-non-media-item'}">
+            ${isMediaFile
+              ? '<img src="" alt="" loading="lazy" />'
+              : `<div class="drive-file-non-media"><span class="drive-file-icon">${icon}</span></div>`}
             <div class="media-item-actions">
-              <button class="mia-btn mia-post"  title="Post to Feed">↗</button>
-              <button class="mia-btn mia-hide"  title="${isHidden ? 'Unhide' : 'Hide'}">👁</button>
+              <button class="mia-btn mia-share" title="Share">📤</button>
+              <button class="mia-btn mia-add"   title="Add to circle or collection">📁</button>
+              <button class="mia-btn mia-hide"  title="${isHidden ? 'Unhide' : 'Hide (private)'}">👁</button>
               <button class="mia-btn mia-del"   title="Delete">🗑</button>
             </div>
           </div>
         `);
-        _loadThumbnail(el.querySelector('img'), file.id, file.thumbnailLink);
 
-        // View (click image area)
-        el.querySelector('img').addEventListener('click', e => {
+        if (isMediaFile) {
+          _loadThumbnail(el.querySelector('img'), file.id, file.thumbnailLink);
+          el.querySelector('img').addEventListener('click', e => {
+            e.stopPropagation();
+            openLightbox(file.id, null, { canDelete: true, thumbnailLink: file.thumbnailLink });
+          });
+        }
+
+        // Share
+        el.querySelector('.mia-share').addEventListener('click', e => {
           e.stopPropagation();
-          openLightbox(file.id, folderId, { canDelete: true, thumbnailLink: file.thumbnailLink });
+          _openShareFileModal(file.id, file.name);
         });
 
-        // Post to Feed
-        el.querySelector('.mia-post').addEventListener('click', async e => {
+        // Add to collection
+        el.querySelector('.mia-add').addEventListener('click', e => {
           e.stopPropagation();
-          _openPostModal();
+          _openAddToCollectionModal(file.id, file.name);
         });
 
         // Hide / Unhide
         el.querySelector('.mia-hide').addEventListener('click', async e => {
           e.stopPropagation();
-          const btn = e.currentTarget;
-          btn.disabled = true;
+          const hideBtn = e.currentTarget;
+          hideBtn.disabled = true;
           try {
             if (isHidden) {
               await Data.unhideFile(file.id);
@@ -780,25 +834,148 @@ const UI = (() => {
               _myDataHiddenIds.push(file.id);
             }
             _renderMyDataGrid(filter);
-          } catch { Utils.showToast('Could not update hidden status', 'error'); btn.disabled = false; }
+          } catch { Utils.showToast('Could not update hidden status', 'error'); hideBtn.disabled = false; }
         });
 
         // Delete
         el.querySelector('.mia-del').addEventListener('click', async e => {
           e.stopPropagation();
           if (!confirm(`Delete "${file.name}"? This cannot be undone.`)) return;
-          const btn = e.currentTarget;
-          btn.disabled = true;
+          const delBtn = e.currentTarget;
+          delBtn.disabled = true;
           try {
             await Drive.deleteFile(file.id);
-            _myDataItems = _myDataItems.filter(i => i.file.id !== file.id);
+            _myDataItems = _myDataItems.filter(f => f.id !== file.id);
             _renderMyDataGrid(filter);
             Utils.showToast('Deleted');
-          } catch { Utils.showToast('Could not delete file', 'error'); btn.disabled = false; }
+          } catch { Utils.showToast('Could not delete file', 'error'); delBtn.disabled = false; }
         });
 
-        grid.appendChild(el);
+        const label = document.createElement('div');
+        label.className = 'drive-file-label';
+        label.title = file.name;
+        label.textContent = file.name;
+        wrapper.appendChild(el);
+        wrapper.appendChild(label);
+
+        if (sizeStr || dateStr) {
+          const meta = document.createElement('div');
+          meta.className = 'drive-file-meta';
+          meta.textContent = [sizeStr, dateStr].filter(Boolean).join(' · ');
+          wrapper.appendChild(meta);
+        }
+
+        grid.appendChild(wrapper);
       });
+    });
+
+    if (loadMoreBtn) {
+      loadMoreBtn.hidden = !_myDataNextPageToken || filter === 'hidden';
+    }
+  }
+
+  /* ── Share file modal ─────────────────────────── */
+
+  function _openShareFileModal(fileId, fileName) {
+    openModal(`
+      <h3>Share "${Utils.escapeHtml(fileName)}"</h3>
+      <form id="share-form" class="form-block">
+        <div class="form-field">
+          <label>Email address</label>
+          <input type="email" id="share-email" class="input" placeholder="friend@example.com" autocomplete="email" />
+        </div>
+        <div class="form-field">
+          <label>Permission</label>
+          <select id="share-role" class="select-sm" style="width:100%">
+            <option value="reader">Viewer — can view only</option>
+            <option value="commenter">Commenter — can comment</option>
+            <option value="writer">Editor — can edit</option>
+          </select>
+        </div>
+        <div class="form-field">
+          <label class="checkbox-label">
+            <input type="checkbox" id="share-public" />
+            Make public (anyone with the link)
+          </label>
+        </div>
+        <p id="share-status" class="muted-text small" aria-live="polite"></p>
+        <div class="modal-actions">
+          <button type="button" class="btn btn-ghost btn-sm modal-cancel-btn">Cancel</button>
+          <button type="submit" class="btn btn-primary btn-sm">Share</button>
+        </div>
+      </form>
+    `);
+    document.querySelector('.modal-cancel-btn').addEventListener('click', closeModal);
+    document.getElementById('share-public').addEventListener('change', e => {
+      const checked = e.target.checked;
+      document.getElementById('share-email').disabled = checked;
+      document.getElementById('share-role').disabled  = checked;
+    });
+    document.getElementById('share-form').addEventListener('submit', async e => {
+      e.preventDefault();
+      const isPublic = document.getElementById('share-public').checked;
+      const email    = document.getElementById('share-email').value.trim();
+      const role     = document.getElementById('share-role').value;
+      const status   = document.getElementById('share-status');
+      const btn      = e.target.querySelector('[type=submit]');
+      btn.disabled = true; btn.textContent = 'Sharing…';
+      status.textContent = '';
+      try {
+        if (isPublic) {
+          await Drive.makePublic(fileId);
+          Utils.showToast('File is now public');
+        } else {
+          if (!email) { status.textContent = 'Enter an email address.'; btn.disabled = false; btn.textContent = 'Share'; return; }
+          await Drive.shareWithEmail(fileId, email, role);
+          Utils.showToast(`Shared with ${email}`);
+        }
+        closeModal();
+      } catch { status.textContent = 'Could not share. Try again.'; btn.disabled = false; btn.textContent = 'Share'; }
+    });
+  }
+
+  /* ── Add to collection modal ──────────────────── */
+
+  async function _openAddToCollectionModal(fileId, fileName) {
+    let circles = [], colls = [];
+    try {
+      [circles, colls] = await Promise.all([Data.listCircles(), Data.listCollections()]);
+    } catch { Utils.showToast('Could not load destinations', 'error'); return; }
+
+    const destOptions = [
+      ...circles.map(c => `<option value="${Utils.escapeHtml(c.folderId)}">◎ ${Utils.escapeHtml(c.name)} (Circle)</option>`),
+      ...colls.filter(c => !c.isPost).map(c => `<option value="${Utils.escapeHtml(c.folderId)}">▤ ${Utils.escapeHtml(c.name)} (Collection)</option>`)
+    ].join('');
+
+    if (!destOptions) { Utils.showToast('Create a circle or collection first', 'error'); return; }
+
+    openModal(`
+      <h3>Add to Circle or Collection</h3>
+      <p class="muted-text small">A copy of "${Utils.escapeHtml(fileName)}" will be added to the destination.</p>
+      <form id="add-to-coll-form" class="form-block">
+        <div class="form-field">
+          <label>Destination</label>
+          <select id="add-dest" class="select-sm" style="width:100%">${destOptions}</select>
+        </div>
+        <p id="add-status" class="muted-text small" aria-live="polite"></p>
+        <div class="modal-actions">
+          <button type="button" class="btn btn-ghost btn-sm modal-cancel-btn">Cancel</button>
+          <button type="submit" class="btn btn-primary btn-sm">Add</button>
+        </div>
+      </form>
+    `);
+    document.querySelector('.modal-cancel-btn').addEventListener('click', closeModal);
+    document.getElementById('add-to-coll-form').addEventListener('submit', async e => {
+      e.preventDefault();
+      const destFolderId = document.getElementById('add-dest').value;
+      const status       = document.getElementById('add-status');
+      const btn          = e.target.querySelector('[type=submit]');
+      btn.disabled = true; btn.textContent = 'Adding…';
+      try {
+        await Drive.copyFile(fileId, destFolderId);
+        Utils.showToast('Added successfully');
+        closeModal();
+      } catch { status.textContent = 'Could not add file. Try again.'; btn.disabled = false; btn.textContent = 'Add'; }
     });
   }
 
