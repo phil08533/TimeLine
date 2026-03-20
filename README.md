@@ -1,132 +1,124 @@
-# TimeLine
+# My Circle
 
-A minimal, friends-only photo and text sharing social network.
-**No servers.** The entire backend is Google Drive. The frontend is a static page hosted on GitHub Pages.
+**Your photos. Your drive. Your rules.**
 
----
+My Circle is a private photo & file sharing app. No backend, no ads, no middleman.
+Everything lives in *your* Google Drive. You control who sees what.
 
-## Quick Start (Demo Mode)
-
-Open `index.html` in a browser and click **Sign In with Google**.
-Without a `js/config.js` file the app runs in **demo mode** — no Google account required, data stored locally in the browser.
+> **You own your data.** Delete a file from your Drive and it's gone everywhere.
+> We don't have servers. There's nothing to breach.
 
 ---
 
-## Deploy to GitHub Pages (Full Mode)
+## How it works for users
 
-### 1. Google Cloud Console setup
+1. Open the app and click **Sign in with Google**
+2. The app creates a `mycircle/` folder in your Drive automatically
+3. Add friends, create circles, upload photos — everything saves to your Drive
+4. Friends you share with access your files directly via Google's own permission system
 
+That's it. No account creation, no passwords, no settings to configure.
+
+---
+
+## Development stages
+
+Progress is tracked here. Each stage is pushed separately for review.
+
+| # | Stage | Status |
+|---|-------|--------|
+| 1 | **Auth** — Google sign-in, session, first-run Drive setup | ✅ Done |
+| 2 | **Profile** — display name, handle, bio, avatar | ✅ Done |
+| 3 | **Friends** — add by email, remove, block/unblock | ✅ Done |
+| 4 | **Collections** — create albums, upload files, set sharing | ✅ Done |
+| 5 | **Circles** — group folders, invite members, upload | ✅ Done |
+| 6 | **Feed** — see files friends have shared with you | 🔧 Needs fix |
+| 7 | **Copy & manage** — copy friends' files, delete your own, storage viewer | [ ] Not started |
+| 8 | **Sign-in screen** — clean login UX, site-owner Client ID setup | 🔧 In progress |
+| 9 | **Theme & polish** — visual themes, colour picker, mobile UX | ✅ Done |
+| 10 | **About & licensing** — ownership pitch, MIT license, how it works | [ ] Not started |
+
+### What "basically working" means
+Stages 1–6 + 8 complete. User can sign in, set up a profile, add friends,
+create circles and collections, upload files, and see what friends share —
+all without touching a config file or knowing what JSON is.
+
+---
+
+## For site owners (hosting your own instance)
+
+You need a Google OAuth Client ID. Do this once — your users never see it.
+
+### Quick setup
 1. Go to [console.cloud.google.com](https://console.cloud.google.com/)
-2. Create a new project (e.g. `timeline-app`)
-3. Enable **Google Drive API**
-4. Create **OAuth 2.0 credentials** (Web Application type):
-   - Authorised JavaScript origins: `https://YOUR_USERNAME.github.io`
-   - Authorised redirect URIs: `https://YOUR_USERNAME.github.io/timeline/`
-5. Create an **API Key** → restrict it to *Drive API* and your GitHub Pages domain
-6. Copy `CLIENT_ID` and `API_KEY`
+2. Create a project → enable **Google Drive API**
+3. **APIs & Services → Credentials → Create → OAuth 2.0 Client ID** (Web application)
+4. Add your GitHub Pages URL as an **Authorised JavaScript origin**
+5. Copy the Client ID
 
-### 2. Configure the app
+Then either:
+- **Option A (easy):** Open the app, expand "Configure Google login", paste the Client ID, save
+- **Option B (deploy):** Copy `config.example.js` → `config.js`, fill in your Client ID, push
 
-```bash
-cp config.example.js js/config.js
-```
+Your users then just open the URL and click **Sign in with Google**.
 
-Edit `js/config.js`:
-
-```javascript
-const CONFIG = {
-  GOOGLE_CLIENT_ID: 'YOUR_CLIENT_ID.apps.googleusercontent.com',
-  GOOGLE_API_KEY:   'YOUR_API_KEY',
-  REDIRECT_URI:     'https://YOUR_USERNAME.github.io/timeline/',
-  APP_FOLDER:       'timeline',
-  DEMO_MODE:        false,
-  MAX_FILE_SIZE: {
-    image: 10 * 1024 * 1024,
-    video: 100 * 1024 * 1024,
-    json:  100 * 1024
-  }
-};
-```
-
-> **Important:** `js/config.js` is in `.gitignore`. Never commit it.
-
-### 3. Push and enable GitHub Pages
-
-```bash
-git add .
-git commit -m "Initial deploy"
-git push origin main
-```
-
-Then go to **Settings → Pages** and set the source to the `main` branch, root folder.
+### Deploy to GitHub Pages
+1. Fork this repo
+2. Settings → Pages → source: `main` branch, root
+3. Live at `https://YOUR_USERNAME.github.io/TimeLine/`
 
 ---
 
-## File Structure
+## File structure
 
 ```
-timeline/
-├── index.html          # Single-page app shell
-├── config.example.js   # Config template (safe to commit)
-├── css/
-│   └── styles.css      # All styling
-├── js/
-│   ├── config.js       # Your credentials (NOT committed — copy from example)
-│   ├── utils.js        # XSS helpers, toasts, debounce, retry
-│   ├── auth.js         # Google OAuth via Identity Services
-│   ├── drive.js        # Google Drive REST API wrapper
-│   ├── posts.js        # Post / profile / friends CRUD
-│   └── ui.js           # DOM rendering and event wiring
-└── README.md
+my-circle/
+├── index.html            # Single-page app shell
+├── config.example.js     # Config template (safe to commit)
+├── config.js             # Your Client ID (NOT committed — gitignored)
+└── js/
+    ├── auth.js           # Google OAuth 2.0 via Identity Services
+    ├── drive.js          # Google Drive REST API wrapper
+    ├── data.js           # All data — profiles, friends, circles, collections
+    ├── theme.js          # Visual theme + colour switching
+    ├── ui.js             # SPA router and all page renderers
+    └── utils.js          # Toasts, XSS prevention, retry, formatting
 ```
 
 ---
 
-## Google Drive Folder Layout
+## Drive folder layout
+
+Everything the app creates lives inside one folder in your Drive:
 
 ```
 My Drive/
-└── timeline/
-    ├── profiles/
-    │   └── {userId}/
-    │       ├── profile.json
-    │       └── friends.json
-    └── posts/
-        └── {userId}/
-            ├── post-{timestamp}.json
-            └── media-{timestamp}-{filename}
+└── mycircle/
+    ├── profile.json          ← your name, handle, bio
+    ├── friends.json          ← friend list + block list
+    ├── settings.json         ← theme, sharing defaults
+    ├── circles/
+    │   └── circle-{id}/      ← shared Drive folder (Google handles permissions)
+    │       └── _meta.json    ← circle name, members, settings
+    └── collections/
+        └── coll-{id}/        ← your album folder
+            ├── _meta.json    ← name, sharing settings
+            ├── reactions.json
+            └── photo.jpg
 ```
 
 ---
 
-## MVP Feature Checklist
+## Privacy & security
 
-- [x] Google OAuth login / logout (demo mode without credentials)
-- [x] Create text posts (max 500 characters)
-- [x] Upload image / video posts (jpg, png, gif, webp, mp4, webm)
-- [x] Add / remove friends by email
-- [x] Choose which friends see each post
-- [x] Private / public toggle per post
-- [x] Timeline view with relative timestamps
-- [x] Hand-drawn image frame aesthetic
-- [x] XSS prevention (`textContent`, `escapeHtml`)
-- [x] File-size validation (10 MB images, 100 MB videos)
-- [x] Rate-limit error handling (Drive 403/429)
-- [x] Retry with exponential back-off
-- [x] Mobile-first responsive layout
-- [x] Toast notifications
-
----
-
-## Security Notes
-
-- OAuth access tokens are stored in **`sessionStorage`** only (cleared on tab close)
-- All user-generated text is rendered with `.textContent` — never `.innerHTML`
-- File types and sizes are validated before upload
-- No server-side components; attack surface is limited to Google's APIs
+- OAuth tokens in **`sessionStorage`** only — cleared on tab close
+- All text rendered with `.textContent` — no XSS via `.innerHTML`
+- Files validated before upload
+- No server, no database, no telemetry, no analytics
+- MIT licensed — read the source, fork it, self-host it
 
 ---
 
 ## License
 
-MIT
+MIT — free to use, modify, and self-host.
