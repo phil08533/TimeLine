@@ -268,62 +268,186 @@ const UI = (() => {
   let _feedAlbums = [];   // cached after load for filter re-renders
   let _feedFilter = 'all';
 
-  function _wireComposer() {
-    // De-duplicate by replacing the submit button node
-    const submitBtn = document.getElementById('composer-submit');
-    if (!submitBtn) return;
-    const freshSubmit = submitBtn.cloneNode(true);
-    submitBtn.parentNode.replaceChild(freshSubmit, submitBtn);
+  async function _openPostModal() {
+    // Load circles so the audience picker can list them
+    const circles = await Data.listCircles().catch(() => []);
 
-    const fileInput   = document.getElementById('composer-files');
-    const caption     = document.getElementById('composer-caption');
-    const previews    = document.getElementById('composer-previews');
-    const sharingEl   = document.getElementById('composer-sharing');
+    const circlePillsHtml = circles.length
+      ? circles.map(c => `
+          <label class="circle-check">
+            <input type="checkbox" name="circle-ids" value="${Utils.escapeHtml(c.folderId)}" />
+            <span>${Utils.escapeHtml(c.name)}</span>
+          </label>`).join('')
+      : '<span class="muted-text small">You have no circles yet.</span>';
 
-    // De-duplicate file input listener
-    const freshFile = fileInput.cloneNode(true);
-    fileInput.parentNode.replaceChild(freshFile, fileInput);
+    openModal(`
+      <h3>Create a Post</h3>
+      <form id="post-form" class="form-block">
 
-    let _selectedFiles = [];
+        <div class="post-dropzone" id="post-dropzone" tabindex="0" role="button" aria-label="Add photos or videos">
+          <div class="post-dropzone-inner">
+            <span class="post-dropzone-icon">📷</span>
+            <span>Drag photos &amp; videos here, or <span class="link-text">browse</span></span>
+          </div>
+          <input type="file" id="post-files" accept="image/*,video/*" multiple hidden />
+        </div>
 
-    freshFile.addEventListener('change', () => {
-      _selectedFiles = Array.from(freshFile.files);
-      previews.innerHTML = '';
-      previews.hidden = !_selectedFiles.length;
-      _selectedFiles.forEach(f => {
+        <div id="post-previews" class="post-previews" hidden></div>
+
+        <div class="form-field" id="post-album-row" hidden>
+          <label>Album title <span class="muted-text small">(required when adding multiple photos)</span></label>
+          <input type="text" id="post-album-title" class="input" placeholder="Summer 2025, Road trip…" maxlength="80" />
+        </div>
+
+        <div class="form-field">
+          <label>Caption <span class="muted-text small">(optional)</span></label>
+          <textarea id="post-caption" class="input" rows="3" placeholder="What's on your mind?"></textarea>
+        </div>
+
+        <div class="form-field">
+          <label>Who can see this?</label>
+          <div class="audience-options">
+
+            <label class="audience-option">
+              <input type="radio" name="audience" value="friends" checked />
+              <div>
+                <div class="audience-label">All friends</div>
+                <div class="muted-text small">Everyone you've added as a friend</div>
+              </div>
+            </label>
+
+            <label class="audience-option" id="audience-circles-row">
+              <input type="radio" name="audience" value="circles" />
+              <div>
+                <div class="audience-label">Specific circles</div>
+                <div class="muted-text small">Only people in the circles you choose</div>
+              </div>
+            </label>
+            <div class="circle-picker" id="circle-picker" hidden>
+              ${circlePillsHtml}
+            </div>
+
+            <label class="audience-option">
+              <input type="radio" name="audience" value="everyone" />
+              <div>
+                <div class="audience-label">Public link</div>
+                <div class="muted-text small">Anyone who has the link can view — shared via Google Drive's link sharing</div>
+              </div>
+            </label>
+
+          </div>
+        </div>
+
+        <p id="post-status" class="muted-text small" aria-live="polite"></p>
+        <div class="modal-actions">
+          <button type="button" class="btn btn-ghost btn-sm modal-cancel-btn">Cancel</button>
+          <button type="submit" class="btn btn-primary btn-sm">Post</button>
+        </div>
+      </form>
+    `);
+
+    document.querySelector('.modal-cancel-btn').addEventListener('click', closeModal);
+
+    const dropzone   = document.getElementById('post-dropzone');
+    const fileInput  = document.getElementById('post-files');
+    const previewBox = document.getElementById('post-previews');
+    const albumRow   = document.getElementById('post-album-row');
+    const albumTitle = document.getElementById('post-album-title');
+    const circlePick = document.getElementById('circle-picker');
+    const status     = document.getElementById('post-status');
+    let selectedFiles = [];
+
+    // Dropzone click / keyboard
+    dropzone.addEventListener('click', () => fileInput.click());
+    dropzone.addEventListener('keydown', e => { if (e.key === 'Enter' || e.key === ' ') fileInput.click(); });
+
+    // Drag-and-drop
+    dropzone.addEventListener('dragover',  e => { e.preventDefault(); dropzone.classList.add('dropzone--over'); });
+    dropzone.addEventListener('dragleave', ()  => dropzone.classList.remove('dropzone--over'));
+    dropzone.addEventListener('drop', e => {
+      e.preventDefault();
+      dropzone.classList.remove('dropzone--over');
+      _applyFiles(Array.from(e.dataTransfer.files).filter(f =>
+        f.type.startsWith('image/') || f.type.startsWith('video/')
+      ));
+    });
+
+    fileInput.addEventListener('change', () => _applyFiles(Array.from(fileInput.files)));
+
+    function _applyFiles(files) {
+      selectedFiles = files;
+      previewBox.innerHTML = '';
+      previewBox.hidden = !files.length;
+      albumRow.hidden    = files.length <= 1;
+      files.forEach(f => {
         const url  = URL.createObjectURL(f);
-        const wrap = _el(`<div class="composer-preview-item"><img src="${url}" alt="${Utils.escapeHtml(f.name)}" /></div>`);
-        previews.appendChild(wrap);
+        const item = _el(`<div class="post-preview-item"><img src="${url}" alt="${Utils.escapeHtml(f.name)}" /></div>`);
+        previewBox.appendChild(item);
+      });
+      if (files.length > 1 && !albumTitle.value) albumTitle.focus();
+    }
+
+    // Show / hide circle picker when audience radio changes
+    document.querySelectorAll('input[name="audience"]').forEach(r => {
+      r.addEventListener('change', () => {
+        if (circlePick) circlePick.hidden = r.value !== 'circles';
       });
     });
 
-    freshSubmit.addEventListener('click', async () => {
-      const text    = caption.value.trim();
-      const sharing = sharingEl.value;
-      if (!text && !_selectedFiles.length) {
-        Utils.showToast('Write something or add a photo first', 'error');
+    // Submit
+    document.getElementById('post-form').addEventListener('submit', async e => {
+      e.preventDefault();
+      const caption  = document.getElementById('post-caption').value.trim();
+      const audience = document.querySelector('input[name="audience"]:checked').value;
+      const title    = albumTitle.value.trim();
+
+      if (!caption && !selectedFiles.length) {
+        status.textContent = 'Write something or add a photo first.';
         return;
       }
-      freshSubmit.disabled = true;
-      freshSubmit.textContent = 'Posting…';
-      Utils.showLoading();
-      try {
-        const post = await Data.createPost(text, sharing);
-        if (_selectedFiles.length) {
-          await Promise.all(_selectedFiles.map(f => Drive.uploadMedia(f, post.folderId)));
+      if (selectedFiles.length > 1 && !title) {
+        status.textContent = 'Give your album a title.';
+        albumTitle.focus();
+        return;
+      }
+
+      let circleIds = [];
+      if (audience === 'circles') {
+        circleIds = [...document.querySelectorAll('input[name="circle-ids"]:checked')].map(el => el.value);
+        if (!circleIds.length) {
+          status.textContent = 'Select at least one circle.';
+          return;
         }
-        caption.value = '';
-        previews.innerHTML = '';
-        previews.hidden = true;
-        freshFile.value = '';
-        _selectedFiles = [];
+      }
+
+      const submitBtn = e.target.querySelector('[type="submit"]');
+      submitBtn.disabled = true;
+      submitBtn.textContent = 'Posting…';
+      status.textContent = 'Creating…';
+      Utils.showLoading();
+
+      try {
+        const post = await Data.createPost({
+          caption,
+          name: title || (selectedFiles.length === 1 ? selectedFiles[0].name.replace(/\.[^.]+$/, '') : `Post ${new Date().toLocaleDateString()}`),
+          sharing: audience,
+          circleIds
+        });
+
+        if (selectedFiles.length) {
+          status.textContent = `Uploading ${selectedFiles.length} file${selectedFiles.length > 1 ? 's' : ''}…`;
+          await Promise.all(selectedFiles.map(f => Drive.uploadMedia(f, post.folderId)));
+        }
+
+        closeModal();
         Utils.showToast('Posted!');
-        await _renderFeed();
+        _renderFeed();
       } catch {
         Utils.showToast('Failed to post', 'error');
+        status.textContent = '';
+        submitBtn.disabled = false;
+        submitBtn.textContent = 'Post';
       } finally {
-        freshSubmit.disabled = false;
-        freshSubmit.textContent = 'Post';
         Utils.hideLoading();
       }
     });
@@ -336,8 +460,7 @@ const UI = (() => {
     empty.hidden = true;
     _clearThumbBlobs();
 
-    // ── Inline post composer ──────────────────────────────
-    _wireComposer();
+    _on('new-post-btn', 'click', () => _openPostModal());
 
     // Wire up filter pills (use _on equivalent via replacement to avoid duplicate listeners)
     document.querySelectorAll('#feed-filters .filter-pill').forEach(btn => {
@@ -1086,59 +1209,6 @@ const UI = (() => {
   }
 
   /* ── New Post ────────────────────────────────── */
-
-  function _openNewPostModal() {
-    openModal(`
-      <h3>New Post</h3>
-      <form id="mf" class="form-block">
-        <div class="form-field">
-          <label>Photo or Video</label>
-          <input type="file" id="post-file-input" class="input" accept="image/*,video/*" required />
-        </div>
-        <div class="form-field">
-          <label>Caption <span class="muted-text">(optional)</span></label>
-          <textarea name="caption" class="input" rows="3" placeholder="What's on your mind?"></textarea>
-        </div>
-        <div class="form-field">
-          <label>Share with</label>
-          <select name="sharing" class="select-sm" style="width:100%">
-            <option value="friends">Friends</option>
-            <option value="everyone">Anyone with link (Public)</option>
-          </select>
-        </div>
-        <p id="post-status" class="muted-text small"></p>
-        <div class="modal-actions">
-          <button type="button" class="btn btn-ghost btn-sm modal-cancel-btn">Cancel</button>
-          <button type="submit" class="btn btn-primary btn-sm">Post</button>
-        </div>
-      </form>
-    `);
-    document.querySelector('.modal-cancel-btn').addEventListener('click', closeModal);
-    document.getElementById('mf').addEventListener('submit', async e => {
-      e.preventDefault();
-      const fd     = new FormData(e.target);
-      const file   = document.getElementById('post-file-input').files[0];
-      if (!file) return;
-      const v = Utils.validateMediaFile(file);
-      if (!v.ok) { Utils.showToast(v.error, 'error'); return; }
-      const status = document.getElementById('post-status');
-      status.textContent = 'Creating post…';
-      Utils.showLoading();
-      try {
-        const post = await Data.createPost(fd.get('caption') || '', fd.get('sharing'));
-        status.textContent = 'Uploading…';
-        await Drive.uploadMedia(file, post.folderId);
-        closeModal();
-        Utils.showToast('Posted!');
-        _renderFeed();
-      } catch {
-        Utils.showToast('Failed to post', 'error');
-        status.textContent = '';
-      } finally {
-        Utils.hideLoading();
-      }
-    });
-  }
 
   /* ── Upload ─────────────────────────────────── */
 
