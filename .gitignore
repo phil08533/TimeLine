@@ -1,4 +1,5 @@
 # User-specific config with real credentials — never commit
+config.js
 js/config.js
 
 # OS / editor
