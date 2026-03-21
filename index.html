@@ -2,7 +2,7 @@
 <html lang="en" data-theme="soft" data-color="slate">
 <head>
   <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
   <title>My Circle</title>
   <meta name="description" content="Private photo &amp; file sharing. Everything lives in your Google Drive — no servers, no ads, no middleman." />
   <meta property="og:type"        content="website" />
@@ -11,9 +11,15 @@
   <meta name="twitter:card"       content="summary" />
   <meta name="twitter:title"      content="My Circle" />
   <meta name="twitter:description" content="Private photo &amp; file sharing. Everything lives in your Google Drive." />
+  <!-- PWA / iOS home screen -->
+  <meta name="mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <meta name="apple-mobile-web-app-title" content="My Circle" />
+  <link rel="apple-touch-icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><rect width='100' height='100' rx='20' fill='%23e2eef5'/><text y='.9em' font-size='75' x='12'>◎</text></svg>" />
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>◎</text></svg>" />
   <link rel="manifest" href="manifest.json" />
-  <meta name="theme-color" content="#f8f8f5" />
+  <meta name="theme-color" content="#e2eef5" />
   <meta http-equiv="Content-Security-Policy"
     content="default-src 'self';
              script-src 'self' https://apis.google.com https://accounts.google.com;
@@ -22,7 +28,7 @@
              img-src    'self' data: blob: https://*.googleusercontent.com https://drive.google.com;
              media-src  'self' data: blob: https://drive.google.com;
              connect-src 'self' https://www.googleapis.com https://accounts.google.com;
-             frame-src  https://accounts.google.com;">
+             frame-src  https://accounts.google.com https://voidscroll.org;">
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;600&family=Playfair+Display:wght@700&display=swap" rel="stylesheet" />
@@ -30,19 +36,234 @@
 </head>
 <body>
 
-  <!-- AUTH SCREEN -->
+  <!-- AUTH / LANDING SCREEN -->
   <div id="auth-screen" class="screen active">
-    <div class="auth-inner">
-      <div class="brand">
-        <div class="brand-mark">◎</div>
-        <h1 class="brand-name">My Circle</h1>
-        <p class="brand-tagline">Share with the people who matter.</p>
+
+    <!-- Sticky mini nav -->
+    <header class="auth-nav">
+      <span class="auth-nav-brand">◎ My Circle</span>
+      <div class="auth-nav-actions">
+        <button id="sign-in-btn" class="btn btn-primary btn-sm auth-signin-btn">
+          <svg width="15" height="15" viewBox="0 0 18 18" fill="none" style="flex-shrink:0">
+            <path d="M17.64 9.2c0-.637-.057-1.251-.164-1.84H9v3.481h4.844c-.209 1.125-.843 2.078-1.796 2.717v2.258h2.908C16.658 14.013 17.64 11.706 17.64 9.2z" fill="#4285F4"/>
+            <path d="M9 18c2.43 0 4.467-.806 5.956-2.18l-2.908-2.259c-.806.54-1.837.86-3.048.86-2.344 0-4.328-1.584-5.036-3.711H.957v2.332A8.997 8.997 0 0 0 9 18z" fill="#34A853"/>
+            <path d="M3.964 10.71A5.41 5.41 0 0 1 3.682 9c0-.593.102-1.17.282-1.71V4.958H.957A8.996 8.996 0 0 0 0 9c0 1.452.348 2.827.957 4.042l3.007-2.332z" fill="#FBBC05"/>
+            <path d="M9 3.58c1.321 0 2.508.454 3.44 1.345l2.582-2.58C13.463.891 11.426 0 9 0A8.997 8.997 0 0 0 .957 4.958L3.964 6.29C4.672 4.163 6.656 3.58 9 3.58z" fill="#EA4335"/>
+          </svg>
+          Sign in
+        </button>
+        <button id="demo-btn" class="btn btn-ghost btn-sm" hidden>Try Demo</button>
       </div>
-      <div class="auth-pitch">
-        <p>Everything lives in <strong>your</strong> Google Drive. No servers, no ads, no middleman — just your circles.</p>
+    </header>
+
+    <!-- Hero -->
+    <section class="auth-hero">
+      <div class="auth-hero-inner">
+
+        <!-- Left: text + CTA -->
+        <div class="auth-hero-text">
+          <div class="auth-hero-brand">
+            <span class="auth-hero-mark">◎</span>
+            <h1 class="auth-hero-name">My Circle</h1>
+          </div>
+          <p class="auth-hero-tagline">Private sharing for the people who actually matter.</p>
+          <p class="auth-hero-sub">Your photos, stories, and memories live in <strong>your</strong> Google Drive — not on someone else's servers. No algorithms. No ads. Just your circles.</p>
+          <div class="auth-hero-cta">
+            <button class="btn btn-primary btn-lg auth-hero-signin">
+              <svg width="18" height="18" viewBox="0 0 18 18" fill="none" style="flex-shrink:0">
+                <path d="M17.64 9.2c0-.637-.057-1.251-.164-1.84H9v3.481h4.844c-.209 1.125-.843 2.078-1.796 2.717v2.258h2.908C16.658 14.013 17.64 11.706 17.64 9.2z" fill="#4285F4"/>
+                <path d="M9 18c2.43 0 4.467-.806 5.956-2.18l-2.908-2.259c-.806.54-1.837.86-3.048.86-2.344 0-4.328-1.584-5.036-3.711H.957v2.332A8.997 8.997 0 0 0 9 18z" fill="#34A853"/>
+                <path d="M3.964 10.71A5.41 5.41 0 0 1 3.682 9c0-.593.102-1.17.282-1.71V4.958H.957A8.996 8.996 0 0 0 0 9c0 1.452.348 2.827.957 4.042l3.007-2.332z" fill="#FBBC05"/>
+                <path d="M9 3.58c1.321 0 2.508.454 3.44 1.345l2.582-2.58C13.463.891 11.426 0 9 0A8.997 8.997 0 0 0 .957 4.958L3.964 6.29C4.672 4.163 6.656 3.58 9 3.58z" fill="#EA4335"/>
+              </svg>
+              Sign in with Google
+            </button>
+            <p class="auth-hero-note" id="auth-note">Free. No account required beyond your Google sign-in.</p>
+          </div>
+          <div class="auth-trust-pills">
+            <span class="trust-pill">🔒 No servers</span>
+            <span class="trust-pill">🚫 No ads</span>
+            <span class="trust-pill">📁 Your Drive</span>
+            <span class="trust-pill">✦ Open source</span>
+          </div>
+        </div>
+
+        <!-- Right: mock app preview -->
+        <div class="auth-hero-preview" aria-hidden="true">
+          <div class="mock-phone">
+            <div class="mock-topbar">
+              <span class="mock-brand">◎ My Circle</span>
+              <span class="mock-nav-dots">
+                <span>Feed</span><span>Circles</span><span>Albums</span>
+              </span>
+            </div>
+            <!-- Mock stories row -->
+            <div class="mock-stories">
+              <div class="mock-story-item">
+                <div class="mock-story-ring mock-story-ring--add">+</div>
+                <span class="mock-story-label">Your Story</span>
+              </div>
+              <div class="mock-story-item">
+                <div class="mock-story-ring" style="--sc:#2dd4bf">S</div>
+                <span class="mock-story-label">Sarah</span>
+              </div>
+              <div class="mock-story-item">
+                <div class="mock-story-ring" style="--sc:#3b82f6">J</div>
+                <span class="mock-story-label">James</span>
+              </div>
+              <div class="mock-story-item">
+                <div class="mock-story-ring" style="--sc:#a78bfa">M</div>
+                <span class="mock-story-label">Mom</span>
+              </div>
+            </div>
+            <!-- Mock post card 1 -->
+            <div class="mock-post">
+              <div class="mock-post-header">
+                <div class="mock-avatar" style="background:#fbbf24">S</div>
+                <div class="mock-post-meta">
+                  <div class="mock-skel mock-skel--name"></div>
+                  <div class="mock-skel mock-skel--time"></div>
+                </div>
+              </div>
+              <div class="mock-post-img mock-shimmer">
+                <span class="mock-post-img-label">📸 Beach trip photos</span>
+              </div>
+              <div class="mock-post-actions">
+                <span class="mock-react">❤️ 12</span>
+                <span class="mock-react">😂 4</span>
+                <span class="mock-react">👏 7</span>
+                <span class="mock-comment">💬 3 comments</span>
+              </div>
+            </div>
+            <!-- Mock post card 2 -->
+            <div class="mock-post">
+              <div class="mock-post-header">
+                <div class="mock-avatar" style="background:#34d399">J</div>
+                <div class="mock-post-meta">
+                  <div class="mock-skel mock-skel--name"></div>
+                  <div class="mock-skel mock-skel--time"></div>
+                </div>
+              </div>
+              <div class="mock-post-img mock-shimmer" style="height:90px">
+                <span class="mock-post-img-label">🌲 Hiking weekend</span>
+              </div>
+              <div class="mock-post-actions">
+                <span class="mock-react">❤️ 8</span>
+                <span class="mock-react">😮 2</span>
+                <span class="mock-comment">💬 5 comments</span>
+              </div>
+            </div>
+          </div>
+        </div>
       </div>
-      <button id="sign-in-btn" class="btn btn-primary btn-lg">
-        <svg width="18" height="18" viewBox="0 0 18 18" fill="none">
+    </section>
+
+    <!-- Feature tiles -->
+    <section class="auth-features">
+      <div class="auth-features-inner">
+        <div class="auth-feature-tile">
+          <span class="af-icon">📸</span>
+          <h3 class="af-title">Stories</h3>
+          <p class="af-desc">Share 24-hour moments. Tap through your circle's stories just like you'd expect — no algorithmic reordering.</p>
+        </div>
+        <div class="auth-feature-tile">
+          <span class="af-icon">⭕</span>
+          <h3 class="af-title">Circles</h3>
+          <p class="af-desc">Group your people — family, close friends, coworkers. Share to a circle and only they see it. No oversharing.</p>
+        </div>
+        <div class="auth-feature-tile">
+          <span class="af-icon">🗂</span>
+          <h3 class="af-title">Albums</h3>
+          <p class="af-desc">Collect and curate photos by occasion — trips, birthdays, events. Invite collaborators to add their shots too.</p>
+        </div>
+        <div class="auth-feature-tile">
+          <span class="af-icon">∞</span>
+          <h3 class="af-title">VoidScroll</h3>
+          <p class="af-desc">Bored? Jump to VoidScroll — our companion open video feed with no engagement traps, right from the app.</p>
+        </div>
+        <div class="auth-feature-tile">
+          <span class="af-icon">🔒</span>
+          <h3 class="af-title">Truly Private</h3>
+          <p class="af-desc">We have zero access to your data. Photos live in your Google Drive and are shared through Google's own permission system.</p>
+        </div>
+      </div>
+    </section>
+
+    <!-- How it works -->
+    <section class="auth-how">
+      <h2 class="auth-section-title">How it works</h2>
+      <div class="auth-steps">
+        <div class="auth-step">
+          <div class="auth-step-num">1</div>
+          <div class="auth-step-icon">🔑</div>
+          <h3>Sign in with Google</h3>
+          <p>One tap. We create a <code>mycircle/</code> folder in your Drive and never touch anything else.</p>
+        </div>
+        <div class="auth-step-arrow">→</div>
+        <div class="auth-step">
+          <div class="auth-step-num">2</div>
+          <div class="auth-step-icon">⭕</div>
+          <h3>Create a Circle</h3>
+          <p>Add your people by email. Name it "Family", "College Squad", whatever fits.</p>
+        </div>
+        <div class="auth-step-arrow">→</div>
+        <div class="auth-step">
+          <div class="auth-step-num">3</div>
+          <div class="auth-step-icon">📤</div>
+          <h3>Post &amp; share</h3>
+          <p>Upload photos, add a caption, pick your audience. They see it on their feed instantly.</p>
+        </div>
+      </div>
+    </section>
+
+    <!-- Why different -->
+    <section class="auth-why">
+      <h2 class="auth-section-title">Why not just use Facebook?</h2>
+      <div class="auth-compare">
+        <div class="auth-compare-table">
+          <div class="act-head">
+            <div></div>
+            <div class="act-col-them">Facebook / Instagram</div>
+            <div class="act-col-us">My Circle</div>
+          </div>
+          <div class="act-row">
+            <div class="act-feature">Your data belongs to</div>
+            <div class="act-them">Them</div>
+            <div class="act-us">You ✓</div>
+          </div>
+          <div class="act-row">
+            <div class="act-feature">Ads</div>
+            <div class="act-them">Everywhere</div>
+            <div class="act-us">None ✓</div>
+          </div>
+          <div class="act-row">
+            <div class="act-feature">Algorithm controls feed</div>
+            <div class="act-them">Yes</div>
+            <div class="act-us">No ✓</div>
+          </div>
+          <div class="act-row">
+            <div class="act-feature">Storage</div>
+            <div class="act-them">Their servers</div>
+            <div class="act-us">Your Drive ✓</div>
+          </div>
+          <div class="act-row">
+            <div class="act-feature">Deleting a photo</div>
+            <div class="act-them">Maybe eventually</div>
+            <div class="act-us">Gone everywhere instantly ✓</div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Final CTA -->
+    <section class="auth-final-cta">
+      <div class="auth-hero-brand" style="justify-content:center">
+        <span class="auth-hero-mark" style="font-size:2.5rem">◎</span>
+      </div>
+      <p style="font-size:1.1rem;font-weight:600;margin:.5rem 0">Ready to share privately?</p>
+      <p style="color:var(--muted);font-size:.9rem;margin-bottom:1.25rem">Free forever. No account beyond your Google sign-in.</p>
+      <button class="btn btn-primary btn-lg auth-final-signin">
+        <svg width="18" height="18" viewBox="0 0 18 18" fill="none" style="flex-shrink:0">
           <path d="M17.64 9.2c0-.637-.057-1.251-.164-1.84H9v3.481h4.844c-.209 1.125-.843 2.078-1.796 2.717v2.258h2.908C16.658 14.013 17.64 11.706 17.64 9.2z" fill="#4285F4"/>
           <path d="M9 18c2.43 0 4.467-.806 5.956-2.18l-2.908-2.259c-.806.54-1.837.86-3.048.86-2.344 0-4.328-1.584-5.036-3.711H.957v2.332A8.997 8.997 0 0 0 9 18z" fill="#34A853"/>
           <path d="M3.964 10.71A5.41 5.41 0 0 1 3.682 9c0-.593.102-1.17.282-1.71V4.958H.957A8.996 8.996 0 0 0 0 9c0 1.452.348 2.827.957 4.042l3.007-2.332z" fill="#FBBC05"/>
@@ -50,14 +271,14 @@
         </svg>
         Sign in with Google
       </button>
-      <button id="demo-btn" class="btn btn-ghost btn-sm" hidden>Try Demo</button>
-      <p class="auth-note" id="auth-note"></p>
+    </section>
 
+    <!-- Owner setup (collapsed) -->
+    <div class="auth-setup-wrap">
       <details id="setup-section" class="auth-setup" hidden>
         <summary class="auth-setup-toggle">Site owner setup</summary>
         <div class="auth-setup-body">
-          <p>Paste your <strong>OAuth 2.0 Client ID</strong> from <a href="https://console.cloud.google.com/" target="_blank" rel="noopener" class="link">Google Cloud Console</a>.
-          Your users will never see this — just click Sign in with Google.</p>
+          <p>Paste your <strong>OAuth 2.0 Client ID</strong> from <a href="https://console.cloud.google.com/" target="_blank" rel="noopener" class="link">Google Cloud Console</a>.</p>
           <ol class="setup-steps">
             <li>Create a project &amp; enable the <strong>Google Drive API</strong></li>
             <li><strong>APIs &amp; Services → Credentials → Create → OAuth 2.0 Client ID</strong> (Web application)</li>
@@ -75,7 +296,9 @@
           </button>
         </div>
       </details>
+      <p class="auth-footer-note">◎ My Circle · <a href="https://github.com/phil08533/TimeLine" target="_blank" rel="noopener" class="link">Open source</a> · <a href="https://voidscroll.org" target="_blank" rel="noopener" class="link">VoidScroll</a></p>
     </div>
+
   </div>
 
   <!-- APP SHELL -->

@@ -13,7 +13,10 @@ const UI = (() => {
 
   function boot() {
     Auth.init({ onSignIn: _onSignIn, onSignOut: _onSignOut });
-    document.getElementById('sign-in-btn').addEventListener('click', () => Auth.signIn());
+    // All sign-in buttons across the landing page
+    document.querySelectorAll('#sign-in-btn, .auth-hero-signin, .auth-final-signin, .auth-signin-btn').forEach(btn => {
+      btn.addEventListener('click', () => Auth.signIn());
+    });
     document.getElementById('demo-btn').addEventListener('click', () => Auth.signIn());
 
     const demoSignInLink = document.getElementById('demo-sign-in-link');
