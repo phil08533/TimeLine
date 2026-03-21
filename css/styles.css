@@ -560,6 +560,246 @@ textarea.input { resize: vertical; min-height: 80px; }
 }
 .chip-remove:hover { opacity: 1; color: var(--danger, #c0392b); }
 
+/* ── Circles list page ── */
+.circles-toolbar {
+  display: flex;
+  align-items: center;
+  gap: .75rem;
+  margin-bottom: 1.25rem;
+  flex-wrap: wrap;
+}
+.circles-search-input {
+  flex: 1;
+  min-width: 160px;
+  max-width: 340px;
+  height: 34px;
+  padding: 0 .75rem;
+  font-size: .85rem;
+}
+.filter-pills { display: flex; gap: .35rem; flex-wrap: wrap; }
+.filter-pill {
+  padding: .3rem .75rem;
+  border-radius: 99px;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  font-size: .8rem;
+  color: var(--muted);
+  cursor: pointer;
+  transition: border-color .12s, background .12s, color .12s;
+}
+.filter-pill:hover { color: var(--text); background: var(--bg); }
+.filter-pill.active { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 10%, var(--surface)); color: var(--text); font-weight: 600; }
+
+.circles-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  gap: 1rem;
+}
+
+/* Circle card */
+.circle-card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--card-radius, var(--radius));
+  overflow: hidden;
+  cursor: pointer;
+  transition: box-shadow .15s, transform .15s;
+  display: flex;
+  flex-direction: column;
+}
+.circle-card:hover { box-shadow: 0 4px 18px rgba(0,0,0,.1); transform: translateY(-1px); }
+
+.circle-card-cover {
+  position: relative;
+  aspect-ratio: 16/7;
+  background: var(--circle-color, var(--border));
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 2.5rem;
+  overflow: hidden;
+}
+.circle-card-cover img { width: 100%; height: 100%; object-fit: cover; position: absolute; inset: 0; }
+.circle-card-cover-overlay {
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(to bottom, transparent 40%, rgba(0,0,0,.35));
+}
+.circle-card-badge {
+  position: absolute;
+  top: .5rem;
+  right: .5rem;
+  background: rgba(0,0,0,.45);
+  color: #fff;
+  font-size: .68rem;
+  font-weight: 700;
+  padding: .2rem .5rem;
+  border-radius: 99px;
+  letter-spacing: .04em;
+  text-transform: uppercase;
+}
+.circle-card-badge--owner { background: color-mix(in srgb, var(--accent) 80%, rgba(0,0,0,.5)); }
+.circle-card-mute {
+  position: absolute;
+  top: .5rem;
+  left: .5rem;
+  font-size: .85rem;
+  opacity: .75;
+}
+
+.circle-card-body { padding: .9rem 1rem 1rem; flex: 1; display: flex; flex-direction: column; gap: .4rem; }
+.circle-card-title { font-size: .98rem; font-weight: 700; }
+.circle-card-desc { font-size: .78rem; color: var(--muted); line-height: 1.4; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.circle-card-meta { display: flex; gap: .75rem; align-items: center; margin-top: auto; padding-top: .45rem; }
+.circle-card-avatars { display: flex; }
+.circle-card-avatars .mini-avatar {
+  width: 22px; height: 22px;
+  border-radius: 50%;
+  background: var(--border);
+  border: 2px solid var(--surface);
+  display: flex; align-items: center; justify-content: center;
+  font-size: .62rem; font-weight: 700;
+  margin-left: -6px;
+  flex-shrink: 0;
+}
+.circle-card-avatars .mini-avatar:first-child { margin-left: 0; }
+.circle-card-members-label { font-size: .75rem; color: var(--muted); }
+.circle-card-activity { font-size: .72rem; color: var(--muted); margin-left: auto; }
+.circle-card-edit {
+  position: absolute;
+  bottom: .6rem;
+  right: .6rem;
+  opacity: 0;
+  transition: opacity .15s;
+  font-size: .8rem;
+  padding: .2rem .5rem;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  color: var(--muted);
+}
+.circle-card:hover .circle-card-edit { opacity: 1; }
+
+/* Empty state icon */
+.empty-icon { font-size: 3rem; margin-bottom: .5rem; opacity: .3; }
+
+/* ── Circle detail hero ── */
+.circle-hero {
+  margin-bottom: 0;
+  padding: 1.25rem 0 0;
+}
+.circle-hero-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 1.25rem;
+}
+.circle-hero-body {
+  display: flex;
+  align-items: flex-start;
+  gap: 1.1rem;
+  padding-bottom: 1.25rem;
+  border-bottom: 1px solid var(--border);
+  margin-bottom: 0;
+}
+.circle-hero-icon {
+  width: 60px; height: 60px;
+  border-radius: 50%;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 1.6rem;
+  flex-shrink: 0;
+  background: var(--circle-color, var(--border));
+  font-weight: 700;
+}
+.circle-hero-info { flex: 1; min-width: 0; }
+.circle-hero-info h2 { font-size: 1.35rem; font-weight: 700; margin-bottom: .25rem; font-family: var(--font-display, inherit); }
+.circle-detail-desc { font-size: .85rem; }
+.circle-hero-stats {
+  display: flex;
+  gap: 1.25rem;
+  margin-top: .5rem;
+  flex-wrap: wrap;
+}
+.circle-stat { font-size: .8rem; color: var(--muted); }
+.circle-stat strong { color: var(--text); font-weight: 600; }
+
+/* ── Circle tabs ── */
+.circle-tabs {
+  display: flex;
+  gap: 0;
+  border-bottom: 2px solid var(--border);
+  margin-bottom: 1.5rem;
+}
+.circle-tab {
+  padding: .65rem 1.1rem;
+  font-size: .85rem;
+  font-weight: 600;
+  border: none;
+  background: none;
+  color: var(--muted);
+  cursor: pointer;
+  border-bottom: 2px solid transparent;
+  margin-bottom: -2px;
+  transition: color .12s, border-color .12s;
+}
+.circle-tab:hover { color: var(--text); }
+.circle-tab.active { color: var(--text); border-bottom-color: var(--accent); }
+
+/* ── Circle members grid ── */
+.circle-members-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  gap: .75rem;
+}
+.circle-member-card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--card-radius, var(--radius));
+  padding: .85rem 1rem;
+  display: flex;
+  align-items: center;
+  gap: .75rem;
+}
+.circle-member-avatar {
+  width: 38px; height: 38px;
+  border-radius: 50%;
+  background: var(--border);
+  display: flex; align-items: center; justify-content: center;
+  font-size: .9rem; font-weight: 700;
+  flex-shrink: 0;
+  color: var(--text);
+}
+.circle-member-info { flex: 1; min-width: 0; }
+.circle-member-name { font-size: .88rem; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.circle-member-email { font-size: .72rem; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.circle-member-role {
+  font-size: .65rem;
+  font-weight: 700;
+  letter-spacing: .06em;
+  text-transform: uppercase;
+  color: var(--muted);
+  padding: .15rem .4rem;
+  border: 1px solid var(--border);
+  border-radius: 99px;
+  flex-shrink: 0;
+}
+.circle-member-role--owner { border-color: var(--accent); color: var(--accent); }
+
+/* Friend suggestion pills in add-member modal */
+.add-member-suggestions { display: flex; flex-wrap: wrap; gap: .35rem; }
+.member-suggest-pill {
+  padding: .3rem .7rem;
+  border-radius: 99px;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  font-size: .8rem;
+  color: var(--muted);
+  cursor: pointer;
+  transition: border-color .12s, background .12s, color .12s;
+}
+.member-suggest-pill:hover { color: var(--text); background: var(--bg); }
+.member-suggest-pill.active { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 10%, var(--surface)); color: var(--text); }
+
 /* ── People list ── */
 .people-list { display: flex; flex-direction: column; gap: .5rem; }
 .person-row {
