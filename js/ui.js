@@ -894,47 +894,59 @@ const UI = (() => {
     addCircle.addEventListener('click', () => _openAddStoryModal());
     bar.appendChild(addCircle);
 
-    // Own stories — show with gradient ring (already viewed by owner so use viewed ring)
-    ownStories.forEach(story => {
+    // Own stories — one circle regardless of how many stories were posted
+    if (ownStories.length > 0) {
       const initials = (me?.name || '?')[0].toUpperCase();
       const avatarHtml = me?.picture
         ? `<img src="${Utils.escapeHtml(me.picture)}" alt="" class="story-avatar-img" />`
         : `<span class="story-avatar-initials">${initials}</span>`;
+      const badge = ownStories.length > 1 ? `<span class="story-count-badge">${ownStories.length}</span>` : '';
       const circle = _el(`
-        <div class="story-circle story-circle--own" title="${Utils.escapeHtml(story.name || 'Story')}">
-          <div class="story-ring story-ring--viewed">
+        <div class="story-circle story-circle--own" title="${Utils.escapeHtml(me?.name || 'You')}">
+          <div class="story-ring story-ring--viewed" style="position:relative">
             <div class="story-avatar">${avatarHtml}</div>
+            ${badge}
           </div>
-          <span class="story-label">${Utils.escapeHtml(me?.name || 'You')}</span>
+          <span class="story-label">${Utils.escapeHtml((me?.name || 'You').split(' ')[0])}</span>
         </div>
       `);
-      circle.addEventListener('click', () => _openStoryViewer([story], 0, me));
+      circle.addEventListener('click', () => _openOwnStoriesViewer(ownStories, me));
       bar.appendChild(circle);
-    });
+    }
 
-    // Friend stories — recent shared folders, shown with gradient ring
+    // Friend stories — group by owner email so one circle per person
     const recentShared = sharedFolders.filter(f => {
       const t = new Date(f.sharedWithMeTime || f.createdTime || 0).getTime();
       return Date.now() - t < 24 * 60 * 60 * 1000;
-    }).slice(0, 8);
+    });
 
+    // Build a map: ownerEmail → { owner, folders[] }
+    const byOwner = new Map();
     recentShared.forEach(f => {
-      const owner  = f.owners?.[0];
-      const name   = owner?.displayName || 'Friend';
-      const pic    = owner?.photoLink || null;
+      const owner = f.owners?.[0];
+      const key   = owner?.emailAddress || f.id;
+      if (!byOwner.has(key)) byOwner.set(key, { owner, folders: [] });
+      byOwner.get(key).folders.push(f);
+    });
+
+    [...byOwner.values()].slice(0, 8).forEach(({ owner, folders }) => {
+      const name     = owner?.displayName || 'Friend';
+      const pic      = owner?.photoLink || null;
       const initials = name[0].toUpperCase();
       const avatarHtml = pic
         ? `<img src="${Utils.escapeHtml(pic)}" alt="" class="story-avatar-img" />`
         : `<span class="story-avatar-initials">${initials}</span>`;
+      const badge = folders.length > 1 ? `<span class="story-count-badge">${folders.length}</span>` : '';
       const circle = _el(`
         <div class="story-circle" title="${Utils.escapeHtml(name)}">
-          <div class="story-ring">
+          <div class="story-ring" style="position:relative">
             <div class="story-avatar">${avatarHtml}</div>
+            ${badge}
           </div>
           <span class="story-label">${Utils.escapeHtml(name.split(' ')[0])}</span>
         </div>
       `);
-      circle.addEventListener('click', () => _openStoryViewerFromFolder(f));
+      circle.addEventListener('click', () => _openFriendStoriesViewer(folders, owner));
       bar.appendChild(circle);
     });
 
@@ -1003,32 +1015,57 @@ const UI = (() => {
     });
   }
 
-  async function _openStoryViewerFromFolder(folder) {
-    // Simplified: just open the first image/video from the folder as a story
+  // Load all own stories into one viewer session, supporting per-story deletion
+  async function _openOwnStoriesViewer(ownStories, user) {
+    Utils.showLoading();
+    const allMedia = [];
     try {
-      const files = await Drive.listFiles(folder.id);
-      const media = files.filter(f => f.mimeType?.startsWith('image/') || f.mimeType?.startsWith('video/'));
-      if (!media.length) { Utils.showToast('No media in this story', 'error'); return; }
-      const owner = folder.owners?.[0];
-      _openStoryViewerMedia(media, 0, owner?.displayName || 'Friend', owner?.photoLink || null);
-    } catch { Utils.showToast('Could not load story', 'error'); }
+      for (const story of ownStories) {
+        try {
+          const files = await Drive.listFiles(story.folderId);
+          const media = files.filter(f => f.mimeType?.startsWith('image/') || f.mimeType?.startsWith('video/'));
+          media.forEach(f => { f._storyFolderId = story.folderId; });
+          allMedia.push(...media);
+        } catch { /* skip failed story */ }
+      }
+    } finally { Utils.hideLoading(); }
+    if (!allMedia.length) { Utils.showToast('No media in your stories', 'error'); return; }
+
+    const onDelete = async (folderId) => {
+      if (!folderId) return;
+      try {
+        await Drive.deleteFile(folderId);
+        Utils.showToast('Story deleted');
+        navigate('feed');
+      } catch { Utils.showToast('Could not delete story', 'error'); }
+    };
+    _openStoryViewerMedia(allMedia, 0, user?.name || 'You', user?.picture || null, onDelete);
+  }
+
+  // Load all folders belonging to one friend and play them in sequence
+  async function _openFriendStoriesViewer(folders, owner) {
+    Utils.showLoading();
+    const allMedia = [];
+    try {
+      for (const folder of folders) {
+        try {
+          const files = await Drive.listFiles(folder.id);
+          const media = files.filter(f => f.mimeType?.startsWith('image/') || f.mimeType?.startsWith('video/'));
+          allMedia.push(...media);
+        } catch { /* skip failed folder */ }
+      }
+    } finally { Utils.hideLoading(); }
+    if (!allMedia.length) { Utils.showToast('No media in this story', 'error'); return; }
+    _openStoryViewerMedia(allMedia, 0, owner?.displayName || 'Friend', owner?.photoLink || null);
+  }
+
+  async function _openStoryViewerFromFolder(folder) {
+    await _openFriendStoriesViewer([folder], folder.owners?.[0]);
   }
 
   function _openStoryViewer(stories, startIndex, user) {
     if (!stories.length) return;
-    const story = stories[startIndex];
-    Drive.listFiles(story.folderId).then(files => {
-      const media = files.filter(f => f.mimeType?.startsWith('image/') || f.mimeType?.startsWith('video/'));
-      const onDelete = async () => {
-        try {
-          await Drive.deleteFile(story.folderId);
-          Utils.showToast('Story deleted');
-          // Refresh feed to remove the story from the bar
-          navigate('feed');
-        } catch { Utils.showToast('Could not delete story', 'error'); }
-      };
-      _openStoryViewerMedia(media, 0, user?.name || 'You', user?.picture || null, onDelete);
-    }).catch(() => Utils.showToast('Could not load story', 'error'));
+    _openOwnStoriesViewer(stories.slice(startIndex), user);
   }
 
   function _openStoryViewerMedia(mediaFiles, index, authorName, authorPic, onDelete = null) {
@@ -1108,8 +1145,9 @@ const UI = (() => {
       overlay.querySelector('.story-viewer-delete').addEventListener('click', async e => {
         e.stopPropagation();
         if (!confirm('Delete this story?')) return;
+        const folderId = mediaFiles[cur]?._storyFolderId || null;
         closeViewer();
-        await onDelete();
+        await onDelete(folderId);
       });
     }
 
