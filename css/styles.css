@@ -1983,15 +1983,14 @@ textarea.input { resize: vertical; min-height: 80px; }
   display: flex; align-items: center; gap: .4rem;
   font-weight: 600; font-size: .95rem;
 }
-/* Iframe fills the remaining viewport. Use absolute positioning so it's
-   independent of the parent's display type (_showPage forces display:block). */
+/* Iframe fills the remaining viewport. Fixed positioning keeps it independent
+   of the parent's display type (_showPage forces display:block on .page). */
 .voidscroll-frame {
   position: fixed;
-  top: calc(52px + 45px); /* topbar + page header */
-  left: 0; right: 0;
-  bottom: env(safe-area-inset-bottom, 0px);
-  width: 100%; border: none;
-  display: block;
+  top: calc(52px + 45px); /* topbar + page-header heights */
+  left: 0; right: 0; bottom: 0;
+  width: 100%; height: auto;
+  border: none; display: block;
   z-index: 1;
 }
 /* Iframe visibility controlled by JS via .voidscroll-frame--hidden */
