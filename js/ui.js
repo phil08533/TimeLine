@@ -303,7 +303,7 @@ const UI = (() => {
   const _pageTitles = {
     feed: 'Feed', 'my-data': 'My Data',
     circles: 'Circles', 'circle-detail': 'Circle',
-    collections: 'Collections', 'collection-detail': 'Collection',
+    collections: 'Albums', 'collection-detail': 'Album',
     friends: 'Friends', 'user-profile': 'Profile',
     profile: 'Profile', settings: 'Settings', about: 'About',
     voidscroll: 'VoidScroll'
@@ -2775,6 +2775,19 @@ const UI = (() => {
     _on('create-collection-btn',      'click', _openCreateCollectionModal);
     _on('collections-empty-create-btn', 'click', _openCreateCollectionModal);
 
+    // Search
+    const albumSearch = document.getElementById('albums-search');
+    if (albumSearch) {
+      albumSearch.value = '';
+      albumSearch.addEventListener('input', () => {
+        const q = albumSearch.value.trim().toLowerCase();
+        document.getElementById('collections-grid')?.querySelectorAll('.album-card').forEach(card => {
+          const name = (card.dataset.name || '').toLowerCase();
+          card.style.display = (!q || name.includes(q)) ? '' : 'none';
+        });
+      });
+    }
+
     // Filter pills
     document.getElementById('collections-filter')?.querySelectorAll('.filter-pill').forEach(pill => {
       pill.addEventListener('click', () => {
@@ -2806,7 +2819,7 @@ const UI = (() => {
       const tagLabel = tag ? (tag[0].toUpperCase() + tag.slice(1)) : '';
 
       const card = _el(`
-        <div class="album-card" data-owner="${isOwner}" data-collab="${isCollab}">
+        <div class="album-card" data-owner="${isOwner}" data-collab="${isCollab}" data-name="${Utils.escapeHtml((c.name || '').toLowerCase())}">
           <div class="album-card-cover">
             <div class="album-cover-stack">
               <div class="album-stack-shadow album-stack-back"></div>
@@ -3201,7 +3214,7 @@ const UI = (() => {
 
   function _openEditCollectionModal(folderId, coll) {
     openModal(`
-      <h3>Edit Collection</h3>
+      <h3>Edit Album</h3>
       <form id="mf" class="form-block">
         <div class="form-field"><label>Name</label><input name="name" class="input" value="${Utils.escapeHtml(coll.name)}" required /></div>
         <div class="form-field"><label>Description</label><input name="description" class="input" value="${Utils.escapeHtml(coll.description || '')}" /></div>
@@ -3237,8 +3250,8 @@ const UI = (() => {
         });
         closeModal();
         _renderCollections();
-        Utils.showToast('Collection updated!');
-      } catch { Utils.showToast('Failed to update collection', 'error'); }
+        Utils.showToast('Album updated!');
+      } catch { Utils.showToast('Failed to update album', 'error'); }
       finally   { Utils.hideLoading(); }
     });
   }
@@ -3740,7 +3753,7 @@ const UI = (() => {
       const nonPostColls = colls.filter(c => !c.isPost);
       statsEl.innerHTML = `
         <div class="profile-stat"><span class="profile-stat-n">${circles.length}</span><span class="profile-stat-l">Circles</span></div>
-        <div class="profile-stat"><span class="profile-stat-n">${nonPostColls.length}</span><span class="profile-stat-l">Collections</span></div>
+        <div class="profile-stat"><span class="profile-stat-n">${nonPostColls.length}</span><span class="profile-stat-l">Albums</span></div>
         <div class="profile-stat"><span class="profile-stat-n">${posts.length}</span><span class="profile-stat-l">Posts</span></div>
         <div class="profile-stat"><span class="profile-stat-n">${friends.length}</span><span class="profile-stat-l">Friends</span></div>
       `;
@@ -3954,13 +3967,13 @@ const UI = (() => {
     'sleep','environment','travel','engineering','vehicles','math',
     'gaming','docs','diy'
   ];
-  let _vsAllVideos = [];
-  let _vsPlaylist  = [];
-  let _vsCat       = 'all';
-  let _vsReady     = false;
-  let _vsBuilt     = false;
-  let _vsMuted     = true;
-  let _vsObserver  = null;
+  let _vsAllVideos   = [];
+  let _vsPlaylist    = [];
+  let _vsCat         = 'all';
+  let _vsReady       = false;
+  let _vsBuilt       = false;
+  let _vsMuted       = true;
+  let _vsScrollTimer = null;
 
   function _vsShuffle(arr) {
     const a = [...arr];
@@ -3983,10 +3996,10 @@ const UI = (() => {
     slide.className = 'vs-slide';
 
     const vid = document.createElement('video');
-    vid.dataset.src = item.url;   // lazy — IntersectionObserver loads src on demand
-    vid.playsInline  = true;
-    vid.muted        = _vsMuted;
-    vid.preload      = 'none';
+    vid.src     = item.url;
+    vid.setAttribute('playsinline', '');
+    vid.muted   = _vsMuted;
+    vid.preload = 'none';   // browser won't download until play() is called
     vid.addEventListener('click', () => { vid.paused ? vid.play() : vid.pause(); });
     vid.addEventListener('ended', () => {
       const feed = document.getElementById('vs-feed');
@@ -4010,51 +4023,55 @@ const UI = (() => {
     return slide;
   }
 
-  function _vsSetupObserver(feed) {
-    if (_vsObserver) _vsObserver.disconnect();
-    _vsObserver = new IntersectionObserver(entries => {
-      if (_currentPage !== 'voidscroll') return;
-      entries.forEach(entry => {
-        const vid = entry.target.querySelector('video');
-        if (!vid) return;
-        if (entry.isIntersecting) {
-          if (vid.dataset.src) { vid.src = vid.dataset.src; delete vid.dataset.src; }
-          vid.muted = _vsMuted;
-          vid.play().catch(() => {});
-        } else {
-          vid.pause();
-        }
-      });
-    }, { root: feed, threshold: 0.8 });
+  // Play whichever slide is currently snapped to; pause all others.
+  // Called on scroll (debounced) and when entering the page.
+  function _vsPlayCurrent() {
+    if (_currentPage !== 'voidscroll') return;
+    const feed = document.getElementById('vs-feed');
+    if (!feed) return;
+    const h = feed.offsetHeight;
+    if (!h) return;
+    const idx = Math.round(feed.scrollTop / h);
+    feed.querySelectorAll('.vs-slide').forEach((slide, i) => {
+      const vid = slide.querySelector('video');
+      if (!vid) return;
+      if (i === idx) { vid.muted = _vsMuted; vid.play().catch(() => {}); }
+      else           { vid.pause(); }
+    });
   }
 
   function _vsPopulateFeed() {
     const feed = document.getElementById('vs-feed');
     if (!feed) return;
-    if (_vsObserver) _vsObserver.disconnect();
     feed.innerHTML = '';
     feed.scrollTop = 0;
-    _vsSetupObserver(feed);
-    _vsPlaylist.forEach(item => {
-      const slide = _vsMakeSlide(item);
-      _vsObserver.observe(slide);
-      feed.appendChild(slide);
-    });
+
+    // Build all slides
+    _vsPlaylist.forEach(item => feed.appendChild(_vsMakeSlide(item)));
+
+    // Scroll listener — debounced so it fires after snap settles
+    feed.addEventListener('scroll', () => {
+      clearTimeout(_vsScrollTimer);
+      _vsScrollTimer = setTimeout(_vsPlayCurrent, 120);
+    }, { passive: true });
+
+    // Play first video immediately
+    const firstVid = feed.querySelector('.vs-slide video');
+    if (firstVid) { firstVid.muted = _vsMuted; firstVid.play().catch(() => {}); }
   }
 
   function _vsKeyHandler(e) {
     if (_currentPage !== 'voidscroll') return;
     const feed = document.getElementById('vs-feed');
     if (!feed) return;
+    const h = feed.offsetHeight || 1;
     if (e.key === 'ArrowDown' || e.key === 'ArrowRight') {
-      e.preventDefault();
-      feed.scrollBy({ top: feed.offsetHeight, behavior: 'smooth' });
+      e.preventDefault(); feed.scrollBy({ top: h, behavior: 'smooth' });
     } else if (e.key === 'ArrowUp' || e.key === 'ArrowLeft') {
-      e.preventDefault();
-      feed.scrollBy({ top: -feed.offsetHeight, behavior: 'smooth' });
+      e.preventDefault(); feed.scrollBy({ top: -h, behavior: 'smooth' });
     } else if (e.key === ' ') {
       e.preventDefault();
-      const idx = Math.round(feed.scrollTop / feed.offsetHeight);
+      const idx = Math.round(feed.scrollTop / h);
       const vid = feed.querySelectorAll('.vs-slide')[idx]?.querySelector('video');
       if (vid) vid.paused ? vid.play() : vid.pause();
     }
@@ -4099,16 +4116,8 @@ const UI = (() => {
 
     if (!_vsBuilt) _vsBuildDOM(page);
 
-    // Already loaded — just make sure the visible slide is playing
-    if (_vsReady) {
-      const feed = document.getElementById('vs-feed');
-      if (feed) {
-        const idx = Math.round(feed.scrollTop / feed.offsetHeight);
-        const vid = feed.querySelectorAll('.vs-slide')[idx]?.querySelector('video');
-        if (vid && vid.src && vid.paused) vid.play().catch(() => {});
-      }
-      return;
-    }
+    // Already loaded — resume the visible slide
+    if (_vsReady) { _vsPlayCurrent(); return; }
 
     try {
       const res = await fetch('https://voidscroll.org/videos.json');

@@ -317,7 +317,7 @@
       <nav class="topbar-nav" id="topbar-nav">
         <a href="#feed"        class="nav-link" data-page="feed">Feed</a>
         <a href="#circles"     class="nav-link" data-page="circles">Circles</a>
-        <a href="#collections" class="nav-link" data-page="collections">Collections</a>
+        <a href="#collections" class="nav-link" data-page="collections">Albums</a>
         <a href="#friends"     class="nav-link" data-page="friends">Friends</a>
       </nav>
       <div class="topbar-right">
@@ -441,20 +441,20 @@
         </div>
       </section>
 
-      <!-- COLLECTIONS (Album Studio) -->
+      <!-- ALBUMS (formerly Collections) -->
       <section id="page-collections" class="page" data-page="collections" hidden>
         <div class="page-header">
-          <div>
-            <h2>Albums</h2>
-            <p class="page-subhead muted-text small">Your curated collections — share moments, invite contributors</p>
-          </div>
+          <h2>Albums</h2>
           <button class="btn btn-primary btn-sm" id="create-collection-btn">+ New Album</button>
         </div>
-        <div id="collections-filter" class="my-data-filters">
-          <button class="filter-pill active" data-filter="all">All</button>
-          <button class="filter-pill" data-filter="mine">Mine</button>
-          <button class="filter-pill" data-filter="collab">Collab</button>
-          <button class="filter-pill" data-filter="shared">Shared with me</button>
+        <div class="circles-toolbar">
+          <input type="search" id="albums-search" class="input circles-search-input" placeholder="Search albums…" autocomplete="off" />
+          <div class="filter-pills" id="collections-filter">
+            <button class="filter-pill active" data-filter="all">All</button>
+            <button class="filter-pill" data-filter="mine">Mine</button>
+            <button class="filter-pill" data-filter="collab">Collab</button>
+            <button class="filter-pill" data-filter="shared">Shared with me</button>
+          </div>
         </div>
         <div id="collections-grid" class="albums-grid"></div>
         <div id="collections-empty" class="empty-state" hidden>
