@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="en" data-theme="minimal" data-color="paper">
+<html lang="en" data-theme="soft" data-color="slate">
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
@@ -98,6 +98,9 @@
         <a href="#friends"     class="nav-link" data-page="friends">Friends</a>
       </nav>
       <div class="topbar-right">
+        <a href="https://voidscroll.org" target="_blank" rel="noopener" class="voidscroll-link" title="VoidScroll — open feed">
+          <span class="voidscroll-icon">∞</span>
+        </a>
         <button id="notif-btn" class="notif-bell" title="Notifications" aria-label="Notifications">
           🔔
           <span id="notif-badge" class="notif-badge" hidden>0</span>
@@ -209,26 +212,48 @@
         </div>
       </section>
 
-      <!-- COLLECTIONS -->
+      <!-- COLLECTIONS (Album Studio) -->
       <section id="page-collections" class="page" data-page="collections" hidden>
         <div class="page-header">
-          <h2>Collections</h2>
-          <button class="btn btn-primary btn-sm" id="create-collection-btn">+ New Collection</button>
+          <div>
+            <h2>Albums</h2>
+            <p class="page-subhead muted-text small">Your curated collections — share moments, invite contributors</p>
+          </div>
+          <button class="btn btn-primary btn-sm" id="create-collection-btn">+ New Album</button>
         </div>
-        <div id="collections-grid" class="card-grid"></div>
+        <div id="collections-filter" class="my-data-filters">
+          <button class="filter-pill active" data-filter="all">All</button>
+          <button class="filter-pill" data-filter="mine">Mine</button>
+          <button class="filter-pill" data-filter="collab">Collab</button>
+          <button class="filter-pill" data-filter="shared">Shared with me</button>
+        </div>
+        <div id="collections-grid" class="albums-grid"></div>
         <div id="collections-empty" class="empty-state" hidden>
-          <p>No collections yet. Create one and share it with friends or circles.</p>
+          <div class="empty-icon">📸</div>
+          <p>No albums yet.</p>
+          <p class="muted-text">Create an album to curate and share photos, videos, and files with friends or circles.</p>
+          <button class="btn btn-primary btn-sm" id="collections-empty-create-btn" style="margin-top:.75rem">+ New Album</button>
         </div>
       </section>
 
       <!-- COLLECTION DETAIL -->
       <section id="page-collection-detail" class="page" data-page="collection-detail" hidden>
-        <div class="page-header">
-          <button class="btn btn-ghost btn-sm" id="back-from-collection">← Collections</button>
-          <h2 id="collection-detail-name"></h2>
-          <div id="collection-detail-actions" class="page-header-actions"></div>
+        <div class="album-hero" id="collection-hero">
+          <div class="album-hero-cover" id="collection-hero-cover"></div>
+          <div class="album-hero-overlay"></div>
+          <div class="album-hero-content">
+            <button class="btn btn-ghost btn-sm album-back-btn" id="back-from-collection">← Albums</button>
+            <div class="album-hero-info">
+              <div id="collection-tag-row" class="album-tag-row"></div>
+              <h2 id="collection-detail-name"></h2>
+              <p id="collection-detail-desc" class="album-desc muted-text"></p>
+              <div id="collection-detail-stats" class="album-stats"></div>
+            </div>
+            <div id="collection-detail-actions" class="album-actions"></div>
+          </div>
         </div>
-        <div id="collection-detail-grid" class="media-grid"></div>
+        <div id="collection-contributors-bar" class="contributors-bar" hidden></div>
+        <div id="collection-detail-grid" class="media-grid collection-media-grid"></div>
       </section>
 
       <!-- FRIENDS -->
@@ -251,6 +276,11 @@
           <h3>Friends <span id="friends-count" class="badge">0</span></h3>
           <div id="friends-list" class="people-list"></div>
           <p id="friends-empty" class="muted-text" hidden>No friends added yet.</p>
+        </div>
+        <div class="section-block">
+          <h3>Hidden Users <span class="muted-text small">(posts hidden from your feed)</span></h3>
+          <div id="hidden-users-list" class="people-list"></div>
+          <p id="hidden-users-empty" class="muted-text">No users hidden.</p>
         </div>
         <div class="section-block">
           <h3>Blocked</h3>
@@ -286,7 +316,11 @@
       <section id="page-profile" class="page" data-page="profile" hidden>
         <div class="page-header">
           <h2>Profile</h2>
-          <button class="btn btn-ghost btn-sm" id="edit-profile-btn">Edit</button>
+          <div class="page-header-actions">
+            <button class="btn btn-ghost btn-sm" id="edit-profile-btn">Edit</button>
+            <a href="#settings" class="btn btn-ghost btn-sm">⚙ Settings</a>
+            <button id="sign-out-btn" class="btn btn-ghost btn-sm danger-btn">Sign out</button>
+          </div>
         </div>
         <div class="profile-card" id="profile-view">
           <div id="profile-avatar" class="avatar-xl">?</div>
@@ -319,10 +353,6 @@
           <div id="profile-posts-grid" class="post-grid"></div>
           <p id="profile-posts-empty" class="muted-text" hidden>No posts yet. Create one from the feed!</p>
         </div>
-        <div class="section-block">
-          <a href="#settings" class="btn btn-ghost btn-sm">Settings →</a>
-          <button id="sign-out-btn" class="btn btn-ghost btn-sm danger-btn">Sign out</button>
-        </div>
       </section>
 
       <!-- SETTINGS -->
@@ -334,9 +364,9 @@
         <div class="section-block">
           <h3>Visual Theme</h3>
           <div class="theme-row" id="visual-theme-row">
-            <button class="theme-pill active" data-vtheme="minimal">Minimal</button>
+            <button class="theme-pill" data-vtheme="minimal">Minimal</button>
             <button class="theme-pill" data-vtheme="brutalist">Brutalist</button>
-            <button class="theme-pill" data-vtheme="soft">Soft</button>
+            <button class="theme-pill active" data-vtheme="soft">Soft</button>
             <button class="theme-pill" data-vtheme="editorial">Editorial</button>
           </div>
         </div>
@@ -344,11 +374,11 @@
         <div class="section-block">
           <h3>Color</h3>
           <div class="color-row" id="color-theme-row">
-            <button class="color-dot active" data-ctheme="paper"    title="Paper"    style="--dot-bg:#f8f8f5;--dot-border:#bbb"></button>
+            <button class="color-dot"        data-ctheme="paper"    title="Paper"    style="--dot-bg:#f8f8f5;--dot-border:#bbb"></button>
             <button class="color-dot"        data-ctheme="midnight" title="Midnight" style="--dot-bg:#0f0f0f;--dot-border:#333"></button>
             <button class="color-dot"        data-ctheme="forest"   title="Forest"   style="--dot-bg:#1a2e1a;--dot-border:#4a7c59"></button>
             <button class="color-dot"        data-ctheme="coral"    title="Coral"    style="--dot-bg:#fff5f2;--dot-border:#e74c3c"></button>
-            <button class="color-dot"        data-ctheme="slate"    title="Slate"    style="--dot-bg:#e8f0fb;--dot-border:#4a90d9"></button>
+            <button class="color-dot active" data-ctheme="slate"    title="Slate"    style="--dot-bg:#e8f0fb;--dot-border:#4a90d9"></button>
           </div>
           <p id="color-theme-label" class="muted-text small">Paper</p>
         </div>
