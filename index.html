@@ -259,6 +259,29 @@
         </div>
       </section>
 
+      <!-- USER PROFILE (other people) -->
+      <section id="page-user-profile" class="page" data-page="user-profile" hidden>
+        <div class="page-header">
+          <button class="btn btn-ghost btn-sm" id="back-from-user-profile">← Back</button>
+          <h2 id="user-profile-name">Profile</h2>
+          <div id="user-profile-actions" class="page-header-actions"></div>
+        </div>
+        <div class="profile-card" id="user-profile-card">
+          <div id="user-profile-avatar" class="avatar-xl">?</div>
+          <div class="profile-info">
+            <h3 id="user-profile-display-name">—</h3>
+            <p id="user-profile-email" class="muted-text"></p>
+            <p id="user-profile-bio"></p>
+          </div>
+        </div>
+        <div id="user-profile-stats" class="profile-stats-row"></div>
+        <div class="section-block" id="user-profile-posts-section">
+          <h3>Posts</h3>
+          <div id="user-profile-posts-grid" class="post-grid"></div>
+          <p id="user-profile-posts-empty" class="muted-text" hidden>No posts shared with you yet.</p>
+        </div>
+      </section>
+
       <!-- PROFILE -->
       <section id="page-profile" class="page" data-page="profile" hidden>
         <div class="page-header">
