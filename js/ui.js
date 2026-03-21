@@ -19,6 +19,10 @@ const UI = (() => {
     const demoSignInLink = document.getElementById('demo-sign-in-link');
     if (demoSignInLink) demoSignInLink.addEventListener('click', e => { e.preventDefault(); Auth.signOut(); });
 
+    // VoidScroll button — animate then navigate
+    const vsBtn = document.getElementById('voidscroll-btn');
+    if (vsBtn) vsBtn.addEventListener('click', () => _openVoidScroll());
+
     // Notification bell
     const notifBtn = document.getElementById('notif-btn');
     if (notifBtn) notifBtn.addEventListener('click', e => { e.stopPropagation(); _toggleNotificationPanel(); });
@@ -298,7 +302,8 @@ const UI = (() => {
     circles: 'Circles', 'circle-detail': 'Circle',
     collections: 'Collections', 'collection-detail': 'Collection',
     friends: 'Friends', 'user-profile': 'Profile',
-    profile: 'Profile', settings: 'Settings', about: 'About'
+    profile: 'Profile', settings: 'Settings', about: 'About',
+    voidscroll: 'VoidScroll'
   };
 
   function _navigate(hash) {
@@ -315,6 +320,8 @@ const UI = (() => {
 
     document.querySelectorAll('.page').forEach(p => { p.style.display = 'none'; });
     _currentPage = page;
+    // Clear VoidScroll active state when leaving that page
+    if (page !== 'voidscroll') document.getElementById('voidscroll-btn')?.classList.remove('active');
 
     switch (page) {
       case 'feed':
@@ -339,6 +346,8 @@ const UI = (() => {
         _showPage('page-profile');     _renderProfile();          break;
       case 'settings':
         _showPage('page-settings');    _renderSettings();         break;
+      case 'voidscroll':
+        _showPage('page-voidscroll');  _renderVoidScroll();       break;
       case 'about':
         _showPage('page-about');                                  break;
       default:
@@ -3930,6 +3939,53 @@ const UI = (() => {
       allowCopying:   document.getElementById('allow-copying')?.value   || 'friends'
     };
     await Data.saveSettings(settings).catch(() => {});
+  }
+
+  /* ── VoidScroll ─────────────────────────────────── */
+
+  function _openVoidScroll() {
+    // 1. Pulse the ∞ button
+    const btn = document.getElementById('voidscroll-btn');
+    if (btn) {
+      btn.classList.remove('vs-pulse');
+      void btn.offsetWidth; // reflow to restart animation
+      btn.classList.add('vs-pulse');
+      btn.classList.add('active');
+      setTimeout(() => btn.classList.remove('vs-pulse'), 400);
+    }
+
+    // 2. Slide banner down, hold, then slide out
+    const banner = document.getElementById('voidscroll-banner');
+    if (banner) {
+      banner.hidden = false;
+      banner.classList.remove('vs-out');
+      banner.classList.add('vs-in');
+      setTimeout(() => {
+        banner.classList.remove('vs-in');
+        banner.classList.add('vs-out');
+        setTimeout(() => { banner.hidden = true; banner.classList.remove('vs-out'); }, 320);
+      }, 1800);
+    }
+
+    // 3. Navigate to the embedded page
+    navigate('voidscroll');
+  }
+
+  function _renderVoidScroll() {
+    // Mark button active
+    document.getElementById('voidscroll-btn')?.classList.add('active');
+
+    // Lazy-load the iframe (set src once to avoid reloading on re-visit)
+    const frame = document.getElementById('voidscroll-frame');
+    if (frame && frame.src === 'about:blank') {
+      frame.src = 'https://voidscroll.org';
+    }
+
+    // Back button clears active state
+    const page = document.getElementById('page-voidscroll');
+    page?.querySelector('a[href="#feed"]')?.addEventListener('click', () => {
+      document.getElementById('voidscroll-btn')?.classList.remove('active');
+    });
   }
 
   /* ── Lightbox ─────────────────────────────────── */
