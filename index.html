@@ -98,9 +98,9 @@
         <a href="#friends"     class="nav-link" data-page="friends">Friends</a>
       </nav>
       <div class="topbar-right">
-        <a href="https://voidscroll.org" target="_blank" rel="noopener" class="voidscroll-link" title="VoidScroll — open feed">
+        <button id="voidscroll-btn" class="voidscroll-link" title="VoidScroll" aria-label="Open VoidScroll">
           <span class="voidscroll-icon">∞</span>
-        </a>
+        </button>
         <button id="notif-btn" class="notif-bell" title="Notifications" aria-label="Notifications">
           🔔
           <span id="notif-badge" class="notif-badge" hidden>0</span>
@@ -112,6 +112,12 @@
       <!-- Notification panel (shown on bell click) -->
       <div id="notif-panel" class="notif-panel" hidden></div>
     </header>
+
+    <!-- VoidScroll slide-down banner (animates in on ∞ press) -->
+    <div id="voidscroll-banner" class="voidscroll-banner" hidden>
+      <span class="voidscroll-banner-icon">∞</span>
+      <span class="voidscroll-banner-text">Powered by VoidScroll</span>
+    </div>
 
     <main id="main">
 
@@ -422,6 +428,23 @@
       </section>
 
       <!-- ABOUT -->
+      <!-- VOIDSCROLL EMBEDDED PAGE -->
+      <section id="page-voidscroll" class="page page-voidscroll" data-page="voidscroll" hidden>
+        <div class="voidscroll-page-header">
+          <a href="#feed" class="btn btn-ghost btn-sm">← Back</a>
+          <span class="voidscroll-page-title"><span class="voidscroll-icon">∞</span> VoidScroll</span>
+          <a href="https://voidscroll.org" target="_blank" rel="noopener" class="btn btn-ghost btn-sm">Open in new tab ↗</a>
+        </div>
+        <iframe
+          id="voidscroll-frame"
+          src="about:blank"
+          class="voidscroll-frame"
+          title="VoidScroll"
+          allow="autoplay; fullscreen"
+          loading="lazy"
+        ></iframe>
+      </section>
+
       <section id="page-about" class="page" data-page="about" hidden>
         <div class="page-header">
           <a href="#settings" class="btn btn-ghost btn-sm">← Settings</a>
