@@ -276,6 +276,8 @@ const UI = (() => {
     _on('sign-out-btn',        'click', () => Auth.signOut());
   }
 
+  let _currentUserProfilePerson = null; // person object for user-profile page
+
   function navigate(page, params = {}) {
     if (page === 'circle-detail' && params.folderId) {
       _currentCircleFolderId = params.folderId;
@@ -283,6 +285,9 @@ const UI = (() => {
     } else if (page === 'collection-detail' && params.folderId) {
       _currentCollFolderId = params.folderId;
       window.location.hash = `collection-detail/${params.folderId}`;
+    } else if (page === 'user-profile' && params.person) {
+      _currentUserProfilePerson = params.person;
+      window.location.hash = 'user-profile';
     } else {
       window.location.hash = page;
     }
@@ -292,7 +297,8 @@ const UI = (() => {
     feed: 'Feed', 'my-data': 'My Data',
     circles: 'Circles', 'circle-detail': 'Circle',
     collections: 'Collections', 'collection-detail': 'Collection',
-    friends: 'Friends', profile: 'Profile', settings: 'Settings', about: 'About'
+    friends: 'Friends', 'user-profile': 'Profile',
+    profile: 'Profile', settings: 'Settings', about: 'About'
   };
 
   function _navigate(hash) {
@@ -327,6 +333,8 @@ const UI = (() => {
         _showPage('page-collection-detail'); _renderCollectionDetail(_currentCollFolderId); break;
       case 'friends':
         _showPage('page-friends');     _renderFriends();          break;
+      case 'user-profile':
+        _showPage('page-user-profile'); _renderUserProfile(_currentUserProfilePerson); break;
       case 'profile':
         _showPage('page-profile');     _renderProfile();          break;
       case 'settings':
@@ -1080,9 +1088,9 @@ const UI = (() => {
     const card = _el(`
       <div class="post-card${isTextOnly ? ' post-card--text-only' : ''}" tabindex="-1" data-album-id="${Utils.escapeHtml(album.id)}">
         <div class="post-card-header">
-          <div class="post-avatar">${avatarHtml}</div>
+          <div class="post-avatar${!album._isOwn ? ' post-avatar--clickable' : ''}">${avatarHtml}</div>
           <div class="post-author-meta">
-            <span class="post-author-name">${Utils.escapeHtml(album.sharer)}</span>
+            <span class="post-author-name${!album._isOwn ? ' post-author-name--clickable' : ''}">${Utils.escapeHtml(album.sharer)}</span>
             <span class="post-author-time">${timeStr}</span>
           </div>
           <div class="post-menu-slot"></div>
@@ -1240,6 +1248,14 @@ const UI = (() => {
       }
     });
     if (menu) menuSlot.appendChild(menu);
+
+    // Clicking the author avatar or name opens their profile
+    if (!album._isOwn && album.sharerEmail) {
+      const person = { email: album.sharerEmail, displayName: album.sharer, picture: album.sharerPicture || null };
+      const openProfile = e => { e.stopPropagation(); navigate('user-profile', { person }); };
+      card.querySelector('.post-avatar--clickable')?.addEventListener('click', openProfile);
+      card.querySelector('.post-author-name--clickable')?.addEventListener('click', openProfile);
+    }
 
     const wrapper = document.createElement('div');
     wrapper.className = 'post-card-wrapper';
@@ -2119,7 +2135,7 @@ const UI = (() => {
             ${coverHtml}
             <div class="feed-album-meta">
               <div class="feed-album-byline">
-                <span class="feed-album-sharer">${Utils.escapeHtml(post.authorName || post.authorEmail)}</span>
+                <span class="feed-album-sharer${!isMyPost ? ' feed-album-sharer--clickable' : ''}">${Utils.escapeHtml(post.authorName || post.authorEmail)}</span>
                 <span class="feed-album-dot">·</span>
                 <span class="feed-album-time">${timeStr}</span>
                 <div class="post-menu-slot" style="margin-left:auto"></div>
@@ -2179,6 +2195,14 @@ const UI = (() => {
         });
         if (circleMenu) circlePostMenuSlot.appendChild(circleMenu);
 
+        // Clicking the author name opens their profile
+        if (!isMyPost && post.authorEmail) {
+          card.querySelector('.feed-album-sharer--clickable')?.addEventListener('click', e => {
+            e.stopPropagation();
+            navigate('user-profile', { person: { email: post.authorEmail, displayName: post.authorName } });
+          });
+        }
+
         const expandGrid = document.createElement('div');
         expandGrid.className = 'feed-album-grid';
         expandGrid.hidden = true;
@@ -2237,7 +2261,7 @@ const UI = (() => {
       const isMOwner = m.email === circle.ownerEmail;
       const initials = (m.displayName || m.email || '?')[0].toUpperCase();
       const card = _el(`
-        <div class="circle-member-card">
+        <div class="circle-member-card${!isMe ? ' circle-member-card--clickable' : ''}">
           <div class="circle-member-avatar" style="background:${_circleColor(m.email)}">${initials}</div>
           <div class="circle-member-info">
             <div class="circle-member-name">${Utils.escapeHtml(m.displayName || m.email)}</div>
@@ -2246,10 +2270,18 @@ const UI = (() => {
           <span class="circle-member-role ${isMOwner ? 'circle-member-role--owner' : ''}">${isMOwner ? 'Owner' : 'Member'}</span>
         </div>
       `);
+      // Click opens their profile (except your own card)
+      if (!isMe) {
+        card.addEventListener('click', e => {
+          if (e.target.closest('button')) return; // don't fire on remove btn
+          navigate('user-profile', { person: { email: m.email, displayName: m.displayName } });
+        });
+      }
       if (isOwner && !isMe) {
         const removeBtn = _el(`<button class="btn btn-ghost btn-sm" style="margin-left:.35rem;font-size:.75rem;padding:.2rem .5rem;color:var(--muted)">✕</button>`);
         removeBtn.title = `Remove ${m.displayName || m.email}`;
-        removeBtn.addEventListener('click', async () => {
+        removeBtn.addEventListener('click', async e => {
+          e.stopPropagation();
           const label = m.displayName || m.email;
           if (!confirm(`Remove ${label} from this circle?`)) return;
           try {
@@ -2793,9 +2825,10 @@ const UI = (() => {
       `);
       if (!isPending) {
         row.querySelector('[data-action="posts"]').addEventListener('click', e => {
-          e.stopPropagation(); _openFriendPostsModal(f);
+          e.stopPropagation();
+          navigate('user-profile', { person: f });
         });
-        row.addEventListener('click', () => _openFriendPostsModal(f));
+        row.addEventListener('click', () => navigate('user-profile', { person: f }));
       }
       row.querySelector('[data-action="remove"]').addEventListener('click', async e => {
         e.stopPropagation(); await Data.removeFriend(f.email); _renderFriends();
@@ -2923,6 +2956,146 @@ const UI = (() => {
       });
       block.hidden = false;
     } catch { /* contacts permission not granted or unavailable — skip silently */ }
+  }
+
+  /* ── User Profile (other people) ─────────────── */
+
+  async function _renderUserProfile(person) {
+    if (!person) { navigate('friends'); return; }
+
+    // Back button: go to previous hash
+    _on('back-from-user-profile', 'click', () => history.back());
+
+    const name   = person.displayName || person.name || person.email || '?';
+    const email  = person.email || '';
+    const picture = person.picture || person.sharerPicture || null;
+
+    // Header + avatar
+    document.getElementById('user-profile-name').textContent = name;
+    document.getElementById('user-profile-display-name').textContent = name;
+    document.getElementById('user-profile-email').textContent = email;
+    document.getElementById('user-profile-bio').textContent = '';
+
+    const avatarEl = document.getElementById('user-profile-avatar');
+    avatarEl.innerHTML = '';
+    if (picture) {
+      avatarEl.innerHTML = `<img src="${Utils.escapeHtml(picture)}" alt="" />`;
+    } else {
+      avatarEl.textContent = name[0].toUpperCase();
+    }
+
+    // Actions: friend status
+    const actionsEl = document.getElementById('user-profile-actions');
+    actionsEl.innerHTML = '<span class="muted-text small">Loading…</span>';
+
+    const statsEl = document.getElementById('user-profile-stats');
+    statsEl.innerHTML = '';
+
+    const grid  = document.getElementById('user-profile-posts-grid');
+    const empty = document.getElementById('user-profile-posts-empty');
+    grid.innerHTML = '<p class="muted-text small">Loading…</p>';
+    empty.hidden = true;
+
+    // Load friendship status + posts in parallel
+    const [friends, sharedFolders] = await Promise.all([
+      Data.getFriends().catch(() => []),
+      Data.getFeedFolders().catch(() => [])
+    ]);
+
+    const me     = Auth.getCurrentUser();
+    const friend = friends.find(f => f.email === email);
+    const isFriend   = !!friend && friend.status !== 'pending_sent';
+    const isPending  = friend?.status === 'pending_sent';
+
+    // Action buttons
+    actionsEl.innerHTML = '';
+    if (email && email !== me?.email) {
+      if (isFriend) {
+        const removeBtn = _el(`<button class="btn btn-ghost btn-sm">Remove friend</button>`);
+        removeBtn.addEventListener('click', async () => {
+          if (!confirm(`Remove ${name} as a friend?`)) return;
+          await Data.removeFriend(email).catch(() => {});
+          navigate('friends');
+          Utils.showToast(`${name} removed`);
+        });
+        actionsEl.appendChild(removeBtn);
+
+        const blockBtn = _el(`<button class="btn btn-ghost btn-sm danger-btn">Block</button>`);
+        blockBtn.addEventListener('click', async () => {
+          if (!confirm(`Block ${name}? They will be removed from your friends.`)) return;
+          await Data.blockUser(email).catch(() => {});
+          await Data.removeFriend(email).catch(() => {});
+          navigate('friends');
+          Utils.showToast(`${name} blocked`);
+        });
+        actionsEl.appendChild(blockBtn);
+      } else if (isPending) {
+        const pendingBtn = _el(`<button class="btn btn-ghost btn-sm" disabled>Request sent</button>`);
+        actionsEl.appendChild(pendingBtn);
+      } else {
+        const addBtn = _el(`<button class="btn btn-primary btn-sm">+ Add Friend</button>`);
+        addBtn.addEventListener('click', async () => {
+          addBtn.disabled = true; addBtn.textContent = 'Sending…';
+          try {
+            await Data.sendFriendRequest(email);
+            addBtn.textContent = 'Request sent';
+            Utils.showToast('Friend request sent!');
+          } catch {
+            Utils.showToast('Could not send request', 'error');
+            addBtn.disabled = false; addBtn.textContent = '+ Add Friend';
+          }
+        });
+        actionsEl.appendChild(addBtn);
+      }
+    }
+
+    // Stats row
+    const theirPosts = sharedFolders.filter(f => f.owners?.[0]?.emailAddress === email);
+    statsEl.innerHTML = `
+      <div class="profile-stat"><span class="profile-stat-n">${theirPosts.length}</span><span class="profile-stat-l">Posts</span></div>
+      <div class="profile-stat"><span class="profile-stat-n">${isFriend ? '✓' : '—'}</span><span class="profile-stat-l">Friend</span></div>
+    `;
+
+    // Posts grid
+    grid.innerHTML = '';
+    if (!theirPosts.length) { empty.hidden = false; return; }
+
+    for (const folder of theirPosts.slice(0, 30)) {
+      try {
+        const files   = await Drive.listFiles(folder.id);
+        const meta    = files.find(f => f.name === '_meta.json');
+        const media   = files.filter(f => f.mimeType?.startsWith('image/') || f.mimeType?.startsWith('video/'));
+        const cover   = media[0];
+        const timeStr = Utils.formatRelativeTime(folder.sharedWithMeTime || folder.createdTime);
+
+        let caption = '';
+        if (meta) {
+          try {
+            const m = await Drive.readJsonFile(meta.id);
+            caption = m.caption || '';
+          } catch {}
+        }
+
+        const card = _el(`
+          <div class="profile-post-card">
+            <div class="profile-post-thumb"></div>
+            ${caption ? `<div class="profile-post-caption">${Utils.escapeHtml(caption.length > 60 ? caption.slice(0, 60) + '…' : caption)}</div>` : ''}
+            <div class="profile-post-actions">
+              <span class="profile-post-time muted-text small">${timeStr}</span>
+              ${media.length > 1 ? `<span class="muted-text small">${media.length} photos</span>` : ''}
+            </div>
+          </div>
+        `);
+
+        if (cover) {
+          _loadCardCover(folder.id, card.querySelector('.profile-post-thumb'));
+          card.style.cursor = 'pointer';
+          card.addEventListener('click', () => openLightbox(cover.id, folder.id, { canCopy: true, thumbnailLink: cover.thumbnailLink }));
+        }
+        grid.appendChild(card);
+      } catch {}
+    }
+    if (!grid.children.length) empty.hidden = false;
   }
 
   /* ── Profile ─────────────────────────────────── */

@@ -399,6 +399,8 @@ details[open] .auth-setup-toggle::before { content: '▾ '; }
 .feed-album-title { font-size: 1rem; font-weight: 600; margin-bottom: .2rem; }
 .feed-album-byline { font-size: .82rem; color: var(--muted); display: flex; align-items: center; gap: .3rem; flex-wrap: wrap; }
 .feed-album-sharer { font-weight: 600; color: var(--text); }
+.feed-album-sharer--clickable { cursor: pointer; }
+.feed-album-sharer--clickable:hover { text-decoration: underline; }
 .feed-album-dot { opacity: .4; }
 .feed-album-expand-hint { font-style: italic; opacity: .55; }
 .feed-album-caption { font-size: .88rem; margin-top: .45rem; color: var(--text); line-height: 1.5; }
@@ -760,6 +762,8 @@ textarea.input { resize: vertical; min-height: 80px; }
   align-items: center;
   gap: .75rem;
 }
+.circle-member-card--clickable { cursor: pointer; transition: box-shadow .12s; }
+.circle-member-card--clickable:hover { box-shadow: var(--shadow); }
 .circle-member-avatar {
   width: 38px; height: 38px;
   border-radius: 50%;
@@ -1233,6 +1237,10 @@ textarea.input { resize: vertical; min-height: 80px; }
 .post-avatar-initials { font-size: .85rem; font-weight: 700; color: var(--text); }
 .post-author-meta { display: flex; flex-direction: column; flex: 1; }
 .post-author-name { font-weight: 600; font-size: .9rem; line-height: 1.2; }
+.post-author-name--clickable { cursor: pointer; }
+.post-author-name--clickable:hover { text-decoration: underline; }
+.post-avatar--clickable { cursor: pointer; }
+.post-avatar--clickable:hover { opacity: .8; }
 .post-author-time { font-size: .75rem; color: var(--muted); }
 /* ── Post ⋯ menu ── */
 .post-menu-slot { margin-left: auto; }
