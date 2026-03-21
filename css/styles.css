@@ -996,10 +996,20 @@ textarea.input { resize: vertical; min-height: 80px; }
   animation: toast-in .2s ease;
   max-width: 300px;
 }
+.toast { display: flex; align-items: center; gap: .6rem; }
 .toast-error { background: var(--danger); color: #fff; }
 @keyframes toast-in { from { opacity:0; transform:translateY(6px); } to { opacity:1; transform:translateY(0); } }
 .dismissing { animation: toast-out .2s ease forwards; }
 @keyframes toast-out { to { opacity:0; transform:translateY(6px); } }
+.toast-action-btn {
+  background: none; border: 1px solid currentColor;
+  color: inherit; opacity: .85;
+  padding: .15rem .5rem; border-radius: var(--radius);
+  font-size: .78rem; font-weight: 700; cursor: pointer;
+  flex-shrink: 0; white-space: nowrap;
+  transition: opacity .1s;
+}
+.toast-action-btn:hover { opacity: 1; }
 
 /* ── Loading ── */
 #loading-overlay {
@@ -1224,12 +1234,37 @@ textarea.input { resize: vertical; min-height: 80px; }
 .post-author-meta { display: flex; flex-direction: column; flex: 1; }
 .post-author-name { font-weight: 600; font-size: .9rem; line-height: 1.2; }
 .post-author-time { font-size: .75rem; color: var(--muted); }
-.post-delete-btn {
+/* ── Post ⋯ menu ── */
+.post-menu-slot { margin-left: auto; }
+.post-menu-wrap { position: relative; flex-shrink: 0; }
+.post-menu-btn {
   background: none; border: none; color: var(--muted);
-  font-size: 1.2rem; line-height: 1; cursor: pointer; padding: .1rem .3rem;
-  border-radius: var(--radius); margin-left: auto;
+  font-size: 1.15rem; line-height: 1; cursor: pointer;
+  padding: .15rem .45rem; border-radius: var(--radius);
+  letter-spacing: .04em; transition: background .1s, color .1s;
 }
-.post-delete-btn:hover { color: var(--danger); background: rgba(192,57,43,.08); }
+.post-menu-btn:hover { background: var(--bg); color: var(--text); }
+.post-menu {
+  position: absolute; top: calc(100% + .3rem); right: 0;
+  min-width: 160px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: 0 4px 16px rgba(0,0,0,.12);
+  z-index: 50;
+  overflow: hidden;
+}
+.post-menu-item {
+  display: block; width: 100%;
+  padding: .55rem .85rem;
+  text-align: left; background: none; border: none;
+  font-size: .85rem; color: var(--text);
+  cursor: pointer; transition: background .1s;
+  white-space: nowrap;
+}
+.post-menu-item:hover { background: var(--bg); }
+.post-menu-item--danger { color: var(--danger); }
+.post-menu-item--danger:hover { background: rgba(192,57,43,.06); }
 .post-caption {
   padding: .4rem 1rem .5rem;
   font-size: .9rem;

@@ -401,6 +401,86 @@ const UI = (() => {
   let _feedQueue  = [];   // albums not yet rendered (infinite scroll)
   let _feedSentinelObs = null; // IntersectionObserver for infinite scroll
   let _focusedPostIndex = -1; // keyboard navigation
+  let _hiddenPostIds = new Set(); // IDs of posts hidden by the user
+
+  // Close any open post menus when clicking outside
+  document.addEventListener('click', () => {
+    document.querySelectorAll('.post-menu:not([hidden])').forEach(m => { m.hidden = true; });
+  });
+
+  // ⋯ kebab menu for a post card.
+  // opts: { isOwn, canDelete, canHide, onEdit, onDelete, onHide }
+  function _buildPostMenu(opts) {
+    const { isOwn, canDelete, canHide, onEdit, onDelete, onHide } = opts;
+    const hasAnyAction = (isOwn && onEdit) || (canDelete && onDelete) || (canHide && onHide);
+    if (!hasAnyAction) return null;
+
+    const wrap = _el(`<div class="post-menu-wrap"></div>`);
+    const btn  = _el(`<button class="post-menu-btn" title="More options" aria-label="Post options">⋯</button>`);
+    const menu = _el(`<div class="post-menu" hidden role="menu"></div>`);
+
+    if (isOwn && onEdit) {
+      const item = _el(`<button class="post-menu-item" role="menuitem">Edit caption</button>`);
+      item.addEventListener('click', e => { e.stopPropagation(); menu.hidden = true; onEdit(); });
+      menu.appendChild(item);
+    }
+    if (canDelete && onDelete) {
+      const item = _el(`<button class="post-menu-item post-menu-item--danger" role="menuitem">Delete post</button>`);
+      item.addEventListener('click', e => { e.stopPropagation(); menu.hidden = true; onDelete(); });
+      menu.appendChild(item);
+    }
+    if (canHide && onHide) {
+      const item = _el(`<button class="post-menu-item" role="menuitem">Hide post</button>`);
+      item.addEventListener('click', e => { e.stopPropagation(); menu.hidden = true; onHide(); });
+      menu.appendChild(item);
+    }
+
+    btn.addEventListener('click', e => {
+      e.stopPropagation();
+      // Close all other open menus first
+      document.querySelectorAll('.post-menu:not([hidden])').forEach(m => { if (m !== menu) m.hidden = true; });
+      menu.hidden = !menu.hidden;
+    });
+
+    wrap.appendChild(btn);
+    wrap.appendChild(menu);
+    return wrap;
+  }
+
+  function _openEditCaptionModal(currentCaption, onSave) {
+    openModal(`
+      <h3>Edit caption</h3>
+      <form id="edit-caption-form" class="form-block">
+        <div class="form-field">
+          <textarea id="edit-caption-text" class="input" rows="4" maxlength="2000">${Utils.escapeHtml(currentCaption || '')}</textarea>
+        </div>
+        <div class="modal-actions">
+          <button type="button" class="btn btn-ghost btn-sm modal-cancel-btn">Cancel</button>
+          <button type="submit" class="btn btn-primary btn-sm">Save</button>
+        </div>
+      </form>
+    `);
+    document.querySelector('.modal-cancel-btn').addEventListener('click', closeModal);
+    document.getElementById('edit-caption-form').addEventListener('submit', async e => {
+      e.preventDefault();
+      const newCaption = document.getElementById('edit-caption-text').value.trim();
+      const submitBtn  = e.target.querySelector('[type=submit]');
+      submitBtn.disabled = true; submitBtn.textContent = 'Saving…';
+      try {
+        await onSave(newCaption);
+        closeModal();
+        Utils.showToast('Caption updated');
+      } catch {
+        Utils.showToast('Failed to save', 'error');
+        submitBtn.disabled = false; submitBtn.textContent = 'Save';
+      }
+    });
+    // Focus textarea at end
+    requestAnimationFrame(() => {
+      const ta = document.getElementById('edit-caption-text');
+      if (ta) { ta.focus(); ta.setSelectionRange(ta.value.length, ta.value.length); }
+    });
+  }
 
   async function _openPostModal() {
     // Load circles so the audience picker can list them
@@ -612,11 +692,13 @@ const UI = (() => {
     });
 
     try {
-      const [sharedFolders, ownPosts, ownStories] = await Promise.all([
+      const [sharedFolders, ownPosts, ownStories, hiddenIds] = await Promise.all([
         Data.getFeedFolders(),
         Data.listOwnPosts(),
-        Data.listOwnStories().catch(() => [])
+        Data.listOwnStories().catch(() => []),
+        Data.getHiddenPostIds().catch(() => [])
       ]);
+      _hiddenPostIds = new Set(hiddenIds);
 
       const me = Auth.getCurrentUser();
 
@@ -932,6 +1014,7 @@ const UI = (() => {
     list.innerHTML = '';
 
     const visible = _feedAlbums.filter(a => {
+      if (_hiddenPostIds.has(a.id)) return false;
       if (_feedFilter === 'friends') return !a._isOwn;
       if (_feedFilter === 'mine')    return a._isOwn;
       return true;
@@ -964,6 +1047,7 @@ const UI = (() => {
     const list  = document.getElementById('feed-list');
     const empty = document.getElementById('feed-empty');
     const visible = albums.filter(a => {
+      if (_hiddenPostIds.has(a.id)) return false;
       if (_feedFilter === 'friends') return !a._isOwn;
       if (_feedFilter === 'mine')    return a._isOwn;
       return true;
@@ -1001,7 +1085,7 @@ const UI = (() => {
             <span class="post-author-name">${Utils.escapeHtml(album.sharer)}</span>
             <span class="post-author-time">${timeStr}</span>
           </div>
-          ${album._isOwn ? `<button class="post-delete-btn" title="Delete post">×</button>` : ''}
+          <div class="post-menu-slot"></div>
         </div>
         ${isTextOnly
           ? `<div class="post-text-only-body">${Utils.escapeHtml(album.caption)}</div>`
@@ -1109,22 +1193,53 @@ const UI = (() => {
       }
     });
 
-    // Delete own post
-    const delBtn = card.querySelector('.post-delete-btn');
-    if (delBtn) {
-      delBtn.addEventListener('click', async e => {
-        e.stopPropagation();
-        if (!confirm('Delete this post?')) return;
-        delBtn.disabled = true;
+    // Post ⋯ menu
+    const captionEl = card.querySelector('.post-caption, .post-text-only-body');
+    const menuSlot  = card.querySelector('.post-menu-slot');
+    const menu = _buildPostMenu({
+      isOwn:     album._isOwn,
+      canDelete: album._isOwn,
+      canHide:   !album._isOwn,
+      onEdit: () => {
+        _openEditCaptionModal(album.caption, async newCaption => {
+          await Data.updateCollectionMeta(album.id, { caption: newCaption });
+          album.caption = newCaption;
+          if (captionEl) captionEl.textContent = newCaption;
+        });
+      },
+      onDelete: async () => {
+        if (!confirm('Delete this post? This cannot be undone.')) return;
         try {
           await Data.deleteCollection(album.id);
           card.closest('.post-card-wrapper').remove();
           Utils.showToast('Post deleted');
           _feedAlbums = _feedAlbums.filter(a => a.id !== album.id);
           if (!document.querySelectorAll('.post-card').length) _paintFeedAlbums();
-        } catch { Utils.showToast('Could not delete post', 'error'); delBtn.disabled = false; }
-      });
-    }
+        } catch { Utils.showToast('Could not delete post', 'error'); }
+      },
+      onHide: async () => {
+        try {
+          await Data.hidePost(album.id);
+          _hiddenPostIds.add(album.id);
+          const wrapper = card.closest('.post-card-wrapper');
+          wrapper.style.transition = 'opacity .2s, max-height .3s';
+          wrapper.style.opacity = '0';
+          wrapper.style.overflow = 'hidden';
+          wrapper.style.maxHeight = wrapper.offsetHeight + 'px';
+          requestAnimationFrame(() => { wrapper.style.maxHeight = '0'; });
+          setTimeout(() => wrapper.remove(), 320);
+          Utils.showToast('Post hidden', 'info', null, {
+            label: 'Undo',
+            action: async () => {
+              await Data.unhidePost(album.id).catch(() => {});
+              _hiddenPostIds.delete(album.id);
+              _paintFeedAlbums();
+            }
+          });
+        } catch { Utils.showToast('Could not hide post', 'error'); }
+      }
+    });
+    if (menu) menuSlot.appendChild(menu);
 
     const wrapper = document.createElement('div');
     wrapper.className = 'post-card-wrapper';
@@ -1998,6 +2113,7 @@ const UI = (() => {
           `<div class="circle-doc-chip">${_fileTypeIcon(f.mimeType)} <span>${Utils.escapeHtml(f.name)}</span></div>`
         ).join('');
 
+        const isMyPost = post.authorEmail === user.email;
         const card = _el(`
           <div class="feed-album-card">
             ${coverHtml}
@@ -2006,9 +2122,9 @@ const UI = (() => {
                 <span class="feed-album-sharer">${Utils.escapeHtml(post.authorName || post.authorEmail)}</span>
                 <span class="feed-album-dot">·</span>
                 <span class="feed-album-time">${timeStr}</span>
-                ${canDelete ? `<button class="btn-link circle-del-post" style="margin-left:auto;font-size:.72rem;color:var(--muted)">delete</button>` : ''}
+                <div class="post-menu-slot" style="margin-left:auto"></div>
               </div>
-              ${post.caption ? `<div class="feed-album-caption">${Utils.escapeHtml(post.caption)}</div>` : ''}
+              <div class="feed-album-caption-wrap">${post.caption ? `<div class="feed-album-caption">${Utils.escapeHtml(post.caption)}</div>` : ''}</div>
               ${docsHtml ? `<div class="circle-docs-row">${docsHtml}</div>` : ''}
             </div>
           </div>
@@ -2018,17 +2134,50 @@ const UI = (() => {
           _loadThumbnail(card.querySelector('img'), mediaFiles[0].id, mediaFiles[0].thumbnailLink);
         }
 
-        if (canDelete) {
-          card.querySelector('.circle-del-post')?.addEventListener('click', async e => {
-            e.stopPropagation();
+        // Circle post ⋯ menu
+        const circlePostMenuSlot = card.querySelector('.post-menu-slot');
+        const circlePostCaptionWrap = card.querySelector('.feed-album-caption-wrap');
+        const circleMenu = _buildPostMenu({
+          isOwn:     isMyPost,
+          canDelete: canDelete,
+          canHide:   !isMyPost,
+          onEdit: () => {
+            _openEditCaptionModal(post.caption, async newCaption => {
+              await Data.updateCirclePostCaption(post.postFolderId, newCaption);
+              post.caption = newCaption;
+              circlePostCaptionWrap.innerHTML = newCaption
+                ? `<div class="feed-album-caption">${Utils.escapeHtml(newCaption)}</div>`
+                : '';
+            });
+          },
+          onDelete: async () => {
             if (!confirm('Delete this post?')) return;
             try {
               await Data.deleteCirclePost(post.postFolderId);
               _renderCircleDetail(folderId);
               Utils.showToast('Post deleted');
             } catch { Utils.showToast('Could not delete post', 'error'); }
-          });
-        }
+          },
+          onHide: async () => {
+            try {
+              await Data.hidePost(post.postFolderId);
+              const wrapper = card.closest('.feed-album-wrapper');
+              if (wrapper) {
+                wrapper.style.transition = 'opacity .2s';
+                wrapper.style.opacity = '0';
+                setTimeout(() => wrapper.remove(), 220);
+              }
+              Utils.showToast('Post hidden', 'info', null, {
+                label: 'Undo',
+                action: async () => {
+                  await Data.unhidePost(post.postFolderId).catch(() => {});
+                  _renderCircleDetail(folderId);
+                }
+              });
+            } catch { Utils.showToast('Could not hide post', 'error'); }
+          }
+        });
+        if (circleMenu) circlePostMenuSlot.appendChild(circleMenu);
 
         const expandGrid = document.createElement('div');
         expandGrid.className = 'feed-album-grid';

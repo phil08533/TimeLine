@@ -782,6 +782,41 @@ const Data = (() => {
     init,
     getFolders,
     getProfile,   saveProfile,  uploadAvatar, makeProfilePublic,
+  /* ── Hidden posts (feed/circle hide) ───────── */
+
+  async function getHiddenPostIds() {
+    try {
+      const f = await Drive.findFile('hidden_posts.json', _folders.rootId);
+      if (!f) return [];
+      const data = await Drive.readJsonFile(f.id);
+      return data.ids || [];
+    } catch { return []; }
+  }
+
+  async function hidePost(id) {
+    const ids = await getHiddenPostIds();
+    if (!ids.includes(id)) {
+      ids.push(id);
+      await Drive.upsertJsonFile('hidden_posts.json', { ids }, _folders.rootId);
+    }
+  }
+
+  async function unhidePost(id) {
+    const ids = await getHiddenPostIds();
+    const filtered = ids.filter(x => x !== id);
+    await Drive.upsertJsonFile('hidden_posts.json', { ids: filtered }, _folders.rootId);
+  }
+
+  /* ── Circle post edit ───────────────────────── */
+
+  async function updateCirclePostCaption(postFolderId, caption) {
+    const f = await Drive.findFile('_post.json', postFolderId);
+    const meta = await Drive.readJsonFile(f.id);
+    const updated = { ...meta, caption };
+    await Drive.updateJsonFile(f.id, updated);
+    return updated;
+  }
+
     getSettings,  saveSettings,
     getFriends,   addFriend,    removeFriend,
     sendFriendRequest, getIncomingFriendRequests, getIncomingCircleNotifications, getNotifications,
@@ -789,7 +824,7 @@ const Data = (() => {
     getBlocked,   blockUser,    unblockUser,
     listCircles,  createCircle, getCircle,  updateCircleMeta,  deleteCircle,
     addMemberToCircle, removeMemberFromCircle,
-    createCirclePost, listCirclePosts, deleteCirclePost,
+    createCirclePost, listCirclePosts, deleteCirclePost, updateCirclePostCaption,
     getMutedCircles, muteCircle, unmuteCircle,
     listCollections, createCollection, getCollection, updateCollectionMeta, deleteCollection, shareCollection, inviteCollaborator,
     getReactions, toggleReaction, toggleLike,
@@ -798,6 +833,7 @@ const Data = (() => {
     createStory, listOwnStories,
     getFeedFolders,
     getHiddenIds, hideFile, unhideFile,
+    getHiddenPostIds, hidePost, unhidePost,
     getPin, setPin, verifyPin, clearPin
   };
 })();

@@ -99,22 +99,40 @@ const Utils = (() => {
 
   /* ── Toast Notifications ─────────────────────────── */
 
-  function showToast(message, type = 'info', durationMs = 3500) {
+  // action (optional): { label: string, action: fn } — shows an action button in the toast
+  function showToast(message, type = 'info', durationMs, action = null) {
+    const ms = durationMs != null ? durationMs : (action ? 6000 : 3500);
     const container = document.getElementById('toast-container');
     if (!container) return;
 
     const toast = document.createElement('div');
     toast.className = `toast toast-${type}`;
-    // Use textContent to prevent XSS
-    toast.textContent = message;
-    container.appendChild(toast);
+
+    const textNode = document.createElement('span');
+    textNode.textContent = message;
+    toast.appendChild(textNode);
 
     const dismiss = () => {
       toast.classList.add('dismissing');
       toast.addEventListener('animationend', () => toast.remove(), { once: true });
     };
 
-    const timer = setTimeout(dismiss, durationMs);
+    if (action?.label && action?.action) {
+      const btn = document.createElement('button');
+      btn.className = 'toast-action-btn';
+      btn.textContent = action.label;
+      btn.addEventListener('click', e => {
+        e.stopPropagation();
+        clearTimeout(timer);
+        dismiss();
+        action.action();
+      });
+      toast.appendChild(btn);
+    }
+
+    container.appendChild(toast);
+
+    const timer = setTimeout(dismiss, ms);
     toast.addEventListener('click', () => { clearTimeout(timer); dismiss(); });
   }
 
