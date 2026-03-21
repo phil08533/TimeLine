@@ -118,12 +118,16 @@
           <h2>Feed</h2>
           <button class="btn btn-primary btn-sm" id="new-post-btn">+ Create Post</button>
         </div>
+        <!-- Stories bar -->
+        <div id="stories-bar" hidden></div>
         <div id="feed-filters" class="my-data-filters">
           <button class="filter-pill active" data-filter="all">All</button>
           <button class="filter-pill" data-filter="friends">From Friends</button>
           <button class="filter-pill" data-filter="mine">Your Posts</button>
         </div>
         <div id="feed-list"></div>
+        <!-- Infinite scroll sentinel -->
+        <div id="feed-sentinel" hidden></div>
         <div id="feed-empty" class="empty-state" hidden>
           <p>Your feed is empty. Create a post or add friends to see their shares here.</p>
         </div>
@@ -407,5 +411,10 @@
   <script src="js/data.js"></script>
   <script src="js/theme.js"></script>
   <script src="js/ui.js"></script>
+  <script>
+    if ('serviceWorker' in navigator) {
+      navigator.serviceWorker.register('sw.js').catch(() => {});
+    }
+  </script>
 </body>
 </html>
