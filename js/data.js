@@ -778,10 +778,6 @@ const Data = (() => {
 
   /* ── Exports ───────────────────────────────── */
 
-  return {
-    init,
-    getFolders,
-    getProfile,   saveProfile,  uploadAvatar, makeProfilePublic,
   /* ── Hidden posts (feed/circle hide) ───────── */
 
   async function getHiddenPostIds() {
@@ -817,6 +813,12 @@ const Data = (() => {
     return updated;
   }
 
+  /* ── Exports ───────────────────────────────── */
+
+  return {
+    init,
+    getFolders,
+    getProfile,   saveProfile,  uploadAvatar, makeProfilePublic,
     getSettings,  saveSettings,
     getFriends,   addFriend,    removeFriend,
     sendFriendRequest, getIncomingFriendRequests, getIncomingCircleNotifications, getNotifications,
