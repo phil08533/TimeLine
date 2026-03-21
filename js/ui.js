@@ -944,14 +944,22 @@ const UI = (() => {
 
   function _openStoryViewer(stories, startIndex, user) {
     if (!stories.length) return;
-    // For own stories, load files from the first story
-    Drive.listFiles(stories[startIndex].folderId).then(files => {
+    const story = stories[startIndex];
+    Drive.listFiles(story.folderId).then(files => {
       const media = files.filter(f => f.mimeType?.startsWith('image/') || f.mimeType?.startsWith('video/'));
-      _openStoryViewerMedia(media, 0, user?.name || 'You', user?.picture || null);
+      const onDelete = async () => {
+        try {
+          await Drive.deleteFile(story.folderId);
+          Utils.showToast('Story deleted');
+          // Refresh feed to remove the story from the bar
+          navigate('feed');
+        } catch { Utils.showToast('Could not delete story', 'error'); }
+      };
+      _openStoryViewerMedia(media, 0, user?.name || 'You', user?.picture || null, onDelete);
     }).catch(() => Utils.showToast('Could not load story', 'error'));
   }
 
-  function _openStoryViewerMedia(mediaFiles, index, authorName, authorPic) {
+  function _openStoryViewerMedia(mediaFiles, index, authorName, authorPic, onDelete = null) {
     if (!mediaFiles.length) return;
     const overlay = _el(`
       <div class="story-viewer-overlay" id="story-viewer-overlay">
@@ -962,6 +970,7 @@ const UI = (() => {
           <div class="story-viewer-header">
             <div class="story-viewer-avatar">${authorPic ? `<img src="${Utils.escapeHtml(authorPic)}" alt="" />` : authorName[0].toUpperCase()}</div>
             <span class="story-viewer-name">${Utils.escapeHtml(authorName)}</span>
+            ${onDelete ? `<button class="story-viewer-delete" aria-label="Delete story" title="Delete story">🗑</button>` : ''}
             <button class="story-viewer-close" aria-label="Close">✕</button>
           </div>
           <div class="story-viewer-media" id="story-viewer-media"></div>
@@ -1022,6 +1031,15 @@ const UI = (() => {
       if (e.key === 'ArrowRight') advance(1);
       if (e.key === 'ArrowLeft')  advance(-1);
     });
+
+    if (onDelete) {
+      overlay.querySelector('.story-viewer-delete').addEventListener('click', async e => {
+        e.stopPropagation();
+        if (!confirm('Delete this story?')) return;
+        closeViewer();
+        await onDelete();
+      });
+    }
 
     showSlide(cur);
   }

@@ -1455,6 +1455,14 @@ textarea.input { resize: vertical; min-height: 80px; }
 }
 .story-viewer-avatar img { width: 100%; height: 100%; object-fit: cover; }
 .story-viewer-name { color: #fff; font-size: .875rem; font-weight: 600; flex: 1; }
+.story-viewer-delete {
+  background: rgba(180,0,0,.55); border: none; color: #fff;
+  border-radius: 50%; width: 28px; height: 28px;
+  display: flex; align-items: center; justify-content: center;
+  cursor: pointer; font-size: .85rem; flex-shrink: 0;
+  margin-right: .2rem;
+}
+.story-viewer-delete:hover { background: rgba(200,0,0,.8); }
 .story-viewer-close {
   background: rgba(0,0,0,.4); border: none; color: #fff;
   border-radius: 50%; width: 28px; height: 28px;
