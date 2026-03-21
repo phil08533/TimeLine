@@ -93,7 +93,6 @@
       </a>
       <nav class="topbar-nav" id="topbar-nav">
         <a href="#feed"        class="nav-link" data-page="feed">Feed</a>
-        <a href="#my-data"     class="nav-link" data-page="my-data">My Data</a>
         <a href="#circles"     class="nav-link" data-page="circles">Circles</a>
         <a href="#collections" class="nav-link" data-page="collections">Collections</a>
         <a href="#friends"     class="nav-link" data-page="friends">Friends</a>
@@ -216,10 +215,6 @@
             </div>
           </div>
         </div>
-        <div class="section-block" id="friend-suggestions-block" hidden>
-          <h3>People you may know</h3>
-          <div id="friend-suggestions-list" class="people-list"></div>
-        </div>
         <div class="section-block">
           <h3>Friends <span id="friends-count" class="badge">0</span></h3>
           <div id="friends-list" class="people-list"></div>
@@ -264,6 +259,11 @@
             <button type="button" class="btn btn-ghost btn-sm" id="cancel-profile-btn">Cancel</button>
           </div>
         </form>
+        <div id="profile-posts-section" class="section-block">
+          <h3>Your Posts</h3>
+          <div id="profile-posts-grid" class="post-grid"></div>
+          <p id="profile-posts-empty" class="muted-text" hidden>No posts yet. Create one from the feed!</p>
+        </div>
         <div class="section-block">
           <a href="#settings" class="btn btn-ghost btn-sm">Settings →</a>
           <button id="sign-out-btn" class="btn btn-ghost btn-sm danger-btn">Sign out</button>

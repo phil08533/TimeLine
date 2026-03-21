@@ -590,6 +590,8 @@ const UI = (() => {
         Data.listOwnPosts()
       ]);
 
+      const me = Auth.getCurrentUser();
+
       // Build a unified album list
       const allFolders = [
         ...sharedFolders.map(f => ({
@@ -597,14 +599,16 @@ const UI = (() => {
           name: f.name,
           sharer: f.owners?.[0]?.displayName || 'Friend',
           sharerEmail: f.owners?.[0]?.emailAddress || '',
+          sharerPicture: f.owners?.[0]?.photoLink || null,
           sharedAt: f.sharedWithMeTime || f.createdTime,
           _isOwn: false
         })),
         ...ownPosts.map(p => ({
           id: p.folderId,
           name: p.name,
-          sharer: 'You',
-          sharerEmail: '',
+          sharer: me?.name || 'You',
+          sharerEmail: me?.email || '',
+          sharerPicture: me?.picture || null,
           sharedAt: p.createdAt || new Date().toISOString(),
           caption: p.caption,
           _isOwn: true
@@ -656,76 +660,101 @@ const UI = (() => {
     empty.hidden = true;
 
     visible.forEach(album => {
-      const cover   = album.files[0];
-      const count   = album.files.length;
+      const mediaFiles = album.files.filter(f => f.mimeType?.startsWith('image/') || f.mimeType?.startsWith('video/'));
+      const count   = mediaFiles.length;
       const timeStr = Utils.formatRelativeTime(album.sharedAt);
 
-      const coverHtml = cover ? `
-        <div class="feed-album-cover">
-          <img src="" alt="" loading="lazy" />
-          ${count > 1 ? `<span class="feed-album-count">${count} photos</span>` : ''}
-        </div>` : '';
+      // Avatar HTML
+      const initials = (album.sharer || '?')[0].toUpperCase();
+      const avatarHtml = album.sharerPicture
+        ? `<img src="${Utils.escapeHtml(album.sharerPicture)}" alt="" class="post-avatar-img" />`
+        : `<span class="post-avatar-initials">${initials}</span>`;
 
-      const expandHint = count > 1
-        ? `<span class="feed-album-dot">·</span><span class="feed-album-expand-hint">tap to expand</span>` : '';
+      // Media grid (1 photo → full width, 2-4 → 2-col grid, 5+ → 3-col)
+      const gridClass = count === 1 ? 'post-media-single' : count <= 4 ? 'post-media-grid2' : 'post-media-grid3';
+      const mediaHtml = count > 0 ? `<div class="post-media ${gridClass}" data-album-loaded="0"></div>` : '';
 
       const card = _el(`
-        <div class="feed-album-card${!cover ? ' feed-album-card--text' : ''}">
-          ${coverHtml}
-          <div class="feed-album-meta">
-            <div class="feed-album-byline">
-              <span class="feed-album-sharer">${Utils.escapeHtml(album.sharer)}</span>
-              <span class="feed-album-dot">·</span>
-              <span class="feed-album-time">${timeStr}</span>
-              ${expandHint}
+        <div class="post-card">
+          <div class="post-card-header">
+            <div class="post-avatar">${avatarHtml}</div>
+            <div class="post-author-meta">
+              <span class="post-author-name">${Utils.escapeHtml(album.sharer)}</span>
+              <span class="post-author-time">${timeStr}</span>
             </div>
-            ${album.caption ? `<div class="feed-album-caption">${Utils.escapeHtml(album.caption)}</div>` : ''}
+            ${album._isOwn ? `<button class="post-delete-btn" title="Delete post">×</button>` : ''}
+          </div>
+          ${album.caption ? `<div class="post-caption">${Utils.escapeHtml(album.caption)}</div>` : ''}
+          ${mediaHtml}
+          <div class="post-actions">
+            <button class="post-like-btn" data-liked="0">♥ <span class="post-like-count">0</span></button>
           </div>
         </div>
       `);
 
-      if (cover) _loadThumbnail(card.querySelector('img'), cover.id, cover.thumbnailLink);
+      // Load media thumbnails into grid
+      const mediaDiv = card.querySelector('.post-media');
+      if (mediaDiv && count > 0) {
+        mediaFiles.slice(0, 9).forEach((f, i) => {
+          const thumb = _el(`<div class="post-media-item"><img src="" alt="" loading="lazy" /></div>`);
+          _loadThumbnail(thumb.querySelector('img'), f.id, f.thumbnailLink);
+          thumb.addEventListener('click', e => {
+            e.stopPropagation();
+            openLightbox(f.id, album.id, { canCopy: !album._isOwn, canDelete: album._isOwn, thumbnailLink: f.thumbnailLink });
+          });
+          mediaDiv.appendChild(thumb);
+        });
+        if (count > 9) {
+          const more = _el(`<div class="post-media-more">+${count - 9}</div>`);
+          more.addEventListener('click', e => {
+            e.stopPropagation();
+            openLightbox(mediaFiles[9].id, album.id, { canCopy: !album._isOwn, canDelete: album._isOwn, thumbnailLink: mediaFiles[9].thumbnailLink });
+          });
+          mediaDiv.appendChild(more);
+        }
+      }
 
-      // Expanded grid (hidden by default for multi-photo albums)
-      let expanded = false;
-      const expandGrid = document.createElement('div');
-      expandGrid.className = 'feed-album-grid';
-      expandGrid.hidden = true;
+      // Like button — load reactions
+      const likeBtn = card.querySelector('.post-like-btn');
+      const likeCount = card.querySelector('.post-like-count');
+      Data.getReactions(album.id).then(r => {
+        const me = Auth.getCurrentUser();
+        const liked = r.likes.some(l => l.userId === me?.userId);
+        likeCount.textContent = r.likes.length;
+        likeBtn.dataset.liked = liked ? '1' : '0';
+        likeBtn.classList.toggle('liked', liked);
+      }).catch(() => {});
 
-      if (count === 1) {
-        // Single photo — click card opens lightbox directly
-        card.style.cursor = 'pointer';
-        card.addEventListener('click', () => openLightbox(cover.id, album.id, {
-          canCopy: !album._isOwn, canDelete: album._isOwn, thumbnailLink: cover.thumbnailLink
-        }));
-      } else if (count > 1) {
-        // Multi-photo album — click toggles grid
-        card.style.cursor = 'pointer';
-        card.addEventListener('click', () => {
-          expanded = !expanded;
-          expandGrid.hidden = !expanded;
-          card.classList.toggle('feed-album-card--open', expanded);
-          if (expanded && !expandGrid.dataset.loaded) {
-            expandGrid.dataset.loaded = '1';
-            album.files.forEach(f => {
-              const thumb = _el(`<div class="media-item"><img src="" alt="" loading="lazy" /></div>`);
-              _loadThumbnail(thumb.querySelector('img'), f.id, f.thumbnailLink);
-              thumb.addEventListener('click', e => {
-                e.stopPropagation();
-                openLightbox(f.id, album.id, {
-                  canCopy: !album._isOwn, canDelete: album._isOwn, thumbnailLink: f.thumbnailLink
-                });
-              });
-              expandGrid.appendChild(thumb);
-            });
-          }
+      likeBtn.addEventListener('click', async e => {
+        e.stopPropagation();
+        try {
+          const { liked, count: newCount } = await Data.toggleLike(album.id);
+          likeCount.textContent = newCount;
+          likeBtn.dataset.liked = liked ? '1' : '0';
+          likeBtn.classList.toggle('liked', liked);
+        } catch { Utils.showToast('Could not react', 'error'); }
+      });
+
+      // Delete own post
+      const delBtn = card.querySelector('.post-delete-btn');
+      if (delBtn) {
+        delBtn.addEventListener('click', async e => {
+          e.stopPropagation();
+          if (!confirm('Delete this post?')) return;
+          delBtn.disabled = true;
+          try {
+            await Data.deleteCollection(album.id);
+            card.closest('.post-card-wrapper').remove();
+            Utils.showToast('Post deleted');
+            _feedAlbums = _feedAlbums.filter(a => a.id !== album.id);
+            if (!document.querySelectorAll('.post-card').length) _paintFeedAlbums();
+          } catch { Utils.showToast('Could not delete post', 'error'); delBtn.disabled = false; }
         });
       }
 
       const wrapper = document.createElement('div');
-      wrapper.className = 'feed-album-wrapper';
+      wrapper.className = 'post-card-wrapper';
       wrapper.appendChild(card);
-      wrapper.appendChild(expandGrid);
       list.appendChild(wrapper);
     });
   }
@@ -1944,7 +1973,6 @@ const UI = (() => {
       document.getElementById('friends-count').textContent = friends.length;
       _renderFriendsList(friends);
       _renderBlockedList(blocked);
-      _renderContactSuggestions(friends);
     } catch { Utils.showToast('Failed to load friends', 'error'); }
   }
 
@@ -2130,8 +2158,9 @@ const UI = (() => {
         avatar.textContent = (profile.displayName || user?.name || '?')[0].toUpperCase();
       }
 
-      // Load stats asynchronously so the profile card renders immediately
+      // Load stats and posts asynchronously so the profile card renders immediately
       _renderProfileStats();
+      _renderProfilePosts();
     } catch { Utils.showToast('Failed to load profile', 'error'); }
   }
 
@@ -2163,6 +2192,57 @@ const UI = (() => {
       `;
     } catch {
       statsEl.innerHTML = '';
+    }
+  }
+
+  async function _renderProfilePosts() {
+    const grid  = document.getElementById('profile-posts-grid');
+    const empty = document.getElementById('profile-posts-empty');
+    if (!grid) return;
+    grid.innerHTML = '<p class="muted-text small">Loading…</p>';
+    empty.hidden = true;
+
+    try {
+      const posts = await Data.listOwnPosts();
+      grid.innerHTML = '';
+      if (!posts.length) { empty.hidden = false; return; }
+
+      posts.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+
+      posts.forEach(post => {
+        const card = _el(`
+          <div class="profile-post-card">
+            <div class="profile-post-thumb"></div>
+            ${post.caption ? `<div class="profile-post-caption">${Utils.escapeHtml(post.caption.length > 60 ? post.caption.slice(0, 60) + '…' : post.caption)}</div>` : ''}
+            <div class="profile-post-actions">
+              <span class="profile-post-time muted-text small">${Utils.formatRelativeTime(post.createdAt)}</span>
+              <button class="btn btn-ghost btn-sm danger-btn profile-post-del">Delete</button>
+            </div>
+          </div>
+        `);
+
+        _loadCardCover(post.folderId, card.querySelector('.profile-post-thumb'));
+
+        card.querySelector('.profile-post-del').addEventListener('click', async e => {
+          e.stopPropagation();
+          if (!confirm('Delete this post? This cannot be undone.')) return;
+          const btn = e.currentTarget;
+          btn.disabled = true;
+          try {
+            await Data.deleteCollection(post.folderId);
+            card.remove();
+            Utils.showToast('Post deleted');
+            if (!grid.children.length) empty.hidden = false;
+            // Also refresh stats
+            _renderProfileStats();
+          } catch { Utils.showToast('Could not delete post', 'error'); btn.disabled = false; }
+        });
+
+        grid.appendChild(card);
+      });
+    } catch {
+      grid.innerHTML = '';
+      Utils.showToast('Could not load posts', 'error');
     }
   }
 
