@@ -113,6 +113,7 @@ const UI = (() => {
       Utils.hideLoading();
     }
     _setupRouter();
+    _setupKeyboardShortcuts();
     _navigate(window.location.hash.slice(1) || 'feed');
     // Poll notifications once after sign-in (no need to hammer the API)
     _refreshNotificationCount().catch(() => {});
@@ -221,6 +222,26 @@ const UI = (() => {
       });
       panel.appendChild(item);
     });
+
+    // ── Recent circle activity digest ─────────────
+    if (circleNotifs.length) {
+      // Group by circle
+      const byCircle = {};
+      circleNotifs.forEach(n => {
+        const key = n.circleFolderId || 'unknown';
+        if (!byCircle[key]) byCircle[key] = { folderId: n.circleFolderId, count: 0 };
+        byCircle[key].count++;
+      });
+      const groups = Object.values(byCircle);
+      const total  = circleNotifs.length;
+      const digestEl = _el(`
+        <div class="notif-digest">
+          <div class="notif-digest-title">Recent circle activity</div>
+          <div class="notif-digest-body">${total} new post${total !== 1 ? 's' : ''} across ${groups.length} circle${groups.length !== 1 ? 's' : ''} since yesterday</div>
+        </div>
+      `);
+      panel.appendChild(digestEl);
+    }
   }
 
   /* ── Screen / page helpers ─────────────────── */
@@ -377,6 +398,9 @@ const UI = (() => {
 
   let _feedAlbums = [];   // cached after load for filter re-renders
   let _feedFilter = 'all';
+  let _feedQueue  = [];   // albums not yet rendered (infinite scroll)
+  let _feedSentinelObs = null; // IntersectionObserver for infinite scroll
+  let _focusedPostIndex = -1; // keyboard navigation
 
   async function _openPostModal() {
     // Load circles so the audience picker can list them
@@ -570,6 +594,9 @@ const UI = (() => {
     empty.hidden = true;
     _clearThumbBlobs();
 
+    // Disconnect any existing sentinel observer
+    if (_feedSentinelObs) { _feedSentinelObs.disconnect(); _feedSentinelObs = null; }
+
     _on('new-post-btn', 'click', () => _openPostModal());
 
     // Wire up filter pills (use _on equivalent via replacement to avoid duplicate listeners)
@@ -585,14 +612,18 @@ const UI = (() => {
     });
 
     try {
-      const [sharedFolders, ownPosts] = await Promise.all([
+      const [sharedFolders, ownPosts, ownStories] = await Promise.all([
         Data.getFeedFolders(),
-        Data.listOwnPosts()
+        Data.listOwnPosts(),
+        Data.listOwnStories().catch(() => [])
       ]);
 
       const me = Auth.getCurrentUser();
 
-      // Build a unified album list
+      // ── Render stories bar ─────────────────────
+      _renderStoriesBar(sharedFolders, ownStories, me);
+
+      // Build a unified album list (exclude stories)
       const allFolders = [
         ...sharedFolders.map(f => ({
           id: f.id,
@@ -603,7 +634,7 @@ const UI = (() => {
           sharedAt: f.sharedWithMeTime || f.createdTime,
           _isOwn: false
         })),
-        ...ownPosts.map(p => ({
+        ...ownPosts.filter(p => !p.isStory).map(p => ({
           id: p.folderId,
           name: p.name,
           sharer: me?.name || 'You',
@@ -618,25 +649,281 @@ const UI = (() => {
       // Sort albums newest-shared first
       allFolders.sort((a, b) => new Date(b.sharedAt) - new Date(a.sharedAt));
 
-      // Load files for each album
-      _feedAlbums = await Promise.all(allFolders.map(async album => {
+      // Load files for first 10 albums immediately; queue the rest for infinite scroll
+      const BATCH = 10;
+      const firstBatch  = allFolders.slice(0, BATCH);
+      const restFolders = allFolders.slice(BATCH);
+
+      _feedAlbums = await Promise.all(firstBatch.map(async album => {
         try {
-          const files = (await Drive.listFiles(album.id))
-            .filter(f => f.mimeType?.startsWith('image/') || f.mimeType?.startsWith('video/'));
-          return { ...album, files };
+          const allFiles = await Drive.listFiles(album.id);
+          const metaFile = allFiles.find(f => f.name === '_meta.json');
+          const files    = allFiles.filter(f => f.mimeType?.startsWith('image/') || f.mimeType?.startsWith('video/'));
+          return { ...album, files, metaFileId: metaFile?.id || null };
         } catch {
-          return { ...album, files: [] };
+          return { ...album, files: [], metaFileId: null };
         }
       }));
 
+      // Store rest in queue for lazy loading
+      _feedQueue = restFolders;
+
       list.innerHTML = '';
       _paintFeedAlbums();
+
+      // Set up sentinel for infinite scroll
+      _setupFeedSentinel();
+
     } catch (err) {
       console.error('Feed load error', err);
       list.innerHTML = '';
       empty.hidden = false;
       empty.querySelector('p').textContent = 'Could not load your feed. Check your connection and try again.';
     }
+  }
+
+  function _setupFeedSentinel() {
+    const sentinel = document.getElementById('feed-sentinel');
+    if (!sentinel || !_feedQueue.length) return;
+    sentinel.hidden = false;
+    _feedSentinelObs = new IntersectionObserver(async entries => {
+      if (!entries[0].isIntersecting || !_feedQueue.length) return;
+      const BATCH = 10;
+      const nextBatch = _feedQueue.splice(0, BATCH);
+      const loaded = await Promise.all(nextBatch.map(async album => {
+        try {
+          const allFiles = await Drive.listFiles(album.id);
+          const metaFile = allFiles.find(f => f.name === '_meta.json');
+          const files    = allFiles.filter(f => f.mimeType?.startsWith('image/') || f.mimeType?.startsWith('video/'));
+          return { ...album, files, metaFileId: metaFile?.id || null };
+        } catch { return { ...album, files: [], metaFileId: null }; }
+      }));
+      _feedAlbums = _feedAlbums.concat(loaded);
+      _appendFeedAlbums(loaded);
+      if (!_feedQueue.length) { sentinel.hidden = true; _feedSentinelObs.disconnect(); }
+    }, { rootMargin: '200px' });
+    _feedSentinelObs.observe(sentinel);
+  }
+
+  // ── Stories bar ──────────────────────────────────
+  function _renderStoriesBar(sharedFolders, ownStories, me) {
+    const bar = document.getElementById('stories-bar');
+    if (!bar) return;
+    bar.innerHTML = '';
+
+    // "Add Story" button
+    const addCircle = _el(`
+      <div class="story-circle story-circle--add" title="Add Story">
+        <div class="story-avatar story-avatar--add">+</div>
+        <span class="story-label">Your Story</span>
+      </div>
+    `);
+    addCircle.addEventListener('click', () => _openAddStoryModal());
+    bar.appendChild(addCircle);
+
+    // Own stories
+    ownStories.forEach(story => {
+      const initials = (me?.name || '?')[0].toUpperCase();
+      const avatarHtml = me?.picture
+        ? `<img src="${Utils.escapeHtml(me.picture)}" alt="" class="story-avatar-img" />`
+        : `<span class="story-avatar-initials">${initials}</span>`;
+      const circle = _el(`
+        <div class="story-circle story-circle--own" title="${Utils.escapeHtml(story.name || 'Story')}">
+          <div class="story-avatar story-avatar--viewed">${avatarHtml}</div>
+          <span class="story-label">${Utils.escapeHtml(me?.name || 'You')}</span>
+        </div>
+      `);
+      circle.addEventListener('click', () => _openStoryViewer([story], 0, me));
+      bar.appendChild(circle);
+    });
+
+    // Friend stories (shared folders that have isStory in meta)
+    // We detect stories by checking if folder name starts with 'story_' pattern or
+    // we can check a limited set. For performance we skip meta-checking here and
+    // only show folders where the owner matches known friends and folder is recent (<24h)
+    // A proper implementation would cache meta but for now we parse based on available data.
+    // We show the stories bar and let users tap to see content.
+    const recentShared = sharedFolders.filter(f => {
+      const t = new Date(f.sharedWithMeTime || f.createdTime || 0).getTime();
+      return Date.now() - t < 24 * 60 * 60 * 1000;
+    }).slice(0, 8);
+
+    recentShared.forEach(f => {
+      const owner  = f.owners?.[0];
+      const name   = owner?.displayName || 'Friend';
+      const pic    = owner?.photoLink || null;
+      const initials = name[0].toUpperCase();
+      const avatarHtml = pic
+        ? `<img src="${Utils.escapeHtml(pic)}" alt="" class="story-avatar-img" />`
+        : `<span class="story-avatar-initials">${initials}</span>`;
+      const circle = _el(`
+        <div class="story-circle" title="${Utils.escapeHtml(name)}">
+          <div class="story-avatar">${avatarHtml}</div>
+          <span class="story-label">${Utils.escapeHtml(name.split(' ')[0])}</span>
+        </div>
+      `);
+      circle.addEventListener('click', () => _openStoryViewerFromFolder(f));
+      bar.appendChild(circle);
+    });
+
+    bar.hidden = bar.children.length <= 1; // hide if only "Add Story" button
+  }
+
+  function _openAddStoryModal() {
+    openModal(`
+      <h3>Share a Story</h3>
+      <p class="muted-text small">Stories disappear after 24 hours.</p>
+      <form id="story-form" class="form-block">
+        <div class="post-dropzone" id="story-dropzone" tabindex="0" role="button" aria-label="Add photo or video">
+          <div class="post-dropzone-inner">
+            <span class="post-dropzone-icon">📸</span>
+            <span>Add a photo or video</span>
+          </div>
+          <input type="file" id="story-file" accept="image/*,video/*" hidden />
+        </div>
+        <div id="story-preview" class="post-previews" hidden></div>
+        <div class="form-field">
+          <label>Caption (optional)</label>
+          <input id="story-caption" class="input" type="text" placeholder="What's happening?" maxlength="200" />
+        </div>
+        <p id="story-status" class="muted-text small" aria-live="polite"></p>
+        <div class="modal-actions">
+          <button type="button" class="btn btn-ghost btn-sm modal-cancel-btn">Cancel</button>
+          <button type="submit" class="btn btn-primary btn-sm">Share Story</button>
+        </div>
+      </form>
+    `);
+    document.querySelector('.modal-cancel-btn').addEventListener('click', closeModal);
+    const dropzone  = document.getElementById('story-dropzone');
+    const fileInput = document.getElementById('story-file');
+    const preview   = document.getElementById('story-preview');
+    let selectedFile = null;
+    dropzone.addEventListener('click', () => fileInput.click());
+    dropzone.addEventListener('keydown', e => { if (e.key === 'Enter' || e.key === ' ') fileInput.click(); });
+    fileInput.addEventListener('change', () => {
+      selectedFile = fileInput.files[0] || null;
+      if (selectedFile) {
+        const url = URL.createObjectURL(selectedFile);
+        preview.innerHTML = `<div class="post-preview-item"><img src="${url}" alt="" /></div>`;
+        preview.hidden = false;
+      }
+    });
+    document.getElementById('story-form').addEventListener('submit', async e => {
+      e.preventDefault();
+      const caption = document.getElementById('story-caption').value.trim();
+      const status  = document.getElementById('story-status');
+      const btn     = e.target.querySelector('[type="submit"]');
+      btn.disabled = true; btn.textContent = 'Sharing…';
+      Utils.showLoading();
+      try {
+        const story = await Data.createStory({ caption, sharing: 'friends' });
+        if (selectedFile) {
+          status.textContent = 'Uploading…';
+          await Drive.uploadMedia(selectedFile, story.folderId);
+        }
+        closeModal();
+        Utils.showToast('Story shared!');
+        _renderFeed();
+      } catch {
+        Utils.showToast('Failed to share story', 'error');
+        btn.disabled = false; btn.textContent = 'Share Story';
+      } finally { Utils.hideLoading(); }
+    });
+  }
+
+  async function _openStoryViewerFromFolder(folder) {
+    // Simplified: just open the first image/video from the folder as a story
+    try {
+      const files = await Drive.listFiles(folder.id);
+      const media = files.filter(f => f.mimeType?.startsWith('image/') || f.mimeType?.startsWith('video/'));
+      if (!media.length) { Utils.showToast('No media in this story', 'error'); return; }
+      const owner = folder.owners?.[0];
+      _openStoryViewerMedia(media, 0, owner?.displayName || 'Friend', owner?.photoLink || null);
+    } catch { Utils.showToast('Could not load story', 'error'); }
+  }
+
+  function _openStoryViewer(stories, startIndex, user) {
+    if (!stories.length) return;
+    // For own stories, load files from the first story
+    Drive.listFiles(stories[startIndex].folderId).then(files => {
+      const media = files.filter(f => f.mimeType?.startsWith('image/') || f.mimeType?.startsWith('video/'));
+      _openStoryViewerMedia(media, 0, user?.name || 'You', user?.picture || null);
+    }).catch(() => Utils.showToast('Could not load story', 'error'));
+  }
+
+  function _openStoryViewerMedia(mediaFiles, index, authorName, authorPic) {
+    if (!mediaFiles.length) return;
+    const overlay = _el(`
+      <div class="story-viewer-overlay" id="story-viewer-overlay">
+        <div class="story-viewer-inner">
+          <div class="story-progress-bar">
+            ${mediaFiles.map((_, i) => `<div class="story-progress-seg${i < index ? ' done' : (i === index ? ' active' : '')}"></div>`).join('')}
+          </div>
+          <div class="story-viewer-header">
+            <div class="story-viewer-avatar">${authorPic ? `<img src="${Utils.escapeHtml(authorPic)}" alt="" />` : authorName[0].toUpperCase()}</div>
+            <span class="story-viewer-name">${Utils.escapeHtml(authorName)}</span>
+            <button class="story-viewer-close" aria-label="Close">✕</button>
+          </div>
+          <div class="story-viewer-media" id="story-viewer-media"></div>
+          <button class="story-viewer-prev" aria-label="Previous">‹</button>
+          <button class="story-viewer-next" aria-label="Next">›</button>
+        </div>
+      </div>
+    `);
+    document.body.appendChild(overlay);
+
+    let cur = index;
+    let autoTimer = null;
+
+    function showSlide(i) {
+      cur = i;
+      const mediaEl = overlay.querySelector('#story-viewer-media');
+      mediaEl.innerHTML = '';
+      const segs = overlay.querySelectorAll('.story-progress-seg');
+      segs.forEach((s, idx) => {
+        s.className = 'story-progress-seg' + (idx < cur ? ' done' : (idx === cur ? ' active' : ''));
+      });
+      const f = mediaFiles[cur];
+      if (f.mimeType?.startsWith('video/')) {
+        const vid = document.createElement('video');
+        vid.autoplay = true; vid.muted = false; vid.loop = false; vid.playsInline = true;
+        vid.style.cssText = 'width:100%;height:100%;object-fit:contain';
+        Drive.getFileAsBlob(f.id).then(url => { vid.src = url; }).catch(() => {});
+        mediaEl.appendChild(vid);
+        vid.addEventListener('ended', () => advance(1));
+        clearTimeout(autoTimer);
+      } else {
+        const img = document.createElement('img');
+        img.alt = ''; img.style.cssText = 'width:100%;height:100%;object-fit:contain';
+        _loadThumbnail(img, f.id, f.thumbnailLink);
+        mediaEl.appendChild(img);
+        clearTimeout(autoTimer);
+        autoTimer = setTimeout(() => advance(1), 5000);
+      }
+    }
+
+    function advance(dir) {
+      const next = cur + dir;
+      if (next < 0 || next >= mediaFiles.length) { closeViewer(); return; }
+      showSlide(next);
+    }
+
+    function closeViewer() {
+      clearTimeout(autoTimer);
+      overlay.remove();
+    }
+
+    overlay.querySelector('.story-viewer-close').addEventListener('click', closeViewer);
+    overlay.querySelector('.story-viewer-prev').addEventListener('click', e => { e.stopPropagation(); advance(-1); });
+    overlay.querySelector('.story-viewer-next').addEventListener('click', e => { e.stopPropagation(); advance(1); });
+    overlay.addEventListener('click', e => { if (e.target === overlay) closeViewer(); });
+    document.addEventListener('keydown', function onKey(e) {
+      if (e.key === 'Escape') { closeViewer(); document.removeEventListener('keydown', onKey); }
+      if (e.key === 'ArrowRight') advance(1);
+      if (e.key === 'ArrowLeft')  advance(-1);
+    });
+
+    showSlide(cur);
   }
 
   function _paintFeedAlbums() {
@@ -655,108 +942,275 @@ const UI = (() => {
       empty.querySelector('p').textContent = _feedFilter === 'all'
         ? 'Your feed is empty. Create a post or add friends to see their shares here.'
         : 'Nothing here yet.';
+      // Still add sentinel
+      const sentinel = document.getElementById('feed-sentinel');
+      if (sentinel) sentinel.hidden = !_feedQueue.length;
       return;
     }
     empty.hidden = true;
 
-    visible.forEach(album => {
-      const mediaFiles = album.files.filter(f => f.mimeType?.startsWith('image/') || f.mimeType?.startsWith('video/'));
-      const count   = mediaFiles.length;
-      const timeStr = Utils.formatRelativeTime(album.sharedAt);
+    visible.forEach(album => _renderSingleFeedPost(album, list));
 
-      // Avatar HTML
-      const initials = (album.sharer || '?')[0].toUpperCase();
-      const avatarHtml = album.sharerPicture
-        ? `<img src="${Utils.escapeHtml(album.sharerPicture)}" alt="" class="post-avatar-img" />`
-        : `<span class="post-avatar-initials">${initials}</span>`;
+    // Sentinel placeholder at end of list
+    const sentinel = document.getElementById('feed-sentinel');
+    if (sentinel) {
+      list.appendChild(sentinel);
+      sentinel.hidden = !_feedQueue.length;
+    }
+  }
 
-      // Media grid (1 photo → full width, 2-4 → 2-col grid, 5+ → 3-col)
-      const gridClass = count === 1 ? 'post-media-single' : count <= 4 ? 'post-media-grid2' : 'post-media-grid3';
-      const mediaHtml = count > 0 ? `<div class="post-media ${gridClass}" data-album-loaded="0"></div>` : '';
+  // Appends newly loaded albums (from infinite scroll) without clearing the list
+  function _appendFeedAlbums(albums) {
+    const list  = document.getElementById('feed-list');
+    const empty = document.getElementById('feed-empty');
+    const visible = albums.filter(a => {
+      if (_feedFilter === 'friends') return !a._isOwn;
+      if (_feedFilter === 'mine')    return a._isOwn;
+      return true;
+    }).filter(a => a.files.length > 0 || a.caption);
+    visible.forEach(album => _renderSingleFeedPost(album, list));
+    // Move sentinel to end
+    const sentinel = document.getElementById('feed-sentinel');
+    if (sentinel) { list.appendChild(sentinel); sentinel.hidden = !_feedQueue.length; }
+    if (visible.length) empty.hidden = true;
+  }
 
-      const card = _el(`
-        <div class="post-card">
-          <div class="post-card-header">
-            <div class="post-avatar">${avatarHtml}</div>
-            <div class="post-author-meta">
-              <span class="post-author-name">${Utils.escapeHtml(album.sharer)}</span>
-              <span class="post-author-time">${timeStr}</span>
-            </div>
-            ${album._isOwn ? `<button class="post-delete-btn" title="Delete post">×</button>` : ''}
+  function _renderSingleFeedPost(album, list) {
+    const mediaFiles = album.files.filter(f => f.mimeType?.startsWith('image/') || f.mimeType?.startsWith('video/'));
+    const count   = mediaFiles.length;
+    const timeStr = Utils.formatRelativeTime(album.sharedAt);
+
+    // Avatar HTML
+    const initials = (album.sharer || '?')[0].toUpperCase();
+    const avatarHtml = album.sharerPicture
+      ? `<img src="${Utils.escapeHtml(album.sharerPicture)}" alt="" class="post-avatar-img" />`
+      : `<span class="post-avatar-initials">${initials}</span>`;
+
+    // Media grid (1 photo → full width, 2-4 → 2-col grid, 5+ → 3-col)
+    const gridClass = count === 1 ? 'post-media-single' : count <= 4 ? 'post-media-grid2' : 'post-media-grid3';
+    const mediaHtml = count > 0 ? `<div class="post-media ${gridClass}"></div>` : '';
+
+    // Text-only detection
+    const isTextOnly = count === 0 && !!album.caption;
+
+    const card = _el(`
+      <div class="post-card${isTextOnly ? ' post-card--text-only' : ''}" tabindex="-1" data-album-id="${Utils.escapeHtml(album.id)}">
+        <div class="post-card-header">
+          <div class="post-avatar">${avatarHtml}</div>
+          <div class="post-author-meta">
+            <span class="post-author-name">${Utils.escapeHtml(album.sharer)}</span>
+            <span class="post-author-time">${timeStr}</span>
           </div>
-          ${album.caption ? `<div class="post-caption">${Utils.escapeHtml(album.caption)}</div>` : ''}
-          ${mediaHtml}
-          <div class="post-actions">
-            <button class="post-like-btn" data-liked="0">♥ <span class="post-like-count">0</span></button>
-          </div>
+          ${album._isOwn ? `<button class="post-delete-btn" title="Delete post">×</button>` : ''}
         </div>
-      `);
+        ${isTextOnly
+          ? `<div class="post-text-only-body">${Utils.escapeHtml(album.caption)}</div>`
+          : (album.caption ? `<div class="post-caption">${Utils.escapeHtml(album.caption)}</div>` : '')}
+        ${mediaHtml}
+        <div class="post-actions">
+          <div class="post-reactions" id="reactions-${Utils.escapeHtml(album.id)}">
+            <button class="post-react-btn" data-type="like" title="Like">❤️ <span>0</span></button>
+            <button class="post-react-btn" data-type="laugh" title="Haha">😂 <span>0</span></button>
+            <button class="post-react-btn" data-type="clap" title="Clap">👏 <span>0</span></button>
+            <button class="post-react-btn" data-type="wow" title="Wow">😮 <span>0</span></button>
+            <button class="post-react-btn" data-type="sad" title="Sad">😢 <span>0</span></button>
+          </div>
+          <button class="post-comments-btn" data-album-id="${Utils.escapeHtml(album.id)}" data-loaded="0">
+            💬 <span class="post-comments-count">0</span> comments
+          </button>
+        </div>
+        <div class="post-comments-section" id="comments-${Utils.escapeHtml(album.id)}" hidden></div>
+      </div>
+    `);
 
-      // Load media thumbnails into grid
-      const mediaDiv = card.querySelector('.post-media');
-      if (mediaDiv && count > 0) {
-        mediaFiles.slice(0, 9).forEach((f, i) => {
-          const thumb = _el(`<div class="post-media-item"><img src="" alt="" loading="lazy" /></div>`);
+    // Load media thumbnails into grid
+    const mediaDiv = card.querySelector('.post-media');
+    if (mediaDiv && count > 0) {
+      mediaFiles.slice(0, 9).forEach(f => {
+        let thumb;
+        if (f.mimeType?.startsWith('video/')) {
+          thumb = _el(`
+            <div class="post-media-item post-media-item--video">
+              <video src="" loop muted playsinline preload="none"></video>
+              <div class="video-play-overlay">
+                <button class="video-play-btn" aria-label="Play video">▶</button>
+              </div>
+            </div>
+          `);
+          const vid    = thumb.querySelector('video');
+          const playEl = thumb.querySelector('.video-play-overlay');
+          thumb.querySelector('.video-play-btn').addEventListener('click', async e => {
+            e.stopPropagation();
+            playEl.hidden = true;
+            try {
+              const url = await Drive.getFileAsBlob(f.id);
+              vid.src = url;
+              vid.muted = false;
+              vid.play().catch(() => {});
+            } catch { Utils.showToast('Could not load video', 'error'); playEl.hidden = false; }
+          });
+        } else {
+          thumb = _el(`<div class="post-media-item"><img src="" alt="" loading="lazy" /></div>`);
           _loadThumbnail(thumb.querySelector('img'), f.id, f.thumbnailLink);
-          thumb.addEventListener('click', e => {
-            e.stopPropagation();
-            openLightbox(f.id, album.id, { canCopy: !album._isOwn, canDelete: album._isOwn, thumbnailLink: f.thumbnailLink });
-          });
-          mediaDiv.appendChild(thumb);
-        });
-        if (count > 9) {
-          const more = _el(`<div class="post-media-more">+${count - 9}</div>`);
-          more.addEventListener('click', e => {
-            e.stopPropagation();
-            openLightbox(mediaFiles[9].id, album.id, { canCopy: !album._isOwn, canDelete: album._isOwn, thumbnailLink: mediaFiles[9].thumbnailLink });
-          });
-          mediaDiv.appendChild(more);
         }
+        thumb.addEventListener('click', e => {
+          if (e.target.closest('.video-play-btn')) return;
+          e.stopPropagation();
+          openLightbox(f.id, album.id, { canCopy: !album._isOwn, canDelete: album._isOwn, thumbnailLink: f.thumbnailLink });
+        });
+        mediaDiv.appendChild(thumb);
+      });
+      if (count > 9) {
+        const more = _el(`<div class="post-media-more">+${count - 9}</div>`);
+        more.addEventListener('click', e => {
+          e.stopPropagation();
+          openLightbox(mediaFiles[9].id, album.id, { canCopy: !album._isOwn, canDelete: album._isOwn, thumbnailLink: mediaFiles[9].thumbnailLink });
+        });
+        mediaDiv.appendChild(more);
       }
+    }
 
-      // Like button — load reactions
-      const likeBtn = card.querySelector('.post-like-btn');
-      const likeCount = card.querySelector('.post-like-count');
-      Data.getReactions(album.id).then(r => {
-        const me = Auth.getCurrentUser();
-        const liked = r.likes.some(l => l.userId === me?.userId);
-        likeCount.textContent = r.likes.length;
-        likeBtn.dataset.liked = liked ? '1' : '0';
-        likeBtn.classList.toggle('liked', liked);
-      }).catch(() => {});
+    // Multi-reaction buttons — load reactions once
+    const reactBar = card.querySelector('.post-reactions');
+    Data.getReactions(album.id).then(r => {
+      const me = Auth.getCurrentUser();
+      const map = { like: r.likes, laugh: r.laughs, clap: r.claps, wow: r.wows, sad: r.sads };
+      reactBar.querySelectorAll('.post-react-btn').forEach(btn => {
+        const type = btn.dataset.type;
+        const arr  = map[type] || [];
+        const active = arr.some(l => l.userId === me?.userId);
+        btn.querySelector('span').textContent = arr.length;
+        btn.classList.toggle('reacted', active);
+      });
+    }).catch(() => {});
 
-      likeBtn.addEventListener('click', async e => {
+    reactBar.querySelectorAll('.post-react-btn').forEach(btn => {
+      btn.addEventListener('click', async e => {
         e.stopPropagation();
+        const type = btn.dataset.type;
         try {
-          const { liked, count: newCount } = await Data.toggleLike(album.id);
-          likeCount.textContent = newCount;
-          likeBtn.dataset.liked = liked ? '1' : '0';
-          likeBtn.classList.toggle('liked', liked);
+          const result = await Data.toggleReaction(album.id, type);
+          btn.querySelector('span').textContent = result.count;
+          btn.classList.toggle('reacted', result.reacted);
         } catch { Utils.showToast('Could not react', 'error'); }
       });
-
-      // Delete own post
-      const delBtn = card.querySelector('.post-delete-btn');
-      if (delBtn) {
-        delBtn.addEventListener('click', async e => {
-          e.stopPropagation();
-          if (!confirm('Delete this post?')) return;
-          delBtn.disabled = true;
-          try {
-            await Data.deleteCollection(album.id);
-            card.closest('.post-card-wrapper').remove();
-            Utils.showToast('Post deleted');
-            _feedAlbums = _feedAlbums.filter(a => a.id !== album.id);
-            if (!document.querySelectorAll('.post-card').length) _paintFeedAlbums();
-          } catch { Utils.showToast('Could not delete post', 'error'); delBtn.disabled = false; }
-        });
-      }
-
-      const wrapper = document.createElement('div');
-      wrapper.className = 'post-card-wrapper';
-      wrapper.appendChild(card);
-      list.appendChild(wrapper);
     });
+
+    // Comments button — lazy load
+    const commentsBtn = card.querySelector('.post-comments-btn');
+    const commentsSection = card.querySelector('.post-comments-section');
+    commentsBtn.addEventListener('click', e => {
+      e.stopPropagation();
+      const isOpen = !commentsSection.hidden;
+      commentsSection.hidden = isOpen;
+      if (!isOpen && commentsBtn.dataset.loaded === '0') {
+        commentsBtn.dataset.loaded = '1';
+        _loadPostComments(album, commentsSection, commentsBtn);
+      }
+    });
+
+    // Delete own post
+    const delBtn = card.querySelector('.post-delete-btn');
+    if (delBtn) {
+      delBtn.addEventListener('click', async e => {
+        e.stopPropagation();
+        if (!confirm('Delete this post?')) return;
+        delBtn.disabled = true;
+        try {
+          await Data.deleteCollection(album.id);
+          card.closest('.post-card-wrapper').remove();
+          Utils.showToast('Post deleted');
+          _feedAlbums = _feedAlbums.filter(a => a.id !== album.id);
+          if (!document.querySelectorAll('.post-card').length) _paintFeedAlbums();
+        } catch { Utils.showToast('Could not delete post', 'error'); delBtn.disabled = false; }
+      });
+    }
+
+    const wrapper = document.createElement('div');
+    wrapper.className = 'post-card-wrapper';
+    wrapper.appendChild(card);
+    list.appendChild(wrapper);
+
+    // Seen-by IntersectionObserver
+    const seenObs = new IntersectionObserver(entries => {
+      if (entries[0].isIntersecting) {
+        Data.markSeen(album.id).catch(() => {});
+        seenObs.disconnect();
+      }
+    }, { threshold: 0.5 });
+    seenObs.observe(card);
+  }
+
+  function _loadPostComments(album, section, countBtn) {
+    // We use the metaFileId for Drive Comments API if available
+    const fileId = album.metaFileId;
+    section.innerHTML = '<span class="muted-text small">Loading comments…</span>';
+
+    if (!fileId) {
+      section.innerHTML = '<span class="muted-text small">Comments not available for this post.</span>';
+      _renderCommentInput(album, section, null, countBtn);
+      return;
+    }
+
+    Drive.getComments(fileId).then(comments => {
+      section.innerHTML = '';
+      if (comments.length) {
+        const area = document.createElement('div');
+        area.className = 'post-comments-list';
+        comments.forEach(c => {
+          const timeStr = c.createdTime ? Utils.formatRelativeTime(c.createdTime) : '';
+          area.appendChild(_el(`
+            <div class="post-comment-row">
+              <span class="post-comment-author">${Utils.escapeHtml(c.author?.displayName || 'Someone')}</span>
+              <span class="post-comment-text">${Utils.escapeHtml(c.content)}</span>
+              ${timeStr ? `<span class="post-comment-time">${timeStr}</span>` : ''}
+            </div>
+          `));
+        });
+        section.appendChild(area);
+        const cnt = countBtn.querySelector('.post-comments-count');
+        if (cnt) cnt.textContent = comments.length;
+      } else {
+        section.appendChild(_el('<span class="muted-text small">No comments yet.</span>'));
+      }
+      _renderCommentInput(album, section, fileId, countBtn);
+    }).catch(err => {
+      section.innerHTML = '';
+      if (err?.status === 403) {
+        section.appendChild(_el('<span class="muted-text small">Comments unavailable — owner hasn\'t granted commenter access.</span>'));
+      }
+      _renderCommentInput(album, section, fileId, countBtn);
+    });
+  }
+
+  function _renderCommentInput(album, section, fileId, countBtn) {
+    const form = _el(`
+      <form class="post-comment-form">
+        <input class="input post-comment-input" placeholder="Write a comment…" maxlength="500" />
+        <button type="submit" class="btn btn-primary btn-sm">Post</button>
+      </form>
+    `);
+    form.addEventListener('submit', async e => {
+      e.preventDefault();
+      const input = form.querySelector('.post-comment-input');
+      const text  = input.value.trim();
+      if (!text) return;
+      if (!fileId) { Utils.showToast('Comments not available', 'error'); return; }
+      const btn = form.querySelector('[type="submit"]');
+      btn.disabled = true;
+      try {
+        await Drive.addComment(fileId, text);
+        input.value = '';
+        // Reload comments
+        countBtn.dataset.loaded = '0';
+        section.innerHTML = '';
+        _loadPostComments(album, section, countBtn);
+      } catch (err) {
+        if (err?.status === 403) Utils.showToast('No commenter access on this post', 'error');
+        else Utils.showToast('Failed to post comment', 'error');
+      } finally { btn.disabled = false; }
+    });
+    section.appendChild(form);
   }
 
   /* ── My Data ─────────────────────────────────── */
@@ -1792,6 +2246,10 @@ const UI = (() => {
       shareBtn.addEventListener('click', () => _openShareModal(folderId, coll));
       actions.appendChild(shareBtn);
 
+      const inviteBtn = _el(`<button class="btn btn-ghost btn-sm">+ Collaborator</button>`);
+      inviteBtn.addEventListener('click', () => _openInviteCollaboratorModal(folderId));
+      actions.appendChild(inviteBtn);
+
       const delBtn = _el(`<button class="btn btn-ghost btn-sm danger-btn">Delete</button>`);
       delBtn.addEventListener('click', async () => {
         if (!confirm(`Delete collection "${coll.name}"?`)) return;
@@ -1956,6 +2414,41 @@ const UI = (() => {
         Utils.showToast('Collection updated!');
       } catch { Utils.showToast('Failed to update collection', 'error'); }
       finally   { Utils.hideLoading(); }
+    });
+  }
+
+  function _openInviteCollaboratorModal(folderId) {
+    openModal(`
+      <h3>Invite a Collaborator</h3>
+      <p class="muted-text small">Collaborators can upload files to this collection.</p>
+      <form id="collab-form" class="form-block">
+        <div class="form-field">
+          <label>Email address</label>
+          <input type="email" id="collab-email" class="input" placeholder="friend@example.com" required autocomplete="email" />
+        </div>
+        <p id="collab-status" class="muted-text small" aria-live="polite"></p>
+        <div class="modal-actions">
+          <button type="button" class="btn btn-ghost btn-sm modal-cancel-btn">Cancel</button>
+          <button type="submit" class="btn btn-primary btn-sm">Invite</button>
+        </div>
+      </form>
+    `);
+    document.querySelector('.modal-cancel-btn').addEventListener('click', closeModal);
+    document.getElementById('collab-form').addEventListener('submit', async e => {
+      e.preventDefault();
+      const email  = document.getElementById('collab-email').value.trim();
+      const status = document.getElementById('collab-status');
+      const btn    = e.target.querySelector('[type="submit"]');
+      if (!email) return;
+      btn.disabled = true; btn.textContent = 'Inviting…';
+      try {
+        await Data.inviteCollaborator(folderId, email);
+        Utils.showToast(`${email} can now upload to this collection`);
+        closeModal();
+      } catch {
+        status.textContent = 'Could not invite collaborator.';
+        btn.disabled = false; btn.textContent = 'Invite';
+      }
     });
   }
 
@@ -2152,7 +2645,13 @@ const UI = (() => {
       document.getElementById('profile-bio').textContent   = profile.bio || '';
 
       const avatar = document.getElementById('profile-avatar');
-      if (user?.picture) {
+      if (profile.avatarFileId) {
+        const img = document.createElement('img');
+        img.alt = '';
+        _loadThumbnail(img, profile.avatarFileId, null);
+        avatar.innerHTML = '';
+        avatar.appendChild(img);
+      } else if (user?.picture) {
         avatar.innerHTML = `<img src="${Utils.escapeHtml(user.picture)}" alt="" />`;
       } else {
         avatar.textContent = (profile.displayName || user?.name || '?')[0].toUpperCase();
@@ -2161,7 +2660,58 @@ const UI = (() => {
       // Load stats and posts asynchronously so the profile card renders immediately
       _renderProfileStats();
       _renderProfilePosts();
+      _renderProfileShareButton();
     } catch { Utils.showToast('Failed to load profile', 'error'); }
+  }
+
+  function _renderProfileShareButton() {
+    // Insert or replace "Share your profile" button below profile stats
+    let shareBtn = document.getElementById('profile-share-btn');
+    if (!shareBtn) {
+      shareBtn = _el(`<button id="profile-share-btn" class="btn btn-ghost btn-sm" style="margin-bottom:1rem">🔗 Share your profile</button>`);
+      const statsEl = document.getElementById('profile-stats');
+      if (statsEl) statsEl.insertAdjacentElement('afterend', shareBtn);
+      else {
+        const section = document.getElementById('profile-posts-section');
+        if (section) section.parentElement.insertBefore(shareBtn, section);
+      }
+    }
+    // Replace listener
+    const fresh = shareBtn.cloneNode(true);
+    shareBtn.parentNode.replaceChild(fresh, shareBtn);
+    fresh.addEventListener('click', _openProfileShareModal);
+  }
+
+  function _openProfileShareModal() {
+    openModal(`
+      <h3>Share Your Profile</h3>
+      <p class="muted-text small">Make your collections visible publicly so anyone can view your profile link.</p>
+      <div id="profile-share-url" class="profile-share-url" hidden></div>
+      <p id="profile-share-status" class="muted-text small" aria-live="polite"></p>
+      <div class="modal-actions">
+        <button type="button" class="btn btn-ghost btn-sm modal-cancel-btn">Cancel</button>
+        <button type="button" class="btn btn-primary btn-sm" id="profile-make-public-btn">Make Public &amp; Get Link</button>
+      </div>
+    `);
+    document.querySelector('.modal-cancel-btn').addEventListener('click', closeModal);
+    document.getElementById('profile-make-public-btn').addEventListener('click', async () => {
+      const btn    = document.getElementById('profile-make-public-btn');
+      const status = document.getElementById('profile-share-status');
+      const urlBox = document.getElementById('profile-share-url');
+      btn.disabled = true; btn.textContent = 'Working…';
+      try {
+        const url = await Data.makeProfilePublic();
+        urlBox.textContent = url;
+        urlBox.hidden = false;
+        status.textContent = 'Anyone with this link can view your public collections.';
+        // Copy to clipboard
+        navigator.clipboard?.writeText(url).then(() => Utils.showToast('Link copied!')).catch(() => {});
+        btn.textContent = 'Link copied!';
+      } catch {
+        status.textContent = 'Could not make profile public.';
+        btn.disabled = false; btn.textContent = 'Make Public & Get Link';
+      }
+    });
   }
 
   async function _renderProfileStats() {
@@ -2248,18 +2798,74 @@ const UI = (() => {
 
   async function _openProfileEdit() {
     const profile = await Data.getProfile();
+    const user    = Auth.getCurrentUser();
     document.getElementById('profile-view').style.display = 'none';
     const form = document.getElementById('profile-form');
     form.hidden = false;
     form.elements.displayName.value = profile.displayName || '';
     form.elements.handle.value      = profile.handle || '';
     form.elements.bio.value         = profile.bio || '';
+
+    // Avatar upload area — inject above form fields if not already there
+    let avatarEditEl = form.querySelector('.profile-avatar-edit');
+    if (!avatarEditEl) {
+      avatarEditEl = _el(`
+        <div class="profile-avatar-edit">
+          <div class="avatar-edit-preview" id="avatar-edit-preview">
+            ${user?.picture ? `<img src="${Utils.escapeHtml(user.picture)}" alt="" />` : (profile.displayName || user?.name || '?')[0].toUpperCase()}
+          </div>
+          <div>
+            <button type="button" class="btn btn-ghost btn-sm" id="avatar-upload-trigger">Change photo</button>
+            <input type="file" id="avatar-file-input" accept="image/*" hidden />
+            <p class="muted-text small" id="avatar-upload-status"></p>
+          </div>
+        </div>
+      `);
+      form.insertBefore(avatarEditEl, form.firstElementChild);
+
+      // Load custom avatar if set
+      if (profile.avatarFileId) {
+        const previewEl = form.querySelector('#avatar-edit-preview');
+        const img = document.createElement('img');
+        img.alt = '';
+        _loadThumbnail(img, profile.avatarFileId, null);
+        previewEl.innerHTML = '';
+        previewEl.appendChild(img);
+      }
+
+      document.getElementById('avatar-upload-trigger').addEventListener('click', () => {
+        document.getElementById('avatar-file-input').click();
+      });
+      document.getElementById('avatar-file-input').addEventListener('change', async () => {
+        const file = document.getElementById('avatar-file-input').files[0];
+        if (!file) return;
+        const statusEl = document.getElementById('avatar-upload-status');
+        const triggerBtn = document.getElementById('avatar-upload-trigger');
+        triggerBtn.disabled = true;
+        statusEl.textContent = 'Uploading…';
+        try {
+          const fileId = await Data.uploadAvatar(file);
+          await Data.saveProfile({ ...profile, avatarFileId: fileId });
+          // Update preview
+          const previewEl = form.querySelector('#avatar-edit-preview');
+          const img = document.createElement('img');
+          img.alt = ''; img.src = URL.createObjectURL(file);
+          previewEl.innerHTML = '';
+          previewEl.appendChild(img);
+          statusEl.textContent = 'Photo updated!';
+          profile.avatarFileId = fileId;
+          Utils.showToast('Avatar updated!');
+        } catch { statusEl.textContent = 'Upload failed.'; }
+        finally { triggerBtn.disabled = false; }
+      });
+    }
+
     form.onsubmit = async e => {
       e.preventDefault();
       const fd = new FormData(form);
       Utils.showLoading();
       try {
-        await Data.saveProfile({ displayName: fd.get('displayName'), handle: fd.get('handle'), bio: fd.get('bio') });
+        await Data.saveProfile({ displayName: fd.get('displayName'), handle: fd.get('handle'), bio: fd.get('bio'), avatarFileId: profile.avatarFileId || null });
         _closeProfileEdit(); _renderProfile(); Utils.showToast('Profile saved!');
       } catch { Utils.showToast('Failed to save profile', 'error'); }
       finally   { Utils.hideLoading(); }
@@ -2364,15 +2970,31 @@ const UI = (() => {
     reactBar.innerHTML = '';
     commArea.innerHTML = '<span class="muted-text small">Loading…</span>';
 
-    // Reactions
+    // Reactions (multi-type)
+    const REACTION_TYPES = [
+      { type: 'like', emoji: '❤️' },
+      { type: 'laugh', emoji: '😂' },
+      { type: 'clap', emoji: '👏' },
+      { type: 'wow', emoji: '😮' },
+      { type: 'sad', emoji: '😢' }
+    ];
     async function refreshReactions() {
       try {
-        const r     = await Data.getReactions(collectionFolderId);
-        const liked = r.likes.some(l => l.userId === user.userId);
+        const r  = await Data.getReactions(collectionFolderId);
+        const map = { like: r.likes, laugh: r.laughs, clap: r.claps, wow: r.wows, sad: r.sads };
         reactBar.innerHTML = '';
-        const likeBtn = _el(`<button class="react-btn ${liked ? 'liked' : ''}">♥ ${r.likes.length}</button>`);
-        likeBtn.addEventListener('click', async () => { await Data.toggleLike(collectionFolderId); refreshReactions(); });
-        reactBar.appendChild(likeBtn);
+        REACTION_TYPES.forEach(({ type, emoji }) => {
+          const arr    = map[type] || [];
+          const active = arr.some(l => l.userId === user?.userId);
+          const btn = _el(`<button class="react-btn ${active ? 'liked' : ''}">${emoji} ${arr.length}</button>`);
+          btn.addEventListener('click', async () => { await Data.toggleReaction(collectionFolderId, type); refreshReactions(); });
+          reactBar.appendChild(btn);
+        });
+        // Seen by
+        const seenCount = (r.seenBy || []).length;
+        if (seenCount > 0) {
+          reactBar.appendChild(_el(`<span class="lightbox-seen-by muted-text small">Seen by ${seenCount}</span>`));
+        }
       } catch { reactBar.innerHTML = ''; }
     }
     refreshReactions();
@@ -2473,6 +3095,84 @@ const UI = (() => {
     document.getElementById('lightbox-img').src = '';
     document.getElementById('lightbox-comment-input').value = '';
     if (_lightboxBlobUrl) { URL.revokeObjectURL(_lightboxBlobUrl); _lightboxBlobUrl = null; }
+  }
+
+  /* ── Keyboard shortcuts ──────────────────────── */
+
+  function _setupKeyboardShortcuts() {
+    document.addEventListener('keydown', e => {
+      // Ignore when typing in inputs
+      const tag = (e.target || document.activeElement).tagName;
+      if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
+
+      switch (e.key) {
+        case 'Escape': {
+          if (!document.getElementById('modal-overlay').hidden) { closeModal(); break; }
+          if (!document.getElementById('lightbox').hidden) { closeLightbox(); break; }
+          const storyOverlay = document.getElementById('story-viewer-overlay');
+          if (storyOverlay) { storyOverlay.remove(); break; }
+          break;
+        }
+        case '?': {
+          e.preventDefault();
+          _showKeyboardShortcutsModal();
+          break;
+        }
+        case 'j':
+        case 'ArrowDown': {
+          e.preventDefault();
+          const cards = Array.from(document.querySelectorAll('.post-card'));
+          if (!cards.length) break;
+          _focusedPostIndex = Math.min(_focusedPostIndex + 1, cards.length - 1);
+          cards[_focusedPostIndex].focus();
+          cards[_focusedPostIndex].scrollIntoView({ behavior: 'smooth', block: 'center' });
+          break;
+        }
+        case 'k':
+        case 'ArrowUp': {
+          e.preventDefault();
+          const cards = Array.from(document.querySelectorAll('.post-card'));
+          if (!cards.length) break;
+          _focusedPostIndex = Math.max(_focusedPostIndex - 1, 0);
+          cards[_focusedPostIndex].focus();
+          cards[_focusedPostIndex].scrollIntoView({ behavior: 'smooth', block: 'center' });
+          break;
+        }
+        case 'l': {
+          const cards = Array.from(document.querySelectorAll('.post-card'));
+          const card  = cards[_focusedPostIndex];
+          if (!card) break;
+          const albumId = card.dataset.albumId;
+          if (!albumId) break;
+          Data.toggleReaction(albumId, 'like').then(result => {
+            const reactBar = card.querySelector('.post-reactions');
+            const btn = reactBar?.querySelector('[data-type="like"]');
+            if (btn) {
+              btn.querySelector('span').textContent = result.count;
+              btn.classList.toggle('reacted', result.reacted);
+            }
+          }).catch(() => {});
+          break;
+        }
+      }
+    });
+  }
+
+  function _showKeyboardShortcutsModal() {
+    openModal(`
+      <h3>Keyboard Shortcuts</h3>
+      <div class="shortcuts-list">
+        <div class="shortcut-row"><kbd>j</kbd> / <kbd>↓</kbd> <span>Next post</span></div>
+        <div class="shortcut-row"><kbd>k</kbd> / <kbd>↑</kbd> <span>Previous post</span></div>
+        <div class="shortcut-row"><kbd>l</kbd> <span>Like focused post</span></div>
+        <div class="shortcut-row"><kbd>Esc</kbd> <span>Close modal / lightbox</span></div>
+        <div class="shortcut-row"><kbd>?</kbd> <span>Show this help</span></div>
+      </div>
+      <div class="modal-actions">
+        <button class="btn btn-ghost btn-sm modal-cancel-btn">Close</button>
+      </div>
+    `);
+    document.querySelector('.modal-cancel-btn').addEventListener('click', closeModal);
   }
 
   /* ── Modal ───────────────────────────────────── */

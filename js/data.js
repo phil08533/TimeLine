@@ -36,6 +36,16 @@ const Data = (() => {
     return Drive.upsertJsonFile('profile.json', { ...data, updatedAt: new Date().toISOString() }, _folders.rootId);
   }
 
+  async function uploadAvatar(file) {
+    const result = await Drive.uploadMedia(file, _folders.rootId);
+    return result.id;
+  }
+
+  async function makeProfilePublic() {
+    await Drive.makePublic(_folders.collectionsFolderId).catch(() => {});
+    return `https://drive.google.com/drive/folders/${_folders.collectionsFolderId}`;
+  }
+
   /* ── Settings ──────────────────────────────── */
 
   async function getSettings() {
@@ -266,6 +276,10 @@ const Data = (() => {
     await Promise.all(emails.map(e => Drive.shareWithEmail(folderId, e, 'commenter').catch(() => {})));
   }
 
+  async function inviteCollaborator(collectionFolderId, email) {
+    await Drive.shareWithEmail(collectionFolderId, email, 'writer');
+  }
+
   /* ── Reactions ─────────────────────────────── */
 
   // Reactions are stored in the user's own Drive root to avoid permission errors
@@ -279,29 +293,66 @@ const Data = (() => {
     try {
       const key = _reactKey(collectionFolderId);
       const f = await Drive.findFile(key, _folders.rootId);
-      if (!f) return { likes: [] };
-      return await Drive.readJsonFile(f.id);
+      const _defaults = { likes: [], laughs: [], claps: [], wows: [], sads: [], seenBy: [] };
+      if (!f) return { ..._defaults };
+      const data = await Drive.readJsonFile(f.id);
+      // Ensure all arrays exist (backward compat)
+      Object.keys(_defaults).forEach(k => { if (!Array.isArray(data[k])) data[k] = []; });
+      return data;
     } catch {
-      return { likes: [] };
+      return { likes: [], laughs: [], claps: [], wows: [], sads: [], seenBy: [] };
     }
   }
 
-  async function toggleLike(collectionFolderId) {
+  async function toggleReaction(collectionFolderId, type) {
+    // type: 'like' | 'laugh' | 'clap' | 'wow' | 'sad'
     const user = Auth.getCurrentUser();
     const key  = _reactKey(collectionFolderId);
     const f    = await Drive.findFile(key, _folders.rootId);
-    let reactions = f ? await Drive.readJsonFile(f.id) : { likes: [] };
+    const _defaults = { likes: [], laughs: [], claps: [], wows: [], sads: [] };
+    let reactions = f ? await Drive.readJsonFile(f.id) : { ..._defaults };
+    // Ensure all arrays exist (backward compat with old files that only have likes)
+    Object.keys(_defaults).forEach(k => { if (!Array.isArray(reactions[k])) reactions[k] = []; });
 
-    const idx = reactions.likes.findIndex(l => l.userId === user.userId);
-    const liked = idx < 0;
-    if (liked) {
-      reactions.likes.push({ userId: user.userId, email: user.email, at: new Date().toISOString() });
+    const arrayKey = { like: 'likes', laugh: 'laughs', clap: 'claps', wow: 'wows', sad: 'sads' }[type] || 'likes';
+    const arr = reactions[arrayKey];
+    const idx = arr.findIndex(l => l.userId === user.userId);
+    const reacted = idx < 0;
+    if (reacted) {
+      arr.push({ userId: user.userId, email: user.email, at: new Date().toISOString() });
     } else {
-      reactions.likes.splice(idx, 1);
+      arr.splice(idx, 1);
     }
 
     await Drive.upsertJsonFile(key, reactions, _folders.rootId);
-    return { liked, count: reactions.likes.length };
+    return { reacted, count: arr.length, type };
+  }
+
+  async function toggleLike(collectionFolderId) {
+    // Backward compat alias
+    const result = await toggleReaction(collectionFolderId, 'like');
+    return { liked: result.reacted, count: result.count };
+  }
+
+  /* ── Seen By ───────────────────────────────── */
+
+  async function markSeen(collectionFolderId) {
+    const user = Auth.getCurrentUser();
+    if (!user) return;
+    const key  = _reactKey(collectionFolderId);
+    const f    = await Drive.findFile(key, _folders.rootId);
+    const _defaults = { likes: [], laughs: [], claps: [], wows: [], sads: [], seenBy: [] };
+    let reactions = f ? await Drive.readJsonFile(f.id) : { ..._defaults };
+    Object.keys(_defaults).forEach(k => { if (!Array.isArray(reactions[k])) reactions[k] = []; });
+    if (!reactions.seenBy.some(s => s.userId === user.userId)) {
+      reactions.seenBy.push({ userId: user.userId, email: user.email, at: new Date().toISOString() });
+      await Drive.upsertJsonFile(key, reactions, _folders.rootId);
+    }
+  }
+
+  async function getSeenBy(collectionFolderId) {
+    const r = await getReactions(collectionFolderId);
+    return r.seenBy || [];
   }
 
   /* ── Posts ─────────────────────────────────── */
@@ -355,7 +406,55 @@ const Data = (() => {
 
   async function listOwnPosts() {
     const colls = await listCollections();
-    return colls.filter(c => c.isPost);
+    return colls.filter(c => c.isPost && !c.isStory);
+  }
+
+  /* ── Stories ───────────────────────────────── */
+
+  // opts: { caption, sharing, circleIds }
+  async function createStory(opts = {}) {
+    const caption   = opts.caption   || '';
+    const sharing   = opts.sharing   || 'friends';
+    const circleIds = opts.circleIds || [];
+    const expiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString();
+
+    const id = Utils.generateId('story');
+    const folderId = await Drive.getOrCreateFolder(id, _folders.collectionsFolderId);
+    const meta = {
+      id, caption,
+      name: `Story ${new Date().toLocaleTimeString()}`,
+      isPost: true, isStory: true,
+      sharing, sharedWith: [], allowCopying: false,
+      expiresAt,
+      createdAt: new Date().toISOString()
+    };
+    await Drive.createJsonFile('_meta.json', meta, folderId);
+
+    if (sharing === 'everyone') {
+      await Drive.makePublic(folderId).catch(() => {});
+    } else if (sharing === 'friends') {
+      const friends = await getFriends();
+      await Promise.all(friends.map(f =>
+        Drive.shareWithEmail(folderId, f.email, 'commenter').catch(() => {})
+      ));
+    } else if (sharing === 'circles' && circleIds.length) {
+      const circles = await Promise.all(circleIds.map(fid => getCircle(fid).catch(() => null)));
+      const emails = new Set();
+      circles.filter(Boolean).forEach(c => {
+        c.members.filter(m => m.role !== 'owner').forEach(m => emails.add(m.email));
+      });
+      await Promise.all([...emails].map(email =>
+        Drive.shareWithEmail(folderId, email, 'commenter').catch(() => {})
+      ));
+    }
+
+    return { ...meta, folderId };
+  }
+
+  async function listOwnStories() {
+    const colls = await listCollections();
+    const now = new Date();
+    return colls.filter(c => c.isStory && new Date(c.expiresAt) > now);
   }
 
   /* ── Feed ──────────────────────────────────── */
@@ -682,7 +781,7 @@ const Data = (() => {
   return {
     init,
     getFolders,
-    getProfile,   saveProfile,
+    getProfile,   saveProfile,  uploadAvatar, makeProfilePublic,
     getSettings,  saveSettings,
     getFriends,   addFriend,    removeFriend,
     sendFriendRequest, getIncomingFriendRequests, getIncomingCircleNotifications, getNotifications,
@@ -692,9 +791,11 @@ const Data = (() => {
     addMemberToCircle, removeMemberFromCircle,
     createCirclePost, listCirclePosts, deleteCirclePost,
     getMutedCircles, muteCircle, unmuteCircle,
-    listCollections, createCollection, getCollection, updateCollectionMeta, deleteCollection, shareCollection,
-    getReactions, toggleLike,
+    listCollections, createCollection, getCollection, updateCollectionMeta, deleteCollection, shareCollection, inviteCollaborator,
+    getReactions, toggleReaction, toggleLike,
+    markSeen, getSeenBy,
     createPost, listOwnPosts,
+    createStory, listOwnStories,
     getFeedFolders,
     getHiddenIds, hideFile, unhideFile,
     getPin, setPin, verifyPin, clearPin
