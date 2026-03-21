@@ -325,7 +325,7 @@ const UI = (() => {
     _currentPage = page;
     // Pause VoidScroll video when navigating away
     if (page !== 'voidscroll') {
-      document.getElementById('vs-video')?.pause?.();
+      document.querySelectorAll('#vs-feed video').forEach(v => v.pause());
       document.getElementById('voidscroll-btn')?.classList.remove('active');
     }
 
@@ -353,11 +353,7 @@ const UI = (() => {
       case 'settings':
         _showPage('page-settings');    _renderSettings();         break;
       case 'voidscroll':
-        _showPage('page-voidscroll');
-        // _showPage sets display:block; override to flex for the column layout
-        document.getElementById('page-voidscroll').style.display = 'flex';
-        document.getElementById('page-voidscroll').style.flexDirection = 'column';
-        _renderVoidScroll();       break;
+        _showPage('page-voidscroll');  _renderVoidScroll();       break;
       case 'about':
         _showPage('page-about');                                  break;
       default:
@@ -3954,16 +3950,17 @@ const UI = (() => {
   /* ── VoidScroll ─────────────────────────────────── */
 
   const VS_CATS = [
-    'all', 'nature', 'space', 'animals', 'science', 'tech', 'history',
-    'sleep', 'environment', 'travel', 'engineering', 'vehicles', 'math',
-    'gaming', 'docs', 'diy'
+    'all','nature','space','animals','science','tech','history',
+    'sleep','environment','travel','engineering','vehicles','math',
+    'gaming','docs','diy'
   ];
-  let _vsAllVideos  = [];   // full deduped list from JSON
-  let _vsPlaylist   = [];   // current filtered+shuffled list
-  let _vsIndex      = 0;
-  let _vsCat        = 'all';
-  let _vsReady      = false; // JSON loaded at least once
-  let _vsBuilt      = false; // DOM built
+  let _vsAllVideos = [];
+  let _vsPlaylist  = [];
+  let _vsCat       = 'all';
+  let _vsReady     = false;
+  let _vsBuilt     = false;
+  let _vsMuted     = true;
+  let _vsObserver  = null;
 
   function _vsShuffle(arr) {
     const a = [...arr];
@@ -3979,48 +3976,87 @@ const UI = (() => {
       ? _vsAllVideos
       : _vsAllVideos.filter(v => v.category === _vsCat);
     _vsPlaylist = _vsShuffle(pool);
-    _vsIndex = 0;
   }
 
-  function _vsLoadVideo(idx) {
-    const vid     = document.getElementById('vs-video');
-    const titleEl = document.getElementById('vs-title');
-    const metaEl  = document.getElementById('vs-meta');
-    const counter = document.getElementById('vs-counter');
-    const status  = document.getElementById('vs-status');
-    if (!vid || !_vsPlaylist.length) return;
-    if (_currentPage !== 'voidscroll') return; // navigated away — don't start playback
-    const item = _vsPlaylist[idx];
-    if (!item) return;
-    if (status) { status.hidden = false; }
-    vid.src = item.url;
-    vid.load();
-    vid.play().catch(() => {});
-    if (titleEl) titleEl.textContent = item.title;
-    if (metaEl)  metaEl.textContent  = item.category;
-    if (counter) counter.textContent = `${idx + 1} / ${_vsPlaylist.length}`;
+  function _vsMakeSlide(item) {
+    const slide = document.createElement('div');
+    slide.className = 'vs-slide';
+
+    const vid = document.createElement('video');
+    vid.dataset.src = item.url;   // lazy — IntersectionObserver loads src on demand
+    vid.playsInline  = true;
+    vid.muted        = _vsMuted;
+    vid.preload      = 'none';
+    vid.addEventListener('click', () => { vid.paused ? vid.play() : vid.pause(); });
+    vid.addEventListener('ended', () => {
+      const feed = document.getElementById('vs-feed');
+      if (feed) feed.scrollBy({ top: feed.offsetHeight, behavior: 'smooth' });
+    });
+    vid.addEventListener('error', () => {
+      const feed = document.getElementById('vs-feed');
+      if (feed) feed.scrollBy({ top: feed.offsetHeight, behavior: 'smooth' });
+    });
+
+    const grad = document.createElement('div');
+    grad.className = 'vs-slide-grad';
+
+    const info = document.createElement('div');
+    info.className = 'vs-slide-info';
+    info.innerHTML = `
+      <p class="vs-slide-title">${Utils.escapeHtml(item.title)}</p>
+      <p class="vs-slide-cat">${Utils.escapeHtml(item.category)}</p>`;
+
+    slide.append(vid, grad, info);
+    return slide;
   }
 
-  function _vsNext() {
-    if (!_vsPlaylist.length) return;
-    _vsIndex = (_vsIndex + 1) % _vsPlaylist.length;
-    _vsLoadVideo(_vsIndex);
+  function _vsSetupObserver(feed) {
+    if (_vsObserver) _vsObserver.disconnect();
+    _vsObserver = new IntersectionObserver(entries => {
+      if (_currentPage !== 'voidscroll') return;
+      entries.forEach(entry => {
+        const vid = entry.target.querySelector('video');
+        if (!vid) return;
+        if (entry.isIntersecting) {
+          if (vid.dataset.src) { vid.src = vid.dataset.src; delete vid.dataset.src; }
+          vid.muted = _vsMuted;
+          vid.play().catch(() => {});
+        } else {
+          vid.pause();
+        }
+      });
+    }, { root: feed, threshold: 0.8 });
   }
 
-  function _vsPrev() {
-    if (!_vsPlaylist.length) return;
-    _vsIndex = (_vsIndex - 1 + _vsPlaylist.length) % _vsPlaylist.length;
-    _vsLoadVideo(_vsIndex);
+  function _vsPopulateFeed() {
+    const feed = document.getElementById('vs-feed');
+    if (!feed) return;
+    if (_vsObserver) _vsObserver.disconnect();
+    feed.innerHTML = '';
+    feed.scrollTop = 0;
+    _vsSetupObserver(feed);
+    _vsPlaylist.forEach(item => {
+      const slide = _vsMakeSlide(item);
+      _vsObserver.observe(slide);
+      feed.appendChild(slide);
+    });
   }
 
   function _vsKeyHandler(e) {
     if (_currentPage !== 'voidscroll') return;
-    if (e.key === 'ArrowRight' || e.key === 'ArrowDown') { e.preventDefault(); _vsNext(); }
-    else if (e.key === 'ArrowLeft' || e.key === 'ArrowUp') { e.preventDefault(); _vsPrev(); }
-    else if (e.key === ' ') {
+    const feed = document.getElementById('vs-feed');
+    if (!feed) return;
+    if (e.key === 'ArrowDown' || e.key === 'ArrowRight') {
       e.preventDefault();
-      const v = document.getElementById('vs-video');
-      if (v) { v.paused ? v.play() : v.pause(); }
+      feed.scrollBy({ top: feed.offsetHeight, behavior: 'smooth' });
+    } else if (e.key === 'ArrowUp' || e.key === 'ArrowLeft') {
+      e.preventDefault();
+      feed.scrollBy({ top: -feed.offsetHeight, behavior: 'smooth' });
+    } else if (e.key === ' ') {
+      e.preventDefault();
+      const idx = Math.round(feed.scrollTop / feed.offsetHeight);
+      const vid = feed.querySelectorAll('.vs-slide')[idx]?.querySelector('video');
+      if (vid) vid.paused ? vid.play() : vid.pause();
     }
   }
 
@@ -4029,63 +4065,27 @@ const UI = (() => {
       <div class="vs-cats" id="vs-cats">
         ${VS_CATS.map(c => `<button class="filter-pill${c === _vsCat ? ' active' : ''}" data-cat="${c}">${c === 'all' ? 'All' : c[0].toUpperCase() + c.slice(1)}</button>`).join('')}
       </div>
-      <div class="vs-player">
-        <video id="vs-video" class="vs-video" playsinline muted></video>
-        <div class="vs-overlay">
-          <div class="vs-side-btns">
-            <button class="vs-icon-btn" id="vs-mute-btn" title="Toggle mute" aria-label="Mute">🔇</button>
-            <button class="vs-icon-btn" id="vs-fit-btn"  title="Toggle fit"  aria-label="Fit">⊡</button>
-          </div>
-          <div class="vs-info">
-            <p class="vs-title" id="vs-title">Loading…</p>
-            <p class="vs-meta"  id="vs-meta"></p>
-          </div>
-        </div>
-        <div class="vs-status" id="vs-status">
-          <div class="vs-spinner"></div>
-          <span>Loading videos…</span>
-        </div>
-      </div>
-      <div class="vs-nav">
-        <button class="vs-nav-btn" id="vs-prev-btn">← Prev</button>
-        <span class="vs-counter" id="vs-counter">—</span>
-        <button class="vs-nav-btn" id="vs-next-btn">Next →</button>
+      <div class="vs-feed" id="vs-feed"></div>
+      <button class="vs-mute-btn" id="vs-mute-btn" aria-label="Toggle mute">🔇</button>
+      <div class="vs-loading" id="vs-loading">
+        <div class="vs-spinner"></div>
+        <span>Loading videos…</span>
       </div>`;
 
-    const vid     = document.getElementById('vs-video');
-    const muteBtn = document.getElementById('vs-mute-btn');
-    const fitBtn  = document.getElementById('vs-fit-btn');
-
-    document.getElementById('vs-prev-btn').addEventListener('click', _vsPrev);
-    document.getElementById('vs-next-btn').addEventListener('click', _vsNext);
-
-    muteBtn.addEventListener('click', () => {
-      vid.muted = !vid.muted;
-      muteBtn.textContent = vid.muted ? '🔇' : '🔊';
-    });
-
-    fitBtn.addEventListener('click', () => {
-      const cover = vid.style.objectFit === 'cover';
-      vid.style.objectFit = cover ? 'contain' : 'cover';
-      fitBtn.textContent = cover ? '⊡' : '⊞';
+    document.getElementById('vs-mute-btn').addEventListener('click', () => {
+      _vsMuted = !_vsMuted;
+      document.getElementById('vs-mute-btn').textContent = _vsMuted ? '🔇' : '🔊';
+      document.querySelectorAll('#vs-feed video').forEach(v => { v.muted = _vsMuted; });
     });
 
     document.getElementById('vs-cats').addEventListener('click', e => {
       const btn = e.target.closest('.filter-pill');
-      if (!btn) return;
+      if (!btn || btn.dataset.cat === _vsCat) return;
       document.querySelectorAll('#vs-cats .filter-pill').forEach(b => b.classList.remove('active'));
       btn.classList.add('active');
       _vsCat = btn.dataset.cat;
       _vsRebuildPlaylist();
-      _vsLoadVideo(_vsIndex);
-    });
-
-    vid.addEventListener('click', () => { vid.paused ? vid.play() : vid.pause(); });
-    vid.addEventListener('ended', _vsNext);
-    vid.addEventListener('error', _vsNext);  // skip broken videos
-    vid.addEventListener('loadeddata', () => {
-      const st = document.getElementById('vs-status');
-      if (st) st.hidden = true;
+      _vsPopulateFeed();
     });
 
     document.addEventListener('keydown', _vsKeyHandler);
@@ -4094,66 +4094,59 @@ const UI = (() => {
 
   async function _renderVoidScroll() {
     document.getElementById('voidscroll-btn')?.classList.add('active');
-
     const page = document.getElementById('page-voidscroll');
     if (!page) return;
 
-    // Build DOM once
     if (!_vsBuilt) _vsBuildDOM(page);
 
-    // If already has videos, just resume playback
+    // Already loaded — just make sure the visible slide is playing
     if (_vsReady) {
-      const vid = document.getElementById('vs-video');
-      if (vid && vid.src && vid.paused) vid.play().catch(() => {});
+      const feed = document.getElementById('vs-feed');
+      if (feed) {
+        const idx = Math.round(feed.scrollTop / feed.offsetHeight);
+        const vid = feed.querySelectorAll('.vs-slide')[idx]?.querySelector('video');
+        if (vid && vid.src && vid.paused) vid.play().catch(() => {});
+      }
       return;
     }
 
-    // Fetch JSON from the live VoidScroll repo
     try {
       const res = await fetch('https://voidscroll.org/videos.json');
       if (!res.ok) throw new Error(res.status);
-      const raw = await res.json();
-      // Deduplicate by URL
+      const raw  = await res.json();
       const seen = new Set();
       _vsAllVideos = raw.filter(v => v.url && !seen.has(v.url) && seen.add(v.url));
       _vsReady = true;
     } catch {
-      const st = document.getElementById('vs-status');
-      if (st) st.innerHTML = '<span style="padding:1rem;text-align:center">Could not load videos — check your connection.</span>';
+      const el = document.getElementById('vs-loading');
+      if (el) el.innerHTML = '<span style="padding:1.5rem;text-align:center">Could not load videos.<br>Check your connection.</span>';
       return;
     }
 
-    // Guard: user may have navigated away while the fetch was in flight
     if (_currentPage !== 'voidscroll') return;
     _vsRebuildPlaylist();
-    _vsLoadVideo(_vsIndex);
+    _vsPopulateFeed();
+    const loading = document.getElementById('vs-loading');
+    if (loading) loading.hidden = true;
   }
 
   function _openVoidScroll() {
-    // 1. Pulse the ∞ button
     const btn = document.getElementById('voidscroll-btn');
     if (btn) {
       btn.classList.remove('vs-pulse');
       void btn.offsetWidth;
-      btn.classList.add('vs-pulse');
-      btn.classList.add('active');
+      btn.classList.add('vs-pulse', 'active');
       setTimeout(() => btn.classList.remove('vs-pulse'), 400);
     }
-
-    // 2. Slide banner down, hold, then slide out
     const banner = document.getElementById('voidscroll-banner');
     if (banner) {
       banner.hidden = false;
-      banner.classList.remove('vs-out');
-      banner.classList.add('vs-in');
+      banner.classList.replace('vs-out', 'vs-in') || banner.classList.add('vs-in');
       setTimeout(() => {
-        banner.classList.remove('vs-in');
-        banner.classList.add('vs-out');
+        banner.classList.replace('vs-in', 'vs-out');
         setTimeout(() => { banner.hidden = true; banner.classList.remove('vs-out'); }, 320);
       }, 1800);
     }
-
-    // 3. Navigate
     navigate('voidscroll');
   }
 
