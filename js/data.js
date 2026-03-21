@@ -159,10 +159,17 @@ const Data = (() => {
     return metas.filter(Boolean);
   }
 
-  async function createCircle(name, description = '', addPolicy = 'owner_only') {
+  async function createCircle(name, description = '', addPolicy = 'owner_only', coverFile = null) {
     const id = Utils.generateId('circle');
     const folderId = await Drive.getOrCreateFolder(id, _folders.circlesFolderId);
     const user = Auth.getCurrentUser();
+    let coverFileId = null;
+    if (coverFile) {
+      try {
+        const uploaded = await Drive.uploadMedia(coverFile, folderId);
+        coverFileId = uploaded.id;
+      } catch { /* cover upload failure is non-fatal */ }
+    }
     const meta = {
       id,
       name,
@@ -171,10 +178,17 @@ const Data = (() => {
       ownerId: user.userId,
       ownerEmail: user.email,
       members: [{ email: user.email, displayName: user.name, role: 'owner', addedAt: new Date().toISOString() }],
+      coverFileId,
       createdAt: new Date().toISOString()
     };
     await Drive.createJsonFile('_meta.json', meta, folderId);
     return { ...meta, folderId };
+  }
+
+  async function uploadCircleCover(folderId, file) {
+    const uploaded = await Drive.uploadMedia(file, folderId);
+    await updateCircleMeta(folderId, { coverFileId: uploaded.id });
+    return uploaded.id;
   }
 
   async function getCircle(folderId) {
@@ -813,6 +827,33 @@ const Data = (() => {
     return updated;
   }
 
+  /* ── Hidden users ───────────────────────────── */
+
+  async function _getHiddenUsersFile() {
+    try {
+      const f = await Drive.findFile('hidden_users.json', _folders.contactsFolderId);
+      if (!f) return { users: [] };
+      return await Drive.readJsonFile(f.id);
+    } catch { return { users: [] }; }
+  }
+
+  async function getHiddenUsers() {
+    return (await _getHiddenUsersFile()).users || [];
+  }
+
+  async function hideUser(email) {
+    const data = await _getHiddenUsersFile();
+    if (data.users.find(u => u.email === email)) return;
+    data.users.push({ email, hiddenAt: new Date().toISOString() });
+    await Drive.upsertJsonFile('hidden_users.json', data, _folders.contactsFolderId);
+  }
+
+  async function unhideUser(email) {
+    const data = await _getHiddenUsersFile();
+    data.users = data.users.filter(u => u.email !== email);
+    await Drive.upsertJsonFile('hidden_users.json', data, _folders.contactsFolderId);
+  }
+
   /* ── Exports ───────────────────────────────── */
 
   return {
@@ -824,7 +865,8 @@ const Data = (() => {
     sendFriendRequest, getIncomingFriendRequests, getIncomingCircleNotifications, getNotifications,
     acceptFriendRequest, declineFriendRequest, syncFriendAcceptances,
     getBlocked,   blockUser,    unblockUser,
-    listCircles,  createCircle, getCircle,  updateCircleMeta,  deleteCircle,
+    getHiddenUsers, hideUser,   unhideUser,
+    listCircles,  createCircle, getCircle,  updateCircleMeta,  deleteCircle, uploadCircleCover,
     addMemberToCircle, removeMemberFromCircle,
     createCirclePost, listCirclePosts, deleteCirclePost, updateCirclePostCaption,
     getMutedCircles, muteCircle, unmuteCircle,

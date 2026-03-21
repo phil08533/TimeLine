@@ -1,0 +1,381 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="soft" data-color="slate">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>My Circle — Private social sharing, owned by you</title>
+  <meta name="description" content="My Circle is a private photo &amp; file sharing app. No servers, no ads — everything lives in your Google Drive." />
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>◎</text></svg>" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Playfair+Display:wght@700&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="css/styles.css" />
+  <style>
+    /* ── Landing-specific overrides ── */
+    body { background: var(--bg); color: var(--text); }
+
+    .landing { max-width: 960px; margin: 0 auto; padding: 0 1.5rem; }
+
+    /* ── Top nav ── */
+    .landing-nav {
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 1.25rem 1.5rem;
+      position: sticky; top: 0; z-index: 100;
+      background: color-mix(in srgb, var(--bg) 80%, transparent);
+      backdrop-filter: blur(12px);
+      border-bottom: 1px solid var(--border);
+    }
+    .landing-nav-brand { display: flex; align-items: center; gap: .5rem; font-weight: 700; font-size: 1.1rem; text-decoration: none; color: var(--text); }
+    .landing-nav-brand .brand-mark { font-size: 1.4rem; }
+    .landing-nav-links { display: flex; gap: 1rem; align-items: center; }
+
+    /* ── Hero ── */
+    .hero {
+      text-align: center;
+      padding: 5rem 1rem 4rem;
+    }
+    .hero-eyebrow {
+      display: inline-block;
+      background: var(--accent);
+      color: var(--accent-fg);
+      font-size: .78rem;
+      font-weight: 600;
+      letter-spacing: .06em;
+      text-transform: uppercase;
+      padding: .25rem .75rem;
+      border-radius: 100px;
+      margin-bottom: 1.5rem;
+    }
+    .hero h1 {
+      font-size: clamp(2.2rem, 6vw, 3.8rem);
+      font-weight: 700;
+      line-height: 1.15;
+      margin-bottom: 1.25rem;
+      color: var(--text);
+    }
+    .hero h1 em { font-style: normal; color: var(--accent); }
+    .hero-sub {
+      font-size: 1.15rem;
+      color: var(--muted);
+      max-width: 560px;
+      margin: 0 auto 2.5rem;
+      line-height: 1.7;
+    }
+    .hero-cta { display: flex; gap: 1rem; justify-content: center; flex-wrap: wrap; }
+    .hero-note { margin-top: 1.5rem; font-size: .82rem; color: var(--muted); }
+
+    /* ── Trust badges ── */
+    .trust-row {
+      display: flex; gap: 2rem; justify-content: center; flex-wrap: wrap;
+      padding: 2rem 0;
+      border-top: 1px solid var(--border);
+      border-bottom: 1px solid var(--border);
+      margin: 2rem 0;
+    }
+    .trust-item { display: flex; align-items: center; gap: .5rem; font-size: .875rem; color: var(--muted); }
+    .trust-item strong { color: var(--text); }
+
+    /* ── Feature sections ── */
+    .features { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 1.5rem; margin: 3rem 0; }
+    .feature-card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--card-radius, 14px);
+      padding: 1.75rem;
+      box-shadow: var(--shadow);
+    }
+    .feature-icon { font-size: 2rem; margin-bottom: .75rem; }
+    .feature-card h3 { font-size: 1rem; font-weight: 600; margin-bottom: .5rem; }
+    .feature-card p { font-size: .875rem; color: var(--muted); line-height: 1.6; }
+
+    /* ── Comparison table ── */
+    .compare-section { margin: 4rem 0; }
+    .compare-section h2 { text-align: center; margin-bottom: 2rem; font-size: 1.8rem; }
+    .compare-table { width: 100%; border-collapse: collapse; font-size: .9rem; }
+    .compare-table th, .compare-table td { padding: .85rem 1rem; border-bottom: 1px solid var(--border); text-align: left; }
+    .compare-table th { font-weight: 600; background: var(--bg); }
+    .compare-table td:first-child { color: var(--muted); }
+    .compare-table .mc-col { color: var(--accent); font-weight: 600; }
+    .compare-table .check { color: #27ae60; }
+    .compare-table .cross { color: var(--danger); }
+    .compare-table tr:hover td { background: color-mix(in srgb, var(--surface) 60%, var(--bg)); }
+
+    /* ── How it works ── */
+    .how-section { margin: 4rem 0; }
+    .how-section h2 { text-align: center; margin-bottom: 2rem; font-size: 1.8rem; }
+    .steps { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 1.5rem; }
+    .step { text-align: center; }
+    .step-num {
+      width: 48px; height: 48px; border-radius: 50%;
+      background: var(--accent); color: var(--accent-fg);
+      display: flex; align-items: center; justify-content: center;
+      font-size: 1.2rem; font-weight: 700;
+      margin: 0 auto 1rem;
+    }
+    .step h3 { font-size: .95rem; font-weight: 600; margin-bottom: .4rem; }
+    .step p { font-size: .82rem; color: var(--muted); line-height: 1.6; }
+
+    /* ── VoidScroll promo ── */
+    .voidscroll-promo {
+      margin: 3rem 0;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--card-radius, 14px);
+      padding: 2rem;
+      display: flex; align-items: center; gap: 2rem;
+      box-shadow: var(--shadow);
+      flex-wrap: wrap;
+    }
+    .voidscroll-promo .vs-icon { font-size: 3rem; flex-shrink: 0; }
+    .voidscroll-promo h3 { font-size: 1.1rem; font-weight: 600; margin-bottom: .4rem; }
+    .voidscroll-promo p { font-size: .875rem; color: var(--muted); margin-bottom: 1rem; }
+
+    /* ── CTA section ── */
+    .cta-section {
+      text-align: center;
+      margin: 4rem 0;
+      padding: 3.5rem 2rem;
+      background: var(--accent);
+      color: var(--accent-fg);
+      border-radius: var(--card-radius, 14px);
+    }
+    .cta-section h2 { font-size: 2rem; margin-bottom: .75rem; color: var(--accent-fg); }
+    .cta-section p { margin-bottom: 2rem; opacity: .85; font-size: 1rem; }
+    .btn-cta-inv {
+      background: var(--accent-fg); color: var(--accent);
+      border: none; border-radius: 100px;
+      padding: .85rem 2rem; font-size: 1rem; font-weight: 600;
+      cursor: pointer; text-decoration: none; display: inline-block;
+      transition: opacity .15s;
+    }
+    .btn-cta-inv:hover { opacity: .9; }
+
+    /* ── Footer ── */
+    .landing-footer {
+      text-align: center; padding: 2rem 0;
+      font-size: .82rem; color: var(--muted);
+      border-top: 1px solid var(--border);
+      margin-top: 4rem;
+    }
+    .landing-footer a { color: var(--accent); text-decoration: none; }
+    .landing-footer a:hover { text-decoration: underline; }
+
+    @media (max-width: 600px) {
+      .hero { padding: 3rem 1rem 2.5rem; }
+      .voidscroll-promo { flex-direction: column; text-align: center; }
+      .compare-table { font-size: .78rem; }
+      .compare-table th, .compare-table td { padding: .6rem .5rem; }
+    }
+  </style>
+</head>
+<body>
+
+  <nav class="landing-nav">
+    <a href="index.html" class="landing-nav-brand">
+      <span class="brand-mark">◎</span>
+      <span>My Circle</span>
+    </a>
+    <div class="landing-nav-links">
+      <a href="#features" class="link" style="font-size:.9rem">Features</a>
+      <a href="#compare" class="link" style="font-size:.9rem">vs. Facebook</a>
+      <a href="index.html" class="btn btn-primary btn-sm">Open App →</a>
+    </div>
+  </nav>
+
+  <div class="landing">
+
+    <!-- Hero -->
+    <section class="hero">
+      <span class="hero-eyebrow">Zero servers &nbsp;·&nbsp; Zero ads &nbsp;·&nbsp; Zero data harvesting</span>
+      <h1>Share with the people<br>who actually <em>matter</em>.</h1>
+      <p class="hero-sub">
+        My Circle is a private photo and file sharing app where
+        <strong>everything lives in your Google Drive</strong> — not our servers.
+        No algorithm, no ads, no one reading your posts.
+      </p>
+      <div class="hero-cta">
+        <a href="index.html" class="btn btn-primary btn-lg">Get Started — it's free</a>
+        <a href="#features" class="btn btn-ghost btn-lg">See how it works</a>
+      </div>
+      <p class="hero-note">Requires a free Google account. No signup form, no password, no credit card.</p>
+    </section>
+
+    <!-- Trust -->
+    <div class="trust-row">
+      <div class="trust-item">🔒 <span><strong>Your data</strong> in your Drive</span></div>
+      <div class="trust-item">🚫 <span><strong>No ads</strong>, ever</span></div>
+      <div class="trust-item">👁 <span><strong>No tracking</strong> or analytics</span></div>
+      <div class="trust-item">⚡ <span><strong>Open source</strong> — MIT license</span></div>
+      <div class="trust-item">🔑 <span><strong>No password</strong> to remember</span></div>
+    </div>
+
+    <!-- Features -->
+    <section id="features">
+      <h2 style="text-align:center;margin-bottom:2rem;font-size:1.8rem">Everything you want. Nothing you don't.</h2>
+      <div class="features">
+        <div class="feature-card">
+          <div class="feature-icon">◎</div>
+          <h3>Circles</h3>
+          <p>Create private groups — Family, Hiking Crew, Book Club. Share posts, photos, and files only with the people in each circle. You control membership.</p>
+        </div>
+        <div class="feature-card">
+          <div class="feature-icon">📸</div>
+          <h3>Albums</h3>
+          <p>Curate collections by occasion — trips, birthdays, weddings. Invite contributors to add their own photos. Share the whole album with a circle or specific friends.</p>
+        </div>
+        <div class="feature-card">
+          <div class="feature-icon">🌀</div>
+          <h3>Stories</h3>
+          <p>Ephemeral 24-hour stories with the Instagram-style gradient ring. Your friends see your story right in their feed — no separate app needed.</p>
+        </div>
+        <div class="feature-card">
+          <div class="feature-icon">💬</div>
+          <h3>Comments &amp; Reactions</h3>
+          <p>React with 5 emoji reactions and leave comments on any post. Comments are stored on the file itself via Google Drive — fully private, no third-party storage.</p>
+        </div>
+        <div class="feature-card">
+          <div class="feature-icon">🧑‍🤝‍🧑</div>
+          <h3>Friends</h3>
+          <p>Friend requests, friend lists, and an easy-to-use feed that only shows content from people you've added. Block or hide users you don't want to see.</p>
+        </div>
+        <div class="feature-card">
+          <div class="feature-icon">🎨</div>
+          <h3>Themes</h3>
+          <p>Four visual styles (Minimal, Soft, Editorial, Brutalist) and five color palettes. Default is the calming light-blue Soft + Slate. Make it yours.</p>
+        </div>
+        <div class="feature-card">
+          <div class="feature-icon">🔒</div>
+          <h3>PIN-protected Files</h3>
+          <p>Hide specific files behind a PIN code right in your Google Drive. Only you can unlock them — the key never leaves your device.</p>
+        </div>
+        <div class="feature-card">
+          <div class="feature-icon">☁️</div>
+          <h3>Powered by Google Drive</h3>
+          <p>15 GB free storage. No new account, no new password. Sign in with Google and My Circle creates a <code>mycircle/</code> folder in your existing Drive.</p>
+        </div>
+      </div>
+    </section>
+
+    <!-- VoidScroll promo -->
+    <div class="voidscroll-promo">
+      <div class="vs-icon">∞</div>
+      <div>
+        <h3>Also love VoidScroll?</h3>
+        <p>Our companion open feed at <strong>voidscroll.org</strong> lets you scroll content without the dopamine traps of mainstream platforms — no infinite scroll manipulation, no engagement bait, no algorithmic rage-farming. Just content you actually want to see.</p>
+        <a href="https://voidscroll.org" target="_blank" rel="noopener" class="btn btn-ghost btn-sm">Visit VoidScroll →</a>
+      </div>
+    </div>
+
+    <!-- Comparison -->
+    <section id="compare" class="compare-section">
+      <h2>Why not just use Facebook?</h2>
+      <table class="compare-table">
+        <thead>
+          <tr>
+            <th>Feature</th>
+            <th class="mc-col">◎ My Circle</th>
+            <th>Facebook</th>
+            <th>Twitter / X</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>Your data stays yours</td>
+            <td class="mc-col check">✓ In your Google Drive</td>
+            <td class="cross">✗ On their servers</td>
+            <td class="cross">✗ On their servers</td>
+          </tr>
+          <tr>
+            <td>Ads</td>
+            <td class="mc-col check">✓ None, ever</td>
+            <td class="cross">✗ Everywhere</td>
+            <td class="cross">✗ Getting worse</td>
+          </tr>
+          <tr>
+            <td>Algorithmic manipulation</td>
+            <td class="mc-col check">✓ None — chronological feed</td>
+            <td class="cross">✗ Outrage-maximizing</td>
+            <td class="cross">✗ Engagement-bait</td>
+          </tr>
+          <tr>
+            <td>Private groups</td>
+            <td class="mc-col check">✓ Circles — you control membership</td>
+            <td>Partial — opaque rules</td>
+            <td class="cross">✗ Not really</td>
+          </tr>
+          <tr>
+            <td>Who reads your posts</td>
+            <td class="mc-col check">✓ Only who you share with</td>
+            <td class="cross">✗ Facebook employees + advertisers</td>
+            <td class="cross">✗ Anyone + data brokers</td>
+          </tr>
+          <tr>
+            <td>Account required</td>
+            <td class="mc-col check">✓ Just your existing Google account</td>
+            <td class="cross">✗ Separate account</td>
+            <td class="cross">✗ Separate account</td>
+          </tr>
+          <tr>
+            <td>Open source</td>
+            <td class="mc-col check">✓ MIT license on GitHub</td>
+            <td class="cross">✗ Closed source</td>
+            <td class="cross">✗ Partially open</td>
+          </tr>
+          <tr>
+            <td>Chronological feed</td>
+            <td class="mc-col check">✓ Always</td>
+            <td class="cross">✗ Algorithm decides</td>
+            <td class="cross">✗ "For You" page</td>
+          </tr>
+        </tbody>
+      </table>
+    </section>
+
+    <!-- How it works -->
+    <section class="how-section">
+      <h2>Get started in 60 seconds</h2>
+      <div class="steps">
+        <div class="step">
+          <div class="step-num">1</div>
+          <h3>Sign in with Google</h3>
+          <p>No new password. No new account. Just click the Google sign-in button — that's it.</p>
+        </div>
+        <div class="step">
+          <div class="step-num">2</div>
+          <h3>Create your first Circle</h3>
+          <p>Add a name, optional picture, and invite friends by email. They get access via Google Drive permissions.</p>
+        </div>
+        <div class="step">
+          <div class="step-num">3</div>
+          <h3>Share photos &amp; posts</h3>
+          <p>Drop photos, videos, or text into the circle. Only members can see them — stored in your Drive, not ours.</p>
+        </div>
+        <div class="step">
+          <div class="step-num">4</div>
+          <h3>React, comment, connect</h3>
+          <p>Emoji reactions, comments, and stories. The full social experience — with none of the surveillance capitalism.</p>
+        </div>
+      </div>
+    </section>
+
+    <!-- CTA -->
+    <section class="cta-section">
+      <h2>Ready to take back your social life?</h2>
+      <p>Free forever. No subscription, no ads, no catch. Your memories stay in your Google Drive — forever.</p>
+      <a href="index.html" class="btn-cta-inv">Open My Circle →</a>
+    </section>
+
+  </div><!-- /.landing -->
+
+  <footer class="landing-footer">
+    <div class="landing">
+      <p>
+        © 2025 My Circle — <a href="https://github.com/phil08533/TimeLine" target="_blank" rel="noopener">Open source on GitHub</a> ·
+        <a href="index.html">Open App</a> ·
+        <a href="https://voidscroll.org" target="_blank" rel="noopener">VoidScroll</a>
+      </p>
+    </div>
+  </footer>
+
+</body>
+</html>

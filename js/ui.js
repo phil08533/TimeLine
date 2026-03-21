@@ -409,7 +409,8 @@ const UI = (() => {
   let _feedQueue  = [];   // albums not yet rendered (infinite scroll)
   let _feedSentinelObs = null; // IntersectionObserver for infinite scroll
   let _focusedPostIndex = -1; // keyboard navigation
-  let _hiddenPostIds = new Set(); // IDs of posts hidden by the user
+  let _hiddenPostIds    = new Set(); // IDs of posts hidden by the user
+  let _hiddenUserEmails = new Set(); // Emails of users whose posts are hidden
 
   // Close any open post menus when clicking outside
   document.addEventListener('click', () => {
@@ -417,10 +418,10 @@ const UI = (() => {
   });
 
   // ⋯ kebab menu for a post card.
-  // opts: { isOwn, canDelete, canHide, onEdit, onDelete, onHide }
+  // opts: { isOwn, canDelete, canHide, canHideUser, sharerName, onEdit, onDelete, onHide, onHideUser }
   function _buildPostMenu(opts) {
-    const { isOwn, canDelete, canHide, onEdit, onDelete, onHide } = opts;
-    const hasAnyAction = (isOwn && onEdit) || (canDelete && onDelete) || (canHide && onHide);
+    const { isOwn, canDelete, canHide, canHideUser, sharerName, onEdit, onDelete, onHide, onHideUser } = opts;
+    const hasAnyAction = (isOwn && onEdit) || (canDelete && onDelete) || (canHide && onHide) || (canHideUser && onHideUser);
     if (!hasAnyAction) return null;
 
     const wrap = _el(`<div class="post-menu-wrap"></div>`);
@@ -440,6 +441,12 @@ const UI = (() => {
     if (canHide && onHide) {
       const item = _el(`<button class="post-menu-item" role="menuitem">Hide post</button>`);
       item.addEventListener('click', e => { e.stopPropagation(); menu.hidden = true; onHide(); });
+      menu.appendChild(item);
+    }
+    if (canHideUser && onHideUser) {
+      const label = sharerName ? `Hide all from ${Utils.escapeHtml(sharerName)}` : 'Hide this user';
+      const item = _el(`<button class="post-menu-item" role="menuitem">${label}</button>`);
+      item.addEventListener('click', e => { e.stopPropagation(); menu.hidden = true; onHideUser(); });
       menu.appendChild(item);
     }
 
@@ -700,13 +707,15 @@ const UI = (() => {
     });
 
     try {
-      const [sharedFolders, ownPosts, ownStories, hiddenIds] = await Promise.all([
+      const [sharedFolders, ownPosts, ownStories, hiddenIds, hiddenUsers] = await Promise.all([
         Data.getFeedFolders(),
         Data.listOwnPosts(),
         Data.listOwnStories().catch(() => []),
-        Data.getHiddenPostIds().catch(() => [])
+        Data.getHiddenPostIds().catch(() => []),
+        Data.getHiddenUsers().catch(() => [])
       ]);
-      _hiddenPostIds = new Set(hiddenIds);
+      _hiddenPostIds    = new Set(hiddenIds);
+      _hiddenUserEmails = new Set(hiddenUsers.map(u => u.email));
 
       const me = Auth.getCurrentUser();
 
@@ -804,14 +813,16 @@ const UI = (() => {
     // "Add Story" button
     const addCircle = _el(`
       <div class="story-circle story-circle--add" title="Add Story">
-        <div class="story-avatar story-avatar--add">+</div>
+        <div class="story-ring story-ring--add">
+          <div class="story-avatar story-avatar--add">+</div>
+        </div>
         <span class="story-label">Your Story</span>
       </div>
     `);
     addCircle.addEventListener('click', () => _openAddStoryModal());
     bar.appendChild(addCircle);
 
-    // Own stories
+    // Own stories — show with gradient ring (already viewed by owner so use viewed ring)
     ownStories.forEach(story => {
       const initials = (me?.name || '?')[0].toUpperCase();
       const avatarHtml = me?.picture
@@ -819,7 +830,9 @@ const UI = (() => {
         : `<span class="story-avatar-initials">${initials}</span>`;
       const circle = _el(`
         <div class="story-circle story-circle--own" title="${Utils.escapeHtml(story.name || 'Story')}">
-          <div class="story-avatar story-avatar--viewed">${avatarHtml}</div>
+          <div class="story-ring story-ring--viewed">
+            <div class="story-avatar">${avatarHtml}</div>
+          </div>
           <span class="story-label">${Utils.escapeHtml(me?.name || 'You')}</span>
         </div>
       `);
@@ -827,12 +840,7 @@ const UI = (() => {
       bar.appendChild(circle);
     });
 
-    // Friend stories (shared folders that have isStory in meta)
-    // We detect stories by checking if folder name starts with 'story_' pattern or
-    // we can check a limited set. For performance we skip meta-checking here and
-    // only show folders where the owner matches known friends and folder is recent (<24h)
-    // A proper implementation would cache meta but for now we parse based on available data.
-    // We show the stories bar and let users tap to see content.
+    // Friend stories — recent shared folders, shown with gradient ring
     const recentShared = sharedFolders.filter(f => {
       const t = new Date(f.sharedWithMeTime || f.createdTime || 0).getTime();
       return Date.now() - t < 24 * 60 * 60 * 1000;
@@ -848,7 +856,9 @@ const UI = (() => {
         : `<span class="story-avatar-initials">${initials}</span>`;
       const circle = _el(`
         <div class="story-circle" title="${Utils.escapeHtml(name)}">
-          <div class="story-avatar">${avatarHtml}</div>
+          <div class="story-ring">
+            <div class="story-avatar">${avatarHtml}</div>
+          </div>
           <span class="story-label">${Utils.escapeHtml(name.split(' ')[0])}</span>
         </div>
       `);
@@ -1023,6 +1033,7 @@ const UI = (() => {
 
     const visible = _feedAlbums.filter(a => {
       if (_hiddenPostIds.has(a.id)) return false;
+      if (a.sharerEmail && _hiddenUserEmails.has(a.sharerEmail)) return false;
       if (_feedFilter === 'friends') return !a._isOwn;
       if (_feedFilter === 'mine')    return a._isOwn;
       return true;
@@ -1056,6 +1067,7 @@ const UI = (() => {
     const empty = document.getElementById('feed-empty');
     const visible = albums.filter(a => {
       if (_hiddenPostIds.has(a.id)) return false;
+      if (a.sharerEmail && _hiddenUserEmails.has(a.sharerEmail)) return false;
       if (_feedFilter === 'friends') return !a._isOwn;
       if (_feedFilter === 'mine')    return a._isOwn;
       return true;
@@ -1078,9 +1090,17 @@ const UI = (() => {
       ? `<img src="${Utils.escapeHtml(album.sharerPicture)}" alt="" class="post-avatar-img" />`
       : `<span class="post-avatar-initials">${initials}</span>`;
 
-    // Media grid (1 photo → full width, 2-4 → 2-col grid, 5+ → 3-col)
-    const gridClass = count === 1 ? 'post-media-single' : count <= 4 ? 'post-media-grid2' : 'post-media-grid3';
-    const mediaHtml = count > 0 ? `<div class="post-media ${gridClass}"></div>` : '';
+    // Carousel for multiple photos, single display for one
+    const mediaHtml = count > 0 ? `
+      <div class="post-carousel">
+        <div class="post-carousel-track"></div>
+        ${count > 1 ? `
+          <button class="post-carousel-arrow post-carousel-arrow--prev" aria-label="Previous">‹</button>
+          <button class="post-carousel-arrow post-carousel-arrow--next" aria-label="Next">›</button>
+          <div class="post-carousel-counter"><span class="post-carousel-cur">1</span>/<span class="post-carousel-total">${count}</span></div>
+          <div class="post-carousel-dots">${mediaFiles.map((_, i) => `<span class="post-carousel-dot${i === 0 ? ' active' : ''}"></span>`).join('')}</div>
+        ` : ''}
+      </div>` : '';
 
     // Text-only detection
     const isTextOnly = count === 0 && !!album.caption;
@@ -1115,51 +1135,67 @@ const UI = (() => {
       </div>
     `);
 
-    // Load media thumbnails into grid
-    const mediaDiv = card.querySelector('.post-media');
-    if (mediaDiv && count > 0) {
-      mediaFiles.slice(0, 9).forEach(f => {
-        let thumb;
+    // Build carousel slides
+    const track = card.querySelector('.post-carousel-track');
+    if (track && count > 0) {
+      let _curIdx = 0;
+      const dots     = card.querySelectorAll('.post-carousel-dot');
+      const curLabel = card.querySelector('.post-carousel-cur');
+
+      function _goTo(idx) {
+        _curIdx = Math.max(0, Math.min(mediaFiles.length - 1, idx));
+        track.style.transform = `translateX(-${_curIdx * 100}%)`;
+        dots.forEach((d, i) => d.classList.toggle('active', i === _curIdx));
+        if (curLabel) curLabel.textContent = _curIdx + 1;
+      }
+
+      card.querySelector('.post-carousel-arrow--prev')?.addEventListener('click', e => {
+        e.stopPropagation(); _goTo(_curIdx - 1);
+      });
+      card.querySelector('.post-carousel-arrow--next')?.addEventListener('click', e => {
+        e.stopPropagation(); _goTo(_curIdx + 1);
+      });
+
+      // Touch swipe support
+      let _touchStartX = 0;
+      track.addEventListener('touchstart', e => { _touchStartX = e.touches[0].clientX; }, { passive: true });
+      track.addEventListener('touchend', e => {
+        const dx = e.changedTouches[0].clientX - _touchStartX;
+        if (Math.abs(dx) > 40) _goTo(dx < 0 ? _curIdx + 1 : _curIdx - 1);
+      });
+
+      mediaFiles.forEach((f, idx) => {
+        let slide;
         if (f.mimeType?.startsWith('video/')) {
-          thumb = _el(`
-            <div class="post-media-item post-media-item--video">
+          slide = _el(`
+            <div class="post-carousel-slide post-media-item--video">
               <video src="" loop muted playsinline preload="none"></video>
               <div class="video-play-overlay">
                 <button class="video-play-btn" aria-label="Play video">▶</button>
               </div>
             </div>
           `);
-          const vid    = thumb.querySelector('video');
-          const playEl = thumb.querySelector('.video-play-overlay');
-          thumb.querySelector('.video-play-btn').addEventListener('click', async e => {
+          const vid    = slide.querySelector('video');
+          const playEl = slide.querySelector('.video-play-overlay');
+          slide.querySelector('.video-play-btn').addEventListener('click', async e => {
             e.stopPropagation();
             playEl.hidden = true;
             try {
               const url = await Drive.getFileAsBlob(f.id);
-              vid.src = url;
-              vid.muted = false;
-              vid.play().catch(() => {});
+              vid.src = url; vid.muted = false; vid.play().catch(() => {});
             } catch { Utils.showToast('Could not load video', 'error'); playEl.hidden = false; }
           });
         } else {
-          thumb = _el(`<div class="post-media-item"><img src="" alt="" loading="lazy" /></div>`);
-          _loadThumbnail(thumb.querySelector('img'), f.id, f.thumbnailLink);
+          slide = _el(`<div class="post-carousel-slide"><img src="" alt="" loading="${idx === 0 ? 'eager' : 'lazy'}" /></div>`);
+          _loadThumbnail(slide.querySelector('img'), f.id, f.thumbnailLink);
         }
-        thumb.addEventListener('click', e => {
+        slide.addEventListener('click', e => {
           if (e.target.closest('.video-play-btn')) return;
           e.stopPropagation();
           openLightbox(f.id, album.id, { canCopy: !album._isOwn, canDelete: album._isOwn, thumbnailLink: f.thumbnailLink });
         });
-        mediaDiv.appendChild(thumb);
+        track.appendChild(slide);
       });
-      if (count > 9) {
-        const more = _el(`<div class="post-media-more">+${count - 9}</div>`);
-        more.addEventListener('click', e => {
-          e.stopPropagation();
-          openLightbox(mediaFiles[9].id, album.id, { canCopy: !album._isOwn, canDelete: album._isOwn, thumbnailLink: mediaFiles[9].thumbnailLink });
-        });
-        mediaDiv.appendChild(more);
-      }
     }
 
     // Multi-reaction buttons — load reactions once
@@ -1204,10 +1240,13 @@ const UI = (() => {
     // Post ⋯ menu
     const captionEl = card.querySelector('.post-caption, .post-text-only-body');
     const menuSlot  = card.querySelector('.post-menu-slot');
+    const sharerEmail = album.sharerEmail || null;
     const menu = _buildPostMenu({
-      isOwn:     album._isOwn,
-      canDelete: album._isOwn,
-      canHide:   !album._isOwn,
+      isOwn:        album._isOwn,
+      canDelete:    album._isOwn,
+      canHide:      !album._isOwn,
+      canHideUser:  !album._isOwn && !!sharerEmail,
+      sharerName:   album.sharer,
       onEdit: () => {
         _openEditCaptionModal(album.caption, async newCaption => {
           await Data.updateCollectionMeta(album.id, { caption: newCaption });
@@ -1245,6 +1284,19 @@ const UI = (() => {
             }
           });
         } catch { Utils.showToast('Could not hide post', 'error'); }
+      },
+      onHideUser: async () => {
+        if (!sharerEmail) return;
+        if (!confirm(`Hide all posts from ${album.sharer}? You can unhide them in Friends.`)) return;
+        try {
+          await Data.hideUser(sharerEmail);
+          _hiddenUserEmails.add(sharerEmail);
+          // Remove all their posts from the feed
+          _feedAlbums = _feedAlbums.filter(a => a.sharerEmail !== sharerEmail);
+          _feedQueue  = _feedQueue.filter(a => a.sharerEmail !== sharerEmail);
+          _paintFeedAlbums();
+          Utils.showToast(`Posts from ${album.sharer} hidden`);
+        } catch { Utils.showToast('Could not hide user', 'error'); }
       }
     });
     if (menu) menuSlot.appendChild(menu);
@@ -1273,8 +1325,9 @@ const UI = (() => {
   }
 
   function _loadPostComments(album, section, countBtn) {
-    // We use the metaFileId for Drive Comments API if available
-    const fileId = album.metaFileId;
+    // Prefer metaFileId (_meta.json) but fall back to the folder itself — Drive allows
+    // comments on any file including folders, so comments always work.
+    const fileId = album.metaFileId || album.id;
     section.innerHTML = '<span class="muted-text small">Loading comments…</span>';
 
     if (!fileId) {
@@ -1956,17 +2009,21 @@ const UI = (() => {
         </div>
       `);
 
-      // Load cover image without wiping overlay elements
+      // Load cover image — prefer explicit coverFileId, fall back to first media in folder
       const coverDiv = card.querySelector('.circle-card-cover');
       const coverImg = document.createElement('img');
       coverImg.alt = '';
       coverImg.style.cssText = 'position:absolute;inset:0;width:100%;height:100%;object-fit:cover';
       coverDiv.prepend(coverImg);
-      Drive.listFiles(c.folderId).then(files => {
-        const first = files.find(f => f.mimeType?.startsWith('image/') || f.mimeType?.startsWith('video/'));
-        if (!first) { coverImg.remove(); return; }
-        _loadThumbnail(coverImg, first.id, first.thumbnailLink);
-      }).catch(() => coverImg.remove());
+      if (c.coverFileId) {
+        _loadThumbnail(coverImg, c.coverFileId, null);
+      } else {
+        Drive.listFiles(c.folderId).then(files => {
+          const first = files.find(f => f.mimeType?.startsWith('image/') || f.mimeType?.startsWith('video/'));
+          if (!first) { coverImg.remove(); return; }
+          _loadThumbnail(coverImg, first.id, first.thumbnailLink);
+        }).catch(() => coverImg.remove());
+      }
 
       if (isOwner) {
         card.querySelector('.circle-card-edit').addEventListener('click', e => {
@@ -2051,7 +2108,16 @@ const UI = (() => {
 
       // Hero
       const iconEl = document.getElementById('circle-detail-icon');
-      iconEl.textContent = circle.name[0]?.toUpperCase() || '◎';
+      if (circle.coverFileId) {
+        iconEl.innerHTML = '';
+        const img = document.createElement('img');
+        img.alt = '';
+        img.style.cssText = 'width:100%;height:100%;object-fit:cover;border-radius:50%';
+        _loadThumbnail(img, circle.coverFileId, null);
+        iconEl.appendChild(img);
+      } else {
+        iconEl.textContent = circle.name[0]?.toUpperCase() || '◎';
+      }
       iconEl.style.setProperty('--circle-color', color);
 
       document.getElementById('circle-detail-name').textContent = circle.name;
@@ -2380,6 +2446,16 @@ const UI = (() => {
     openModal(`
       <h3>New Circle</h3>
       <form id="mf" class="form-block">
+        <div class="form-field">
+          <label>Circle Picture <span class="muted-text small">(optional)</span></label>
+          <div class="circle-cover-upload" id="circle-cover-upload-area">
+            <div class="circle-cover-preview" id="circle-cover-preview">
+              <span class="circle-cover-placeholder">📷</span>
+            </div>
+            <input type="file" id="circle-cover-file" accept="image/*" hidden />
+            <button type="button" class="btn btn-ghost btn-sm" id="circle-cover-pick-btn">Choose photo</button>
+          </div>
+        </div>
         <div class="form-field"><label>Name</label><input name="name" class="input" placeholder="e.g. Family, Hiking Crew…" required /></div>
         <div class="form-field"><label>Description (optional)</label><input name="description" class="input" /></div>
         <div class="form-field">
@@ -2396,12 +2472,25 @@ const UI = (() => {
       </form>
     `);
     document.querySelector('.modal-cancel-btn').addEventListener('click', closeModal);
+    // Cover image picker
+    const pickBtn   = document.getElementById('circle-cover-pick-btn');
+    const fileInput = document.getElementById('circle-cover-file');
+    const preview   = document.getElementById('circle-cover-preview');
+    pickBtn.addEventListener('click', () => fileInput.click());
+    fileInput.addEventListener('change', () => {
+      const file = fileInput.files[0];
+      if (!file) return;
+      const url = URL.createObjectURL(file);
+      preview.innerHTML = `<img src="${url}" alt="" style="width:100%;height:100%;object-fit:cover;border-radius:50%" />`;
+    });
+
     document.getElementById('mf').addEventListener('submit', async e => {
       e.preventDefault();
       const fd = new FormData(e.target);
+      const coverFile = fileInput.files[0] || null;
       Utils.showLoading();
       try {
-        await Data.createCircle(fd.get('name'), fd.get('description'), fd.get('addPolicy'));
+        await Data.createCircle(fd.get('name'), fd.get('description'), fd.get('addPolicy'), coverFile);
         closeModal(); _renderCircles(); Utils.showToast('Circle created!');
       } catch { Utils.showToast('Failed to create circle', 'error'); }
       finally   { Utils.hideLoading(); }
@@ -2470,6 +2559,16 @@ const UI = (() => {
     openModal(`
       <h3>Edit Circle</h3>
       <form id="mf" class="form-block">
+        <div class="form-field">
+          <label>Circle Picture</label>
+          <div class="circle-cover-upload">
+            <div class="circle-cover-preview" id="circle-cover-preview">
+              ${circle.coverFileId ? '' : '<span class="circle-cover-placeholder">📷</span>'}
+            </div>
+            <input type="file" id="circle-cover-file" accept="image/*" hidden />
+            <button type="button" class="btn btn-ghost btn-sm" id="circle-cover-pick-btn">Change photo</button>
+          </div>
+        </div>
         <div class="form-field"><label>Name</label><input name="name" class="input" value="${Utils.escapeHtml(circle.name)}" required /></div>
         <div class="form-field"><label>Description</label><input name="description" class="input" value="${Utils.escapeHtml(circle.description || '')}" /></div>
         <div class="form-field">
@@ -2486,11 +2585,32 @@ const UI = (() => {
       </form>
     `);
     document.querySelector('.modal-cancel-btn').addEventListener('click', closeModal);
+    // Pre-load existing cover
+    if (circle.coverFileId) {
+      const preview = document.getElementById('circle-cover-preview');
+      const img = document.createElement('img');
+      img.alt = '';
+      img.style.cssText = 'width:100%;height:100%;object-fit:cover;border-radius:50%';
+      _loadThumbnail(img, circle.coverFileId, null);
+      preview.appendChild(img);
+    }
+    const pickBtn   = document.getElementById('circle-cover-pick-btn');
+    const fileInput = document.getElementById('circle-cover-file');
+    const preview   = document.getElementById('circle-cover-preview');
+    pickBtn.addEventListener('click', () => fileInput.click());
+    fileInput.addEventListener('change', () => {
+      const file = fileInput.files[0];
+      if (!file) return;
+      preview.innerHTML = `<img src="${URL.createObjectURL(file)}" alt="" style="width:100%;height:100%;object-fit:cover;border-radius:50%" />`;
+    });
+
     document.getElementById('mf').addEventListener('submit', async e => {
       e.preventDefault();
       const fd = new FormData(e.target);
+      const coverFile = fileInput.files[0] || null;
       Utils.showLoading();
       try {
+        if (coverFile) await Data.uploadCircleCover(folderId, coverFile).catch(() => {});
         await Data.updateCircleMeta(folderId, {
           name: fd.get('name'),
           description: fd.get('description'),
@@ -2504,48 +2624,96 @@ const UI = (() => {
     });
   }
 
-  /* ── Collections ─────────────────────────────── */
+  /* ── Collections (Album Studio) ──────────────── */
+
+  const _albumTagColors = {
+    trip: '#e67e22', birthday: '#9b59b6', family: '#27ae60',
+    wedding: '#e91e63', holiday: '#1abc9c', work: '#3498db',
+    food: '#f39c12', art: '#e74c3c', music: '#8e44ad', other: '#607090'
+  };
+  const _albumTagLabels = ['Trip', 'Birthday', 'Family', 'Wedding', 'Holiday', 'Work', 'Food', 'Art', 'Music', 'Other'];
 
   async function _renderCollections() {
     const grid  = document.getElementById('collections-grid');
     const empty = document.getElementById('collections-empty');
     grid.innerHTML = '<p class="muted-text">Loading…</p>';
     empty.hidden = true;
-    _on('create-collection-btn', 'click', _openCreateCollectionModal);
+    _on('create-collection-btn',      'click', _openCreateCollectionModal);
+    _on('collections-empty-create-btn', 'click', _openCreateCollectionModal);
 
-    try {
-      const colls = await Data.listCollections();
-      grid.innerHTML = '';
-      if (!colls.length) { empty.hidden = false; return; }
-      colls.filter(c => !c.isPost).forEach(c => {
-        const card = _el(`
-          <div class="card coll-card">
-            <div class="coll-thumb coll-thumb-cover">▤</div>
-            <div class="card-body">
-              <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:.5rem">
-                <h4>${Utils.escapeHtml(c.name)}</h4>
-                <button class="btn btn-ghost btn-sm card-edit-btn" title="Edit">✎</button>
-              </div>
-              <div class="card-meta">
-                <span>${_sharingLabel(c.sharing)}</span>
-                ${c.allowCopying ? '<span>Copying ok</span>' : ''}
-              </div>
-              ${c.description ? `<p style="font-size:.78rem;color:var(--muted);margin-top:.35rem">${Utils.escapeHtml(c.description)}</p>` : ''}
-            </div>
-          </div>
-        `);
-        const thumb = card.querySelector('.coll-thumb-cover');
-        _loadCardCover(c.folderId, thumb);
-        card.querySelector('.card-edit-btn').addEventListener('click', e => {
-          e.stopPropagation();
-          _openEditCollectionModal(c.folderId, c);
-        });
-        card.addEventListener('click', () => navigate('collection-detail', { folderId: c.folderId }));
-        grid.appendChild(card);
+    // Filter pills
+    document.getElementById('collections-filter')?.querySelectorAll('.filter-pill').forEach(pill => {
+      pill.addEventListener('click', () => {
+        document.getElementById('collections-filter').querySelectorAll('.filter-pill').forEach(p => p.classList.remove('active'));
+        pill.classList.add('active');
+        _applyAlbumFilter(pill.dataset.filter);
       });
+    });
+
+    let allColls = [];
+    try {
+      allColls = await Data.listCollections();
     } catch {
       grid.innerHTML = '';
-      Utils.showToast('Failed to load collections', 'error');
+      Utils.showToast('Failed to load albums', 'error');
+      return;
+    }
+
+    grid.innerHTML = '';
+    const colls = allColls.filter(c => !c.isPost);
+    if (!colls.length) { empty.hidden = false; return; }
+
+    const me = Auth.getCurrentUser();
+    colls.forEach(c => {
+      const isOwner  = c.ownerEmail === me?.email;
+      const isCollab = !isOwner && c.contributors?.includes(me?.email);
+      const tag      = (c.tag || '').toLowerCase();
+      const tagColor = _albumTagColors[tag] || _albumTagColors.other;
+      const tagLabel = tag ? (tag[0].toUpperCase() + tag.slice(1)) : '';
+
+      const card = _el(`
+        <div class="album-card" data-owner="${isOwner}" data-collab="${isCollab}">
+          <div class="album-card-cover">
+            <div class="album-cover-stack">
+              <div class="album-stack-shadow album-stack-back"></div>
+              <div class="album-stack-shadow album-stack-mid"></div>
+              <div class="album-cover-img album-stack-front"></div>
+            </div>
+            <div class="album-card-overlay"></div>
+            ${tagLabel ? `<span class="album-tag" style="background:${tagColor}">${Utils.escapeHtml(tagLabel)}</span>` : ''}
+            ${isCollab ? `<span class="album-badge album-badge--collab">Collab</span>` : ''}
+            ${isOwner  ? `<button class="btn btn-ghost btn-sm album-card-edit" title="Edit">✎</button>` : ''}
+          </div>
+          <div class="album-card-body">
+            <div class="album-card-title">${Utils.escapeHtml(c.name)}</div>
+            <div class="album-card-meta">
+              <span class="album-sharing-pill">${_sharingLabel(c.sharing)}</span>
+              ${c.description ? `<span class="album-desc-preview">${Utils.escapeHtml(c.description)}</span>` : ''}
+            </div>
+          </div>
+        </div>
+      `);
+
+      _loadCardCover(c.folderId, card.querySelector('.album-cover-img'));
+      card.querySelector('.album-card-edit')?.addEventListener('click', e => {
+        e.stopPropagation();
+        _openEditCollectionModal(c.folderId, c);
+      });
+      card.addEventListener('click', () => navigate('collection-detail', { folderId: c.folderId }));
+      grid.appendChild(card);
+    });
+
+    function _applyAlbumFilter(filter) {
+      grid.querySelectorAll('.album-card').forEach(card => {
+        const isOwner  = card.dataset.owner === 'true';
+        const isCollab = card.dataset.collab === 'true';
+        card.hidden = !(
+          filter === 'all' ||
+          (filter === 'mine'   && isOwner) ||
+          (filter === 'collab' && isCollab) ||
+          (filter === 'shared' && !isOwner && !isCollab)
+        );
+      });
     }
   }
 
@@ -2558,41 +2726,91 @@ const UI = (() => {
     document.getElementById('collection-detail-name').textContent = '…';
     document.getElementById('collection-detail-grid').innerHTML = '<p class="muted-text">Loading…</p>';
     document.getElementById('collection-detail-actions').innerHTML = '';
+    document.getElementById('collection-detail-stats').innerHTML = '';
+    document.getElementById('collection-tag-row').innerHTML = '';
+    document.getElementById('collection-detail-desc').textContent = '';
+    document.getElementById('collection-hero-cover').innerHTML = '';
+    document.getElementById('collection-contributors-bar').hidden = true;
 
     try {
-      const coll = await Data.getCollection(folderId);
+      const [coll, files] = await Promise.all([
+        Data.getCollection(folderId),
+        Drive.listFiles(folderId)
+      ]);
+
+      const me = Auth.getCurrentUser();
+      const isOwner = coll.ownerEmail === me?.email;
+      const mediaFiles = files.filter(f => f.mimeType?.startsWith('image/') || f.mimeType?.startsWith('video/'));
+
+      // Hero cover — use first media file as full-bleed background
+      if (mediaFiles[0]) {
+        const heroCover = document.getElementById('collection-hero-cover');
+        const img = document.createElement('img');
+        img.alt = '';
+        _loadThumbnail(img, mediaFiles[0].id, mediaFiles[0].thumbnailLink);
+        heroCover.appendChild(img);
+      }
+
+      // Tag
+      const tag      = (coll.tag || '').toLowerCase();
+      const tagColor = _albumTagColors[tag] || null;
+      if (tag && tagColor) {
+        document.getElementById('collection-tag-row').innerHTML =
+          `<span class="album-tag" style="background:${tagColor}">${tag[0].toUpperCase() + tag.slice(1)}</span>`;
+      }
+
       document.getElementById('collection-detail-name').textContent = coll.name;
+      document.getElementById('collection-detail-desc').textContent = coll.description || '';
+      document.getElementById('collection-detail-stats').innerHTML =
+        `<span>${mediaFiles.length} photo${mediaFiles.length !== 1 ? 's' : ''}</span>
+         <span>${_sharingLabel(coll.sharing)}</span>
+         ${coll.allowCopying ? '<span>Copying ok</span>' : ''}`;
 
+      // Contributors bar
+      const contribs = coll.contributors || [];
+      if (contribs.length) {
+        const bar = document.getElementById('collection-contributors-bar');
+        bar.innerHTML = `<span class="contrib-label">Contributors:</span>` +
+          contribs.map(email => `<span class="contrib-pill" title="${Utils.escapeHtml(email)}">${Utils.escapeHtml(email.split('@')[0])}</span>`).join('');
+        bar.hidden = false;
+      }
+
+      // Action buttons
       const actions = document.getElementById('collection-detail-actions');
-
-      const upBtn = _el(`<button class="btn btn-primary btn-sm">Upload</button>`);
+      const upBtn = _el(`<button class="btn btn-primary btn-sm">＋ Add</button>`);
       upBtn.addEventListener('click', () => _openUploadModal(folderId));
       actions.appendChild(upBtn);
 
-      const shareBtn = _el(`<button class="btn btn-ghost btn-sm">Share</button>`);
+      const shareBtn = _el(`<button class="btn btn-ghost btn-sm album-action-btn">Share</button>`);
       shareBtn.addEventListener('click', () => _openShareModal(folderId, coll));
       actions.appendChild(shareBtn);
 
-      const inviteBtn = _el(`<button class="btn btn-ghost btn-sm">+ Collaborator</button>`);
+      const inviteBtn = _el(`<button class="btn btn-ghost btn-sm album-action-btn">+ Contributor</button>`);
       inviteBtn.addEventListener('click', () => _openInviteCollaboratorModal(folderId));
       actions.appendChild(inviteBtn);
 
-      const delBtn = _el(`<button class="btn btn-ghost btn-sm danger-btn">Delete</button>`);
-      delBtn.addEventListener('click', async () => {
-        if (!confirm(`Delete collection "${coll.name}"?`)) return;
-        await Data.deleteCollection(folderId);
-        navigate('collections');
-        Utils.showToast('Collection deleted');
-      });
-      actions.appendChild(delBtn);
+      if (isOwner) {
+        const editBtn = _el(`<button class="btn btn-ghost btn-sm album-action-btn">Edit</button>`);
+        editBtn.addEventListener('click', () => _openEditCollectionModal(folderId, coll));
+        actions.appendChild(editBtn);
 
-      const files = await Drive.listFiles(folderId);
+        const delBtn = _el(`<button class="btn btn-ghost btn-sm album-action-btn danger-btn">Delete</button>`);
+        delBtn.addEventListener('click', async () => {
+          if (!confirm(`Delete album "${coll.name}"?`)) return;
+          await Data.deleteCollection(folderId);
+          navigate('collections');
+          Utils.showToast('Album deleted');
+        });
+        actions.appendChild(delBtn);
+      }
+
+      // Media grid
       const allFiles = files.filter(f => f.mimeType !== 'application/json');
       const grid  = document.getElementById('collection-detail-grid');
       grid.innerHTML = '';
 
       if (!allFiles.length) {
-        grid.innerHTML = '<div class="empty-state"><p>No files yet. Upload something!</p></div>';
+        grid.innerHTML = '<div class="empty-state"><p>No files yet. Add something!</p></div>';
         return;
       }
 
@@ -2601,21 +2819,18 @@ const UI = (() => {
         if (isMedia(f)) {
           const el = _el(`<div class="media-item"><img src="" alt="" loading="lazy" /></div>`);
           _loadThumbnail(el.querySelector('img'), f.id, f.thumbnailLink);
-          el.addEventListener('click', () => openLightbox(f.id, folderId, { canDelete: true, thumbnailLink: f.thumbnailLink }));
+          el.addEventListener('click', () => openLightbox(f.id, folderId, { canDelete: isOwner, thumbnailLink: f.thumbnailLink }));
           grid.appendChild(el);
         } else {
-          // Non-media file card
           const wrapper = document.createElement('div');
           wrapper.className = 'drive-file-card';
           const el = _el(`
             <div class="media-item media-item--managed drive-file-non-media-item">
               <div class="drive-file-non-media"><span class="drive-file-icon">${_fileTypeIcon(f.mimeType)}</span></div>
-              <div class="media-item-actions">
-                <button class="mia-btn mia-del" title="Delete">🗑</button>
-              </div>
+              ${isOwner ? `<div class="media-item-actions"><button class="mia-btn mia-del" title="Delete">🗑</button></div>` : ''}
             </div>
           `);
-          el.querySelector('.mia-del').addEventListener('click', async e => {
+          el.querySelector('.mia-del')?.addEventListener('click', async e => {
             e.stopPropagation();
             if (!confirm(`Delete "${f.name}"?`)) return;
             try { await Drive.deleteFile(f.id); _renderCollectionDetail(folderId); Utils.showToast('Deleted'); }
@@ -2628,32 +2843,42 @@ const UI = (() => {
         }
       });
     } catch (err) {
-      Utils.showToast('Failed to load collection', 'error');
+      Utils.showToast('Failed to load album', 'error');
       console.error(err);
     }
   }
 
   function _openCreateCollectionModal() {
+    const tagOptions = _albumTagLabels.map(t =>
+      `<option value="${t.toLowerCase()}">${t}</option>`
+    ).join('');
     openModal(`
-      <h3>New Collection</h3>
+      <h3>New Album</h3>
       <form id="mf" class="form-block">
-        <div class="form-field"><label>Name</label><input name="name" class="input" placeholder="e.g. Summer 2025…" required /></div>
-        <div class="form-field"><label>Description (optional)</label><input name="description" class="input" /></div>
+        <div class="form-field"><label>Album Name</label><input name="name" class="input" placeholder="e.g. Summer Road Trip 2025…" required /></div>
+        <div class="form-field"><label>Description (optional)</label><input name="description" class="input" placeholder="A few words about this album…" /></div>
         <div class="form-field">
-          <label>Share with</label>
+          <label>Occasion / Tag <span class="muted-text small">(optional)</span></label>
+          <select name="tag" class="select-sm" style="width:100%">
+            <option value="">None</option>
+            ${tagOptions}
+          </select>
+        </div>
+        <div class="form-field">
+          <label>Visible to</label>
           <select name="sharing" class="select-sm" style="width:100%">
-            <option value="friends">Friends</option>
+            <option value="friends">Friends only</option>
             <option value="circles">My circles</option>
             <option value="everyone">Anyone with link</option>
             <option value="select">Specific people</option>
           </select>
         </div>
         <label style="display:flex;align-items:center;gap:.5rem;font-size:.875rem;cursor:pointer">
-          <input type="checkbox" name="allowCopying" checked /> Allow others to copy files
+          <input type="checkbox" name="allowCopying" checked /> Allow contributors to copy files
         </label>
         <div class="modal-actions">
           <button type="button" class="btn btn-ghost btn-sm modal-cancel-btn">Cancel</button>
-          <button type="submit" class="btn btn-primary btn-sm">Create</button>
+          <button type="submit" class="btn btn-primary btn-sm">Create Album</button>
         </div>
       </form>
     `);
@@ -2664,10 +2889,14 @@ const UI = (() => {
       Utils.showLoading();
       try {
         const coll = await Data.createCollection(fd.get('name'), fd.get('description'), fd.get('sharing'), !!fd.get('allowCopying'));
+        // Store tag in metadata
+        if (fd.get('tag')) {
+          await Data.updateCollectionMeta(coll.folderId, { tag: fd.get('tag') }).catch(() => {});
+        }
         closeModal();
         navigate('collection-detail', { folderId: coll.folderId });
-        Utils.showToast('Collection created!');
-      } catch { Utils.showToast('Failed to create collection', 'error'); }
+        Utils.showToast('Album created!');
+      } catch { Utils.showToast('Failed to create album', 'error'); }
       finally   { Utils.hideLoading(); }
     });
   }
@@ -2789,9 +3018,12 @@ const UI = (() => {
     _on('add-friend-name',  'keydown', e => { if (e.key === 'Enter') _addFriend(); });
 
     try {
-      const [friends, blocked] = await Promise.all([Data.getFriends(), Data.getBlocked()]);
+      const [friends, blocked, hiddenUsers] = await Promise.all([
+        Data.getFriends(), Data.getBlocked(), Data.getHiddenUsers().catch(() => [])
+      ]);
       document.getElementById('friends-count').textContent = friends.length;
       _renderFriendsList(friends);
+      _renderHiddenUsersList(hiddenUsers);
       _renderBlockedList(blocked);
     } catch { Utils.showToast('Failed to load friends', 'error'); }
   }
@@ -2887,6 +3119,31 @@ const UI = (() => {
       const list = document.getElementById('fp-list');
       if (list) list.innerHTML = '<p class="muted-text">Could not load posts.</p>';
     }
+  }
+
+  function _renderHiddenUsersList(hiddenUsers) {
+    const list  = document.getElementById('hidden-users-list');
+    const empty = document.getElementById('hidden-users-empty');
+    if (!list) return;
+    list.innerHTML = '';
+    empty.hidden = !!hiddenUsers.length;
+    hiddenUsers.forEach(u => {
+      const row = _el(`
+        <div class="person-row">
+          <div class="avatar-sm">👁</div>
+          <div class="person-info"><div class="person-name">${Utils.escapeHtml(u.email)}</div></div>
+          <div class="person-actions">
+            <button class="btn btn-ghost btn-sm">Unhide</button>
+          </div>
+        </div>
+      `);
+      row.querySelector('button').addEventListener('click', async () => {
+        await Data.unhideUser(u.email);
+        _hiddenUserEmails.delete(u.email);
+        _renderFriends();
+      });
+      list.appendChild(row);
+    });
   }
 
   function _renderBlockedList(blocked) {

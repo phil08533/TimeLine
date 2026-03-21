@@ -1366,24 +1366,42 @@ textarea.input { resize: vertical; min-height: 80px; }
   cursor: pointer;
   flex-shrink: 0;
 }
-.story-avatar {
-  width: 56px; height: 56px;
+/* Story ring wrapper — provides the gradient halo */
+.story-ring {
+  width: 64px; height: 64px;
   border-radius: 50%;
+  padding: 3px;
+  background: linear-gradient(135deg, #f09433 0%, #e6683c 25%, #dc2743 50%, #cc2366 75%, #bc1888 100%);
+  display: flex; align-items: center; justify-content: center;
+  transition: transform .15s;
+  flex-shrink: 0;
+}
+.story-ring--viewed {
   background: var(--border);
+}
+.story-ring--add {
+  background: none;
+  border: 2.5px dashed var(--border);
+  padding: 0;
+}
+.story-circle:hover .story-ring { transform: scale(1.07); }
+.story-avatar {
+  width: 100%; height: 100%;
+  border-radius: 50%;
+  background: var(--surface);
   display: flex; align-items: center; justify-content: center;
   font-size: 1.1rem; font-weight: 700;
   overflow: hidden;
-  border: 2.5px solid var(--accent);
-  transition: transform .15s;
+  border: 2.5px solid var(--surface);
 }
-.story-circle:hover .story-avatar { transform: scale(1.07); }
 .story-avatar--add {
-  border-style: dashed;
-  border-color: var(--border);
+  border: none;
+  background: var(--border);
   font-size: 1.5rem;
   color: var(--muted);
+  width: 60px; height: 60px;
 }
-.story-avatar--viewed { border-color: var(--border); }
+.story-avatar--viewed { border-color: var(--surface); }
 .story-avatar-img { width: 100%; height: 100%; object-fit: cover; display: block; }
 .story-avatar-initials { font-size: .9rem; font-weight: 700; }
 .story-label {
@@ -1695,3 +1713,295 @@ textarea.input { resize: vertical; min-height: 80px; }
   /* ── Section blocks ── */
   .section-block { margin-top: 1.5rem; padding-top: 1.1rem; }
 }
+
+/* ════════════════════════════════════════════════
+   NEW FEATURES
+   ════════════════════════════════════════════════ */
+
+/* ── VoidScroll topbar link ── */
+.voidscroll-link {
+  display: flex; align-items: center; justify-content: center;
+  width: 34px; height: 34px;
+  border-radius: 50%;
+  text-decoration: none;
+  color: var(--muted);
+  font-weight: 700;
+  transition: color .15s, background .15s;
+}
+.voidscroll-link:hover { color: var(--text); background: var(--border); }
+.voidscroll-icon { font-size: 1.3rem; line-height: 1; }
+
+/* ── Post carousel ── */
+.post-carousel {
+  position: relative;
+  overflow: hidden;
+  background: var(--bg);
+  border-radius: var(--card-radius) var(--card-radius) 0 0;
+  aspect-ratio: 4/3;
+  max-height: 480px;
+}
+.post-carousel-track {
+  display: flex;
+  width: 100%;
+  height: 100%;
+  transition: transform .3s ease;
+}
+.post-carousel-slide {
+  flex: 0 0 100%;
+  height: 100%;
+  position: relative;
+  overflow: hidden;
+}
+.post-carousel-slide img,
+.post-carousel-slide video {
+  width: 100%; height: 100%;
+  object-fit: cover;
+  display: block;
+}
+.post-carousel-arrow {
+  position: absolute;
+  top: 50%; transform: translateY(-50%);
+  width: 36px; height: 36px;
+  border-radius: 50%;
+  background: rgba(0,0,0,.45);
+  color: #fff;
+  border: none;
+  font-size: 1.4rem;
+  display: flex; align-items: center; justify-content: center;
+  cursor: pointer;
+  z-index: 5;
+  transition: background .15s;
+  line-height: 1;
+}
+.post-carousel-arrow:hover { background: rgba(0,0,0,.7); }
+.post-carousel-arrow--prev { left: .5rem; }
+.post-carousel-arrow--next { right: .5rem; }
+.post-carousel-counter {
+  position: absolute;
+  top: .5rem; right: .6rem;
+  background: rgba(0,0,0,.5);
+  color: #fff;
+  font-size: .72rem;
+  font-weight: 600;
+  padding: .15rem .45rem;
+  border-radius: 999px;
+  z-index: 5;
+}
+.post-carousel-dots {
+  position: absolute;
+  bottom: .55rem; left: 0; right: 0;
+  display: flex; justify-content: center; gap: 5px;
+  z-index: 5;
+}
+.post-carousel-dot {
+  width: 6px; height: 6px; border-radius: 50%;
+  background: rgba(255,255,255,.5);
+  transition: background .2s, transform .2s;
+}
+.post-carousel-dot.active { background: #fff; transform: scale(1.3); }
+
+/* ── Circle cover upload ── */
+.circle-cover-upload {
+  display: flex; align-items: center; gap: 1rem;
+}
+.circle-cover-preview {
+  width: 72px; height: 72px;
+  border-radius: 50%;
+  background: var(--border);
+  display: flex; align-items: center; justify-content: center;
+  overflow: hidden;
+  flex-shrink: 0;
+  font-size: 1.5rem;
+}
+.circle-cover-placeholder { font-size: 1.5rem; }
+
+/* ── Albums grid (collections redesign) ── */
+.albums-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+  gap: 1.25rem;
+  margin-top: .5rem;
+}
+.album-card {
+  cursor: pointer;
+  border-radius: var(--card-radius);
+  overflow: hidden;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  box-shadow: var(--shadow);
+  transition: transform .15s, box-shadow .15s;
+}
+.album-card:hover { transform: translateY(-2px); box-shadow: 0 6px 20px rgba(0,0,0,.1); }
+.album-card-cover {
+  position: relative;
+  aspect-ratio: 4/3;
+  background: var(--bg);
+  overflow: visible;
+  padding-top: 8px;
+}
+/* Polaroid stack effect */
+.album-cover-stack {
+  position: relative;
+  width: 100%; height: 100%;
+}
+.album-stack-shadow {
+  position: absolute;
+  inset: 0;
+  border-radius: 4px;
+  background: var(--border);
+}
+.album-stack-back {
+  transform: rotate(-4deg) translateY(4px);
+  z-index: 1;
+}
+.album-stack-mid {
+  transform: rotate(2deg) translateY(2px);
+  z-index: 2;
+}
+.album-cover-img {
+  position: absolute;
+  inset: 0;
+  z-index: 3;
+  border-radius: 4px;
+  overflow: hidden;
+  background: var(--border);
+}
+.album-cover-img img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.album-card-overlay {
+  position: absolute;
+  inset: 0; z-index: 4;
+  background: linear-gradient(to bottom, transparent 50%, rgba(0,0,0,.3));
+  border-radius: 4px;
+}
+.album-tag {
+  position: absolute;
+  top: .55rem; left: .55rem;
+  z-index: 10;
+  color: #fff;
+  font-size: .68rem;
+  font-weight: 600;
+  padding: .18rem .55rem;
+  border-radius: 999px;
+  letter-spacing: .04em;
+  text-transform: uppercase;
+}
+.album-badge {
+  position: absolute;
+  bottom: .55rem; left: .55rem;
+  z-index: 10;
+  font-size: .7rem; font-weight: 600;
+  padding: .18rem .5rem;
+  border-radius: 999px;
+  background: rgba(0,0,0,.55); color: #fff;
+}
+.album-card-edit {
+  position: absolute;
+  top: .4rem; right: .4rem;
+  z-index: 10;
+  opacity: 0;
+  transition: opacity .15s;
+  background: rgba(0,0,0,.45) !important;
+  color: #fff !important;
+  border-color: transparent !important;
+}
+.album-card:hover .album-card-edit { opacity: 1; }
+.album-card-body { padding: .85rem 1rem; }
+.album-card-title { font-weight: 600; font-size: .95rem; margin-bottom: .3rem; }
+.album-card-meta { display: flex; gap: .4rem; flex-wrap: wrap; align-items: center; }
+.album-sharing-pill {
+  font-size: .7rem;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  color: var(--muted);
+  padding: .1rem .4rem;
+  border-radius: 99px;
+}
+.album-desc-preview {
+  font-size: .75rem;
+  color: var(--muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 160px;
+}
+
+/* ── Album detail hero ── */
+.album-hero {
+  position: relative;
+  min-height: 220px;
+  background: var(--surface);
+  border-radius: 0 0 var(--card-radius) var(--card-radius);
+  overflow: hidden;
+  margin-bottom: 1.5rem;
+}
+.album-hero-cover {
+  position: absolute; inset: 0;
+}
+.album-hero-cover img {
+  width: 100%; height: 100%; object-fit: cover; display: block;
+}
+.album-hero-overlay {
+  position: absolute; inset: 0;
+  background: linear-gradient(to bottom, rgba(0,0,0,.15), rgba(0,0,0,.65));
+}
+.album-hero-content {
+  position: relative; z-index: 2;
+  padding: 1rem 1.25rem 1.5rem;
+  display: flex; flex-direction: column; gap: .75rem;
+  min-height: 220px;
+  justify-content: space-between;
+}
+.album-back-btn { align-self: flex-start; background: rgba(255,255,255,.15) !important; color: #fff !important; border-color: rgba(255,255,255,.3) !important; }
+.album-hero-info { color: #fff; }
+.album-tag-row { margin-bottom: .4rem; }
+.album-hero-info h2 { font-size: 1.6rem; font-weight: 700; margin-bottom: .3rem; }
+.album-desc { color: rgba(255,255,255,.8) !important; }
+.album-stats {
+  display: flex; gap: 1rem; flex-wrap: wrap;
+  font-size: .82rem; color: rgba(255,255,255,.8);
+  margin-top: .5rem;
+}
+.album-actions {
+  display: flex; gap: .5rem; flex-wrap: wrap;
+}
+.album-action-btn { background: rgba(255,255,255,.15) !important; color: #fff !important; border-color: rgba(255,255,255,.3) !important; }
+.album-action-btn:hover { background: rgba(255,255,255,.3) !important; }
+.album-action-btn.danger-btn { color: #ff8888 !important; }
+
+/* ── Contributors bar ── */
+.contributors-bar {
+  display: flex; align-items: center; gap: .5rem; flex-wrap: wrap;
+  padding: .6rem 1rem;
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
+  font-size: .8rem;
+  margin-bottom: 1rem;
+}
+.contrib-label { color: var(--muted); }
+.contrib-pill {
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: .15rem .55rem;
+  font-size: .75rem;
+  color: var(--text);
+}
+
+/* ── Collection media grid ── */
+.collection-media-grid {
+  padding: 0 .25rem;
+}
+
+/* ── Page subhead ── */
+.page-subhead { margin-top: .15rem; }
+
+/* ── Profile header with actions ── */
+#page-profile .page-header .page-header-actions {
+  display: flex; gap: .4rem; flex-wrap: wrap; align-items: center;
+}
+
+/* ── Hidden users section ── */
+#hidden-users-list .person-row .avatar-sm { background: var(--bg); color: var(--muted); }
+
+/* ── Topbar right spacing for VoidScroll ── */
+.topbar-right { gap: .3rem; }

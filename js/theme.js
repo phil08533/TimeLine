@@ -7,18 +7,18 @@ const Theme = (() => {
   const COLORS  = ['paper', 'midnight', 'forest', 'coral', 'slate'];
   const COLOR_NAMES = { paper: 'Paper', midnight: 'Midnight', forest: 'Forest', coral: 'Coral', slate: 'Slate' };
 
-  let _visual = 'minimal';
-  let _color  = 'paper';
+  let _visual = 'soft';
+  let _color  = 'slate';
 
   function apply(visual, color) {
-    _visual = VISUAL.includes(visual) ? visual : 'minimal';
-    _color  = COLORS.includes(color)  ? color  : 'paper';
+    _visual = VISUAL.includes(visual) ? visual : 'soft';
+    _color  = COLORS.includes(color)  ? color  : 'slate';
     document.documentElement.setAttribute('data-theme', _visual);
     document.documentElement.setAttribute('data-color', _color);
   }
 
   function init(settings = {}) {
-    apply(settings.theme || 'minimal', settings.colorTheme || 'paper');
+    apply(settings.theme || 'soft', settings.colorTheme || 'slate');
   }
 
   function setVisual(v) {
