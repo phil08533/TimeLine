@@ -1,16 +1,32 @@
 {
   "name": "My Circle",
   "short_name": "My Circle",
-  "description": "Private photo & file sharing via your Google Drive.",
+  "description": "Private photo & file sharing. Everything lives in your Google Drive — no servers, no ads, no middleman.",
   "start_url": "./",
   "display": "standalone",
-  "background_color": "#f8f8f5",
-  "theme_color": "#f8f8f5",
+  "orientation": "portrait-primary",
+  "background_color": "#e2eef5",
+  "theme_color": "#e2eef5",
+  "categories": ["social", "photo"],
   "icons": [
     {
-      "src": "data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>◎</text></svg>",
+      "src": "data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 512 512'><rect width='512' height='512' rx='100' fill='%23e2eef5'/><text y='.82em' x='48' font-size='400'>◎</text></svg>",
       "type": "image/svg+xml",
-      "sizes": "any"
+      "sizes": "any",
+      "purpose": "any maskable"
+    }
+  ],
+  "screenshots": [],
+  "shortcuts": [
+    {
+      "name": "Feed",
+      "url": "./#feed",
+      "description": "Go to your feed"
+    },
+    {
+      "name": "Create Post",
+      "url": "./#feed",
+      "description": "Share a new post"
     }
   ]
 }
