@@ -323,8 +323,14 @@ const UI = (() => {
 
     document.querySelectorAll('.page').forEach(p => { p.style.display = 'none'; });
     _currentPage = page;
-    // Clear VoidScroll active state when leaving that page
-    if (page !== 'voidscroll') document.getElementById('voidscroll-btn')?.classList.remove('active');
+    // Show/hide VoidScroll iframe and button state
+    const vsFrame = document.getElementById('voidscroll-frame');
+    if (page === 'voidscroll') {
+      vsFrame?.classList.remove('voidscroll-frame--hidden');
+    } else {
+      vsFrame?.classList.add('voidscroll-frame--hidden');
+      document.getElementById('voidscroll-btn')?.classList.remove('active');
+    }
 
     switch (page) {
       case 'feed':
@@ -3978,17 +3984,15 @@ const UI = (() => {
     // Mark button active
     document.getElementById('voidscroll-btn')?.classList.add('active');
 
-    // Lazy-load the iframe (set src once to avoid reloading on re-visit)
+    // Show iframe (was hidden by _navigate when on other pages)
     const frame = document.getElementById('voidscroll-frame');
-    if (frame && frame.src === 'about:blank') {
-      frame.src = 'https://voidscroll.org';
+    if (frame) {
+      frame.classList.remove('voidscroll-frame--hidden');
+      // Lazy-load the iframe src (only set once to preserve scroll position)
+      if (!frame.src || frame.src === 'about:blank' || frame.src === window.location.href) {
+        frame.src = 'https://voidscroll.org';
+      }
     }
-
-    // Back button clears active state
-    const page = document.getElementById('page-voidscroll');
-    page?.querySelector('a[href="#feed"]')?.addEventListener('click', () => {
-      document.getElementById('voidscroll-btn')?.classList.remove('active');
-    });
   }
 
   /* ── Lightbox ─────────────────────────────────── */

@@ -1969,25 +1969,33 @@ textarea.input { resize: vertical; min-height: 80px; }
 
 /* ── VoidScroll embedded page ── */
 .page-voidscroll {
-  display: flex; flex-direction: column;
-  height: calc(100vh - 48px); /* fill below topbar */
-  padding: 0; overflow: hidden;
+  padding: 0 !important; overflow: hidden;
+  /* height fills viewport below the topbar (~52px) and below the mini page header (~45px) */
 }
 .voidscroll-page-header {
   display: flex; align-items: center; justify-content: space-between;
   padding: .5rem .75rem;
   border-bottom: 1px solid var(--border);
   background: var(--surface);
-  flex-shrink: 0;
+  height: 45px; box-sizing: border-box;
 }
 .voidscroll-page-title {
   display: flex; align-items: center; gap: .4rem;
   font-weight: 600; font-size: .95rem;
 }
+/* Iframe fills the remaining viewport. Use absolute positioning so it's
+   independent of the parent's display type (_showPage forces display:block). */
 .voidscroll-frame {
-  flex: 1; width: 100%; border: none;
+  position: fixed;
+  top: calc(52px + 45px); /* topbar + page header */
+  left: 0; right: 0;
+  bottom: env(safe-area-inset-bottom, 0px);
+  width: 100%; border: none;
   display: block;
+  z-index: 1;
 }
+/* Iframe visibility controlled by JS via .voidscroll-frame--hidden */
+.voidscroll-frame--hidden { display: none !important; }
 
 /* ── Post carousel ── */
 .post-carousel {
