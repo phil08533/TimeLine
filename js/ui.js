@@ -1765,125 +1765,203 @@ const UI = (() => {
 
   /* ── Circles ─────────────────────────────────── */
 
+  // Generate a stable pastel background color from a string
+  function _circleColor(name) {
+    let h = 0;
+    for (let i = 0; i < name.length; i++) h = (h * 31 + name.charCodeAt(i)) & 0xffff;
+    return `hsl(${h % 360}, 38%, 68%)`;
+  }
+
   async function _renderCircles() {
     const grid  = document.getElementById('circles-grid');
     const empty = document.getElementById('circles-empty');
     grid.innerHTML = '<p class="muted-text">Loading…</p>';
     empty.hidden = true;
     _on('create-circle-btn', 'click', _openCreateCircleModal);
+    document.getElementById('circles-empty-create-btn')?.addEventListener('click', _openCreateCircleModal);
 
+    let circles;
     try {
-      const circles = await Data.listCircles();
-      grid.innerHTML = '';
-      if (!circles.length) { empty.hidden = false; return; }
-      circles.forEach(c => {
-        const user = Auth.getCurrentUser();
-        const isOwner = c.ownerEmail === user.email;
-        const card = _el(`
-          <div class="card coll-card">
-            <div class="coll-thumb coll-thumb-cover">◎</div>
-            <div class="card-body">
-              <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:.5rem">
-                <h4>${Utils.escapeHtml(c.name)}</h4>
-                ${isOwner ? `<button class="btn btn-ghost btn-sm card-edit-btn" title="Edit">✎</button>` : ''}
-              </div>
-              <div class="card-meta">
-                <span>${c.members?.length || 0} member${c.members?.length !== 1 ? 's' : ''}</span>
-                <span>${c.addPolicy === 'any_member' ? 'Open' : 'Managed'}</span>
-              </div>
-              ${c.description ? `<p style="font-size:.78rem;color:var(--muted);margin-top:.35rem">${Utils.escapeHtml(c.description)}</p>` : ''}
-            </div>
-          </div>
-        `);
-        const thumb = card.querySelector('.coll-thumb-cover');
-        _loadCardCover(c.folderId, thumb);
-        if (isOwner) {
-          card.querySelector('.card-edit-btn').addEventListener('click', e => {
-            e.stopPropagation();
-            _openEditCircleModal(c.folderId, c);
-          });
-        }
-        card.addEventListener('click', () => navigate('circle-detail', { folderId: c.folderId }));
-        grid.appendChild(card);
-      });
+      circles = await Data.listCircles();
     } catch {
       grid.innerHTML = '';
       Utils.showToast('Failed to load circles', 'error');
+      return;
     }
+
+    const user = Auth.getCurrentUser();
+    let mutedIds = [];
+    try { mutedIds = await Data.getMutedCircles(); } catch { /* ignore */ }
+
+    function _buildCard(c) {
+      const isOwner = c.ownerEmail === user.email;
+      const isMuted = mutedIds.includes(c.folderId);
+      const memberCount = c.members?.length || 0;
+      const color = _circleColor(c.name);
+
+      // up to 5 mini avatar initials
+      const avatarHtml = (c.members || []).slice(0, 5).map(m => {
+        const initials = (m.displayName || m.email || '?')[0].toUpperCase();
+        return `<span class="mini-avatar" title="${Utils.escapeHtml(m.displayName || m.email)}">${initials}</span>`;
+      }).join('');
+      const extraCount = memberCount > 5 ? `<span class="mini-avatar" style="background:var(--border)">+${memberCount - 5}</span>` : '';
+
+      const card = _el(`
+        <div class="circle-card" style="--circle-color:${color}" data-owner="${isOwner}" data-name="${Utils.escapeHtml(c.name.toLowerCase())}">
+          <div class="circle-card-cover">
+            <div class="circle-card-cover-overlay"></div>
+            ${isMuted ? `<span class="circle-card-mute" title="Muted">🔕</span>` : ''}
+            <span class="circle-card-badge ${isOwner ? 'circle-card-badge--owner' : ''}">${isOwner ? 'Owner' : 'Member'}</span>
+          </div>
+          <div class="circle-card-body">
+            <div class="circle-card-title">${Utils.escapeHtml(c.name)}</div>
+            ${c.description ? `<div class="circle-card-desc">${Utils.escapeHtml(c.description)}</div>` : ''}
+            <div class="circle-card-meta">
+              <div class="circle-card-avatars">${avatarHtml}${extraCount}</div>
+              <span class="circle-card-members-label">${memberCount} member${memberCount !== 1 ? 's' : ''}</span>
+              ${isOwner ? `<button class="btn btn-ghost btn-sm circle-card-edit" title="Edit circle">✎ Edit</button>` : ''}
+            </div>
+          </div>
+        </div>
+      `);
+
+      // Load cover image without wiping overlay elements
+      const coverDiv = card.querySelector('.circle-card-cover');
+      const coverImg = document.createElement('img');
+      coverImg.alt = '';
+      coverImg.style.cssText = 'position:absolute;inset:0;width:100%;height:100%;object-fit:cover';
+      coverDiv.prepend(coverImg);
+      Drive.listFiles(c.folderId).then(files => {
+        const first = files.find(f => f.mimeType?.startsWith('image/') || f.mimeType?.startsWith('video/'));
+        if (!first) { coverImg.remove(); return; }
+        _loadThumbnail(coverImg, first.id, first.thumbnailLink);
+      }).catch(() => coverImg.remove());
+
+      if (isOwner) {
+        card.querySelector('.circle-card-edit').addEventListener('click', e => {
+          e.stopPropagation();
+          _openEditCircleModal(c.folderId, c);
+        });
+      }
+      card.addEventListener('click', () => navigate('circle-detail', { folderId: c.folderId }));
+      return card;
+    }
+
+    function _applyFilters() {
+      const query  = (document.getElementById('circles-search')?.value || '').toLowerCase().trim();
+      const active = document.querySelector('#circles-filter .filter-pill.active')?.dataset.filter || 'all';
+      let visible = 0;
+      grid.querySelectorAll('.circle-card').forEach(card => {
+        const name    = card.dataset.name || '';
+        const isOwner = card.dataset.owner === 'true';
+        const matchesFilter = active === 'all' || (active === 'owner' && isOwner) || (active === 'member' && !isOwner);
+        const matchesSearch = !query || name.includes(query);
+        card.hidden = !(matchesFilter && matchesSearch);
+        if (!card.hidden) visible++;
+      });
+      empty.hidden = visible > 0 || (circles.length === 0);
+    }
+
+    grid.innerHTML = '';
+    if (!circles.length) { empty.hidden = false; return; }
+    circles.forEach(c => grid.appendChild(_buildCard(c)));
+
+    // Search
+    document.getElementById('circles-search')?.addEventListener('input', _applyFilters);
+
+    // Filter pills
+    document.querySelectorAll('#circles-filter .filter-pill').forEach(pill => {
+      pill.addEventListener('click', () => {
+        document.querySelectorAll('#circles-filter .filter-pill').forEach(p => p.classList.remove('active'));
+        pill.classList.add('active');
+        _applyFilters();
+      });
+    });
   }
 
   async function _renderCircleDetail(folderId) {
     if (!folderId) { navigate('circles'); return; }
+
+    // Reset UI
     document.getElementById('circle-detail-name').textContent = '…';
-    document.getElementById('circle-members-strip').innerHTML = '';
+    document.getElementById('circle-detail-desc').textContent = '';
+    document.getElementById('circle-hero-stats').innerHTML = '';
     document.getElementById('circle-detail-feed').innerHTML = '<p class="muted-text">Loading…</p>';
     document.getElementById('circle-detail-empty').hidden = true;
     document.getElementById('circle-detail-actions').innerHTML = '';
+    document.getElementById('circle-members-grid').innerHTML = '';
+
+    // Reset tabs to Feed
+    document.querySelectorAll('.circle-tab').forEach(t => t.classList.toggle('active', t.dataset.tab === 'feed'));
+    document.getElementById('circle-tab-feed').hidden = false;
+    document.getElementById('circle-tab-members').hidden = true;
+
+    // Wire tab switching
+    document.querySelectorAll('.circle-tab').forEach(tab => {
+      tab.onclick = () => {
+        document.querySelectorAll('.circle-tab').forEach(t => t.classList.remove('active'));
+        tab.classList.add('active');
+        document.getElementById('circle-tab-feed').hidden    = tab.dataset.tab !== 'feed';
+        document.getElementById('circle-tab-members').hidden = tab.dataset.tab !== 'members';
+      };
+    });
 
     try {
       const [circle, mutedIds] = await Promise.all([
         Data.getCircle(folderId),
-        Data.getMutedCircles()
+        Data.getMutedCircles().catch(() => [])
       ]);
-      document.getElementById('circle-detail-name').textContent = circle.name;
 
       const user    = Auth.getCurrentUser();
       const isOwner = circle.ownerEmail === user.email;
       const isMuted = mutedIds.includes(folderId);
+      const memberCount = circle.members?.length || 0;
+      const color = _circleColor(circle.name);
 
-      // Members strip
-      const strip = document.getElementById('circle-members-strip');
-      (circle.members || []).forEach(m => {
-        const canRemove = isOwner && m.email !== user.email;
-        const chip = _el(`
-          <span class="member-chip">
-            ${Utils.escapeHtml(m.displayName || m.email)}
-            ${canRemove ? `<button class="chip-remove" title="Remove member">×</button>` : ''}
-          </span>
-        `);
-        if (canRemove) {
-          chip.querySelector('.chip-remove').addEventListener('click', async e => {
-            e.stopPropagation();
-            const label = m.displayName || m.email;
-            if (!confirm(`Remove ${label} from this circle?`)) return;
-            try {
-              await Data.removeMemberFromCircle(folderId, m.email);
-              _renderCircleDetail(folderId);
-              Utils.showToast(`${label} removed`);
-            } catch { Utils.showToast('Could not remove member', 'error'); }
-          });
-        }
-        strip.appendChild(chip);
-      });
+      // Hero
+      const iconEl = document.getElementById('circle-detail-icon');
+      iconEl.textContent = circle.name[0]?.toUpperCase() || '◎';
+      iconEl.style.setProperty('--circle-color', color);
 
-      const canAdd  = isOwner || circle.addPolicy === 'any_member';
+      document.getElementById('circle-detail-name').textContent = circle.name;
+      document.getElementById('circle-detail-desc').textContent = circle.description || '';
+
+      document.getElementById('circle-hero-stats').innerHTML = `
+        <span class="circle-stat"><strong>${memberCount}</strong> member${memberCount !== 1 ? 's' : ''}</span>
+        <span class="circle-stat">${isMuted ? '🔕 Muted' : (circle.addPolicy === 'any_member' ? 'Open' : 'Managed')}</span>
+        ${isOwner ? '<span class="circle-stat">You own this</span>' : ''}
+      `;
+
+      // Actions
       const actions = document.getElementById('circle-detail-actions');
 
-      if (canAdd) {
+      const postBtn = _el(`<button class="btn btn-primary btn-sm">+ Post</button>`);
+      postBtn.addEventListener('click', () => _openCirclePostModal(folderId, circle));
+      actions.appendChild(postBtn);
+
+      if (isOwner || circle.addPolicy === 'any_member') {
         const addBtn = _el(`<button class="btn btn-ghost btn-sm">+ Member</button>`);
         addBtn.addEventListener('click', () => _openAddMemberModal(folderId, circle));
         actions.appendChild(addBtn);
       }
 
-      // Mute / Unmute
       const muteBtn = _el(`<button class="btn btn-ghost btn-sm">${isMuted ? '🔔 Unmute' : '🔕 Mute'}</button>`);
       muteBtn.addEventListener('click', async () => {
         muteBtn.disabled = true;
         try {
           if (isMuted) { await Data.unmuteCircle(folderId); Utils.showToast('Circle unmuted'); }
-          else          { await Data.muteCircle(folderId);   Utils.showToast('Circle muted — posts won\'t appear in your feed'); }
+          else         { await Data.muteCircle(folderId);   Utils.showToast('Circle muted'); }
           _renderCircleDetail(folderId);
         } catch { muteBtn.disabled = false; }
       });
       actions.appendChild(muteBtn);
 
-      // Post button
-      const postBtn = _el(`<button class="btn btn-primary btn-sm">+ Post</button>`);
-      postBtn.addEventListener('click', () => _openCirclePostModal(folderId, circle));
-      actions.appendChild(postBtn);
-
       if (isOwner) {
-        const delBtn = _el(`<button class="btn btn-ghost btn-sm danger-btn">Delete Circle</button>`);
+        const editBtn = _el(`<button class="btn btn-ghost btn-sm">✎ Edit</button>`);
+        editBtn.addEventListener('click', () => _openEditCircleModal(folderId, circle));
+        actions.appendChild(editBtn);
+
+        const delBtn = _el(`<button class="btn btn-ghost btn-sm danger-btn">Delete</button>`);
         delBtn.addEventListener('click', async () => {
           if (!confirm(`Delete circle "${circle.name}"? This cannot be undone.`)) return;
           await Data.deleteCircle(folderId);
@@ -1893,7 +1971,10 @@ const UI = (() => {
         actions.appendChild(delBtn);
       }
 
-      // Load posts (mini-feed)
+      // ── Members tab ──
+      _renderCircleMembersGrid(folderId, circle, isOwner, user);
+
+      // ── Feed tab ──
       const posts  = await Data.listCirclePosts(folderId);
       const feedEl = document.getElementById('circle-detail-feed');
       feedEl.innerHTML = '';
@@ -1918,7 +1999,7 @@ const UI = (() => {
         ).join('');
 
         const card = _el(`
-          <div class="feed-album-card${!mediaFiles.length && !post.caption ? '' : ''}">
+          <div class="feed-album-card">
             ${coverHtml}
             <div class="feed-album-meta">
               <div class="feed-album-byline">
@@ -1937,7 +2018,6 @@ const UI = (() => {
           _loadThumbnail(card.querySelector('img'), mediaFiles[0].id, mediaFiles[0].thumbnailLink);
         }
 
-        // Delete post
         if (canDelete) {
           card.querySelector('.circle-del-post')?.addEventListener('click', async e => {
             e.stopPropagation();
@@ -1950,27 +2030,19 @@ const UI = (() => {
           });
         }
 
-        // Expand grid for multi-photo posts
         const expandGrid = document.createElement('div');
         expandGrid.className = 'feed-album-grid';
         expandGrid.hidden = true;
         let expanded = false;
 
-        if (mediaFiles.length === 1) {
-          const coverEl = card.querySelector('.feed-album-cover');
-          if (coverEl) {
-            coverEl.style.cursor = 'pointer';
-            coverEl.addEventListener('click', e => {
-              e.stopPropagation();
+        const setupCoverClick = coverEl => {
+          if (!coverEl) return;
+          coverEl.style.cursor = 'pointer';
+          coverEl.addEventListener('click', e => {
+            e.stopPropagation();
+            if (mediaFiles.length === 1) {
               openLightbox(mediaFiles[0].id, post.postFolderId, { canDelete, thumbnailLink: mediaFiles[0].thumbnailLink });
-            });
-          }
-        } else if (mediaFiles.length > 1) {
-          const coverEl = card.querySelector('.feed-album-cover');
-          if (coverEl) {
-            coverEl.style.cursor = 'pointer';
-            coverEl.addEventListener('click', e => {
-              e.stopPropagation();
+            } else {
               expanded = !expanded;
               expandGrid.hidden = !expanded;
               if (expanded && !expandGrid.dataset.loaded) {
@@ -1985,9 +2057,10 @@ const UI = (() => {
                   expandGrid.appendChild(thumb);
                 });
               }
-            });
-          }
-        }
+            }
+          });
+        };
+        setupCoverClick(card.querySelector('.feed-album-cover'));
 
         const wrapper = document.createElement('div');
         wrapper.className = 'feed-album-wrapper';
@@ -2000,6 +2073,46 @@ const UI = (() => {
       Utils.showToast('Failed to load circle', 'error');
       console.error(err);
     }
+  }
+
+  function _renderCircleMembersGrid(folderId, circle, isOwner, user) {
+    const grid = document.getElementById('circle-members-grid');
+    grid.innerHTML = '';
+    const members = circle.members || [];
+    if (!members.length) {
+      grid.innerHTML = '<p class="muted-text">No members yet.</p>';
+      return;
+    }
+    members.forEach(m => {
+      const isMe     = m.email === user.email;
+      const isMOwner = m.email === circle.ownerEmail;
+      const initials = (m.displayName || m.email || '?')[0].toUpperCase();
+      const card = _el(`
+        <div class="circle-member-card">
+          <div class="circle-member-avatar" style="background:${_circleColor(m.email)}">${initials}</div>
+          <div class="circle-member-info">
+            <div class="circle-member-name">${Utils.escapeHtml(m.displayName || m.email)}</div>
+            <div class="circle-member-email">${Utils.escapeHtml(m.email)}</div>
+          </div>
+          <span class="circle-member-role ${isMOwner ? 'circle-member-role--owner' : ''}">${isMOwner ? 'Owner' : 'Member'}</span>
+        </div>
+      `);
+      if (isOwner && !isMe) {
+        const removeBtn = _el(`<button class="btn btn-ghost btn-sm" style="margin-left:.35rem;font-size:.75rem;padding:.2rem .5rem;color:var(--muted)">✕</button>`);
+        removeBtn.title = `Remove ${m.displayName || m.email}`;
+        removeBtn.addEventListener('click', async () => {
+          const label = m.displayName || m.email;
+          if (!confirm(`Remove ${label} from this circle?`)) return;
+          try {
+            await Data.removeMemberFromCircle(folderId, m.email);
+            _renderCircleDetail(folderId);
+            Utils.showToast(`${label} removed`);
+          } catch { Utils.showToast('Could not remove member', 'error'); }
+        });
+        card.appendChild(removeBtn);
+      }
+      grid.appendChild(card);
+    });
   }
 
   function _openCirclePostModal(circleFolderId, circle) {
@@ -2114,12 +2227,34 @@ const UI = (() => {
     });
   }
 
-  function _openAddMemberModal(folderId, circle) {
+  async function _openAddMemberModal(folderId, circle) {
+    // Pre-load friends to offer as suggestions (non-blocking)
+    let friends = [];
+    try { friends = (await Data.getFriends()) || []; } catch { /* ignore */ }
+
+    // Exclude already-in-circle emails
+    const existingEmails = new Set((circle.members || []).map(m => m.email));
+    const suggestions = friends.filter(f => !existingEmails.has(f.email) && f.status !== 'pending_sent');
+
+    const suggestHtml = suggestions.length ? `
+      <div class="form-field">
+        <label>Suggest from friends</label>
+        <div class="add-member-suggestions">
+          ${suggestions.map(f => `
+            <button type="button" class="member-suggest-pill" data-email="${Utils.escapeHtml(f.email)}" data-name="${Utils.escapeHtml(f.displayName || '')}">
+              ${Utils.escapeHtml(f.displayName || f.email)}
+            </button>
+          `).join('')}
+        </div>
+      </div>
+    ` : '';
+
     openModal(`
       <h3>Add Member to ${Utils.escapeHtml(circle.name)}</h3>
       <form id="mf" class="form-block">
-        <div class="form-field"><label>Email</label><input name="email" type="email" class="input" required /></div>
-        <div class="form-field"><label>Display name (optional)</label><input name="displayName" class="input" /></div>
+        ${suggestHtml}
+        <div class="form-field"><label>Email</label><input name="email" type="email" class="input" required placeholder="someone@example.com" /></div>
+        <div class="form-field"><label>Display name <span class="muted-text small">(optional)</span></label><input name="displayName" class="input" /></div>
         <div class="modal-actions">
           <button type="button" class="btn btn-ghost btn-sm modal-cancel-btn">Cancel</button>
           <button type="submit" class="btn btn-primary btn-sm">Add</button>
@@ -2127,6 +2262,17 @@ const UI = (() => {
       </form>
     `);
     document.querySelector('.modal-cancel-btn').addEventListener('click', closeModal);
+
+    // Wire suggestion pills
+    document.querySelectorAll('.member-suggest-pill').forEach(pill => {
+      pill.addEventListener('click', () => {
+        document.querySelector('#mf [name="email"]').value    = pill.dataset.email;
+        document.querySelector('#mf [name="displayName"]').value = pill.dataset.name;
+        document.querySelectorAll('.member-suggest-pill').forEach(p => p.classList.remove('active'));
+        pill.classList.add('active');
+      });
+    });
+
     document.getElementById('mf').addEventListener('submit', async e => {
       e.preventDefault();
       const fd = new FormData(e.target);

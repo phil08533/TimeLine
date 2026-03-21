@@ -161,23 +161,51 @@
           <h2>My Circles</h2>
           <button class="btn btn-primary btn-sm" id="create-circle-btn">+ New Circle</button>
         </div>
-        <div id="circles-grid" class="card-grid"></div>
+        <div class="circles-toolbar">
+          <input type="search" id="circles-search" class="input circles-search-input" placeholder="Search circles…" autocomplete="off" />
+          <div class="filter-pills" id="circles-filter">
+            <button class="filter-pill active" data-filter="all">All</button>
+            <button class="filter-pill" data-filter="owner">Owned</button>
+            <button class="filter-pill" data-filter="member">Member</button>
+          </div>
+        </div>
+        <div id="circles-grid" class="circles-grid"></div>
         <div id="circles-empty" class="empty-state" hidden>
-          <p>No circles yet. Create one and invite friends to share together.</p>
+          <div class="empty-icon">◎</div>
+          <p>No circles yet.</p>
+          <p class="muted-text">Create one and invite friends to share together.</p>
+          <button class="btn btn-primary btn-sm" id="circles-empty-create-btn" style="margin-top:.75rem">+ New Circle</button>
         </div>
       </section>
 
       <!-- CIRCLE DETAIL -->
       <section id="page-circle-detail" class="page" data-page="circle-detail" hidden>
-        <div class="page-header">
-          <button class="btn btn-ghost btn-sm" id="back-from-circle">← Circles</button>
-          <h2 id="circle-detail-name"></h2>
-          <div id="circle-detail-actions" class="page-header-actions"></div>
+        <div class="circle-hero" id="circle-detail-hero">
+          <div class="circle-hero-top">
+            <button class="btn btn-ghost btn-sm" id="back-from-circle">← Circles</button>
+            <div id="circle-detail-actions" class="page-header-actions"></div>
+          </div>
+          <div class="circle-hero-body">
+            <div class="circle-hero-icon" id="circle-detail-icon">◎</div>
+            <div class="circle-hero-info">
+              <h2 id="circle-detail-name"></h2>
+              <p id="circle-detail-desc" class="muted-text circle-detail-desc"></p>
+              <div id="circle-hero-stats" class="circle-hero-stats"></div>
+            </div>
+          </div>
         </div>
-        <div id="circle-members-strip" class="members-strip"></div>
-        <div id="circle-detail-feed" class="feed-list"></div>
-        <div id="circle-detail-empty" class="empty-state" hidden>
-          <p>Nothing posted here yet. Be the first to post!</p>
+        <div class="circle-tabs" id="circle-tabs">
+          <button class="circle-tab active" data-tab="feed">Feed</button>
+          <button class="circle-tab" data-tab="members">Members</button>
+        </div>
+        <div id="circle-tab-feed">
+          <div id="circle-detail-feed" class="feed-list"></div>
+          <div id="circle-detail-empty" class="empty-state" hidden>
+            <p>Nothing posted here yet. Be the first to post!</p>
+          </div>
+        </div>
+        <div id="circle-tab-members" hidden>
+          <div id="circle-members-grid" class="circle-members-grid"></div>
         </div>
       </section>
 
