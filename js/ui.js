@@ -353,7 +353,11 @@ const UI = (() => {
       case 'settings':
         _showPage('page-settings');    _renderSettings();         break;
       case 'voidscroll':
-        _showPage('page-voidscroll');  _renderVoidScroll();       break;
+        _showPage('page-voidscroll');
+        // _showPage sets display:block; override to flex for the column layout
+        document.getElementById('page-voidscroll').style.display = 'flex';
+        document.getElementById('page-voidscroll').style.flexDirection = 'column';
+        _renderVoidScroll();       break;
       case 'about':
         _showPage('page-about');                                  break;
       default:

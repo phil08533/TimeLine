@@ -1968,15 +1968,12 @@ textarea.input { resize: vertical; min-height: 80px; }
 }
 
 /* ── VoidScroll native page ── */
-/* _showPage() forces display:block inline, so we use explicit heights
-   instead of relying on flexbox from the page root. */
 .page-voidscroll {
   padding: 0 !important;
   height: calc(100vh - var(--topbar-h));
   overflow: hidden;
   box-sizing: border-box;
-  display: flex !important;       /* override _showPage's display:block */
-  flex-direction: column;
+  /* flex layout applied by JS in _navigate to avoid fighting display:none */
 }
 
 /* Category filter pills bar */
