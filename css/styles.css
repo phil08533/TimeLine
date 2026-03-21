@@ -1974,6 +1974,7 @@ textarea.input { resize: vertical; min-height: 80px; }
   background: #000;
   position: relative;
   overflow: hidden;
+  border-radius: 14px;  /* rounded card — clips the snap feed inside */
 }
 
 /* Floating category bar — glassmorphism overlay, doesn't push content */
