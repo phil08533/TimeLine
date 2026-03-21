@@ -3989,6 +3989,7 @@ const UI = (() => {
     const counter = document.getElementById('vs-counter');
     const status  = document.getElementById('vs-status');
     if (!vid || !_vsPlaylist.length) return;
+    if (_currentPage !== 'voidscroll') return; // navigated away — don't start playback
     const item = _vsPlaylist[idx];
     if (!item) return;
     if (status) { status.hidden = false; }
@@ -4122,6 +4123,8 @@ const UI = (() => {
       return;
     }
 
+    // Guard: user may have navigated away while the fetch was in flight
+    if (_currentPage !== 'voidscroll') return;
     _vsRebuildPlaylist();
     _vsLoadVideo(_vsIndex);
   }
