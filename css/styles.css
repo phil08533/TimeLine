@@ -1967,34 +1967,148 @@ textarea.input { resize: vertical; min-height: 80px; }
   to   { opacity: 0; transform: translateX(-50%) translateY(-110%); }
 }
 
-/* ── VoidScroll embedded page ── */
+/* ── VoidScroll native page ── */
+/* _showPage() forces display:block inline, so we use explicit heights
+   instead of relying on flexbox from the page root. */
 .page-voidscroll {
-  padding: 0 !important; overflow: hidden;
-  /* height fills viewport below the topbar (~52px) and below the mini page header (~45px) */
+  padding: 0 !important;
+  height: calc(100vh - var(--topbar-h));
+  overflow: hidden;
+  box-sizing: border-box;
+  display: flex !important;       /* override _showPage's display:block */
+  flex-direction: column;
 }
-.voidscroll-page-header {
+
+/* Category filter pills bar */
+.vs-cats {
+  display: flex;
+  gap: .35rem;
+  padding: .5rem .75rem;
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: none;
+  background: var(--surface);
+  border-bottom: var(--bw) solid var(--border);
+  flex-shrink: 0;
+}
+.vs-cats::-webkit-scrollbar { display: none; }
+.vs-cats .filter-pill { flex-shrink: 0; }
+
+/* Main video area */
+.vs-player {
+  flex: 1;
+  position: relative;
+  background: #000;
+  overflow: hidden;
+  min-height: 0;
+}
+.vs-video {
+  width: 100%; height: 100%;
+  display: block;
+  object-fit: contain;
+  background: #000;
+  cursor: pointer;
+}
+
+/* Loading / error states inside player */
+.vs-status {
+  position: absolute; inset: 0;
+  display: flex; flex-direction: column;
+  align-items: center; justify-content: center;
+  gap: .6rem;
+  color: rgba(255,255,255,.7);
+  font-size: .9rem;
+  pointer-events: none;
+  background: rgba(0,0,0,.4);
+}
+.vs-status[hidden] { display: none; }
+.vs-spinner {
+  width: 32px; height: 32px;
+  border: 3px solid rgba(255,255,255,.2);
+  border-top-color: #fff;
+  border-radius: 50%;
+  animation: spin .7s linear infinite;
+}
+
+/* Bottom gradient + info overlay */
+.vs-overlay {
+  position: absolute; inset: 0;
+  display: flex; flex-direction: column;
+  justify-content: flex-end;
+  pointer-events: none;
+  background: linear-gradient(
+    to bottom,
+    transparent 50%,
+    rgba(0,0,0,.65) 100%
+  );
+}
+.vs-info {
+  padding: .75rem 1rem 1rem;
+  pointer-events: auto;
+}
+.vs-title {
+  font-size: .95rem; font-weight: 600;
+  color: #fff;
+  text-shadow: 0 1px 4px rgba(0,0,0,.7);
+  margin: 0 0 .2rem;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.vs-meta {
+  font-size: .75rem;
+  color: rgba(255,255,255,.65);
+  text-transform: uppercase;
+  letter-spacing: .05em;
+}
+
+/* Side icon buttons (mute, fit) */
+.vs-side-btns {
+  position: absolute;
+  right: .75rem; bottom: 4.5rem;
+  display: flex; flex-direction: column;
+  gap: .5rem;
+  pointer-events: auto;
+}
+.vs-icon-btn {
+  width: 40px; height: 40px;
+  border-radius: 50%;
+  background: rgba(0,0,0,.45);
+  border: 1px solid rgba(255,255,255,.18);
+  color: #fff;
+  font-size: 1rem;
+  display: flex; align-items: center; justify-content: center;
+  cursor: pointer;
+  backdrop-filter: blur(6px);
+  transition: background .15s;
+}
+.vs-icon-btn:hover { background: rgba(0,0,0,.65); }
+
+/* Prev / Next / counter bar — uses app surface so it blends in */
+.vs-nav {
   display: flex; align-items: center; justify-content: space-between;
   padding: .5rem .75rem;
-  border-bottom: 1px solid var(--border);
   background: var(--surface);
-  height: 45px; box-sizing: border-box;
+  border-top: var(--bw) solid var(--border);
+  flex-shrink: 0;
+  gap: .5rem;
 }
-.voidscroll-page-title {
-  display: flex; align-items: center; gap: .4rem;
-  font-weight: 600; font-size: .95rem;
+.vs-nav-btn {
+  padding: .35rem 1rem;
+  border-radius: var(--card-radius);
+  background: var(--accent);
+  color: var(--accent-fg);
+  font-size: .8rem; font-weight: 600;
+  border: none; cursor: pointer;
+  white-space: nowrap;
 }
-/* Iframe fills the remaining viewport. Fixed positioning keeps it independent
-   of the parent's display type (_showPage forces display:block on .page). */
-.voidscroll-frame {
-  position: fixed;
-  top: calc(52px + 45px); /* topbar + page-header heights */
-  left: 0; right: 0; bottom: 0;
-  width: 100%; height: auto;
-  border: none; display: block;
-  z-index: 1;
+.vs-nav-btn:hover { opacity: .85; }
+.vs-counter {
+  font-size: .78rem; color: var(--muted);
+  flex: 1; text-align: center;
+  white-space: nowrap;
 }
-/* Iframe visibility controlled by JS via .voidscroll-frame--hidden */
-.voidscroll-frame--hidden { display: none !important; }
 
 /* ── Post carousel ── */
 .post-carousel {

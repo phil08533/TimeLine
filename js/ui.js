@@ -323,12 +323,9 @@ const UI = (() => {
 
     document.querySelectorAll('.page').forEach(p => { p.style.display = 'none'; });
     _currentPage = page;
-    // Show/hide VoidScroll iframe and button state
-    const vsFrame = document.getElementById('voidscroll-frame');
-    if (page === 'voidscroll') {
-      vsFrame?.classList.remove('voidscroll-frame--hidden');
-    } else {
-      vsFrame?.classList.add('voidscroll-frame--hidden');
+    // Pause VoidScroll video when navigating away
+    if (page !== 'voidscroll') {
+      document.getElementById('vs-video')?.pause?.();
       document.getElementById('voidscroll-btn')?.classList.remove('active');
     }
 
@@ -3952,12 +3949,185 @@ const UI = (() => {
 
   /* ── VoidScroll ─────────────────────────────────── */
 
+  const VS_CATS = [
+    'all', 'nature', 'space', 'animals', 'science', 'tech', 'history',
+    'sleep', 'environment', 'travel', 'engineering', 'vehicles', 'math',
+    'gaming', 'docs', 'diy'
+  ];
+  let _vsAllVideos  = [];   // full deduped list from JSON
+  let _vsPlaylist   = [];   // current filtered+shuffled list
+  let _vsIndex      = 0;
+  let _vsCat        = 'all';
+  let _vsReady      = false; // JSON loaded at least once
+  let _vsBuilt      = false; // DOM built
+
+  function _vsShuffle(arr) {
+    const a = [...arr];
+    for (let i = a.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [a[i], a[j]] = [a[j], a[i]];
+    }
+    return a;
+  }
+
+  function _vsRebuildPlaylist() {
+    const pool = _vsCat === 'all'
+      ? _vsAllVideos
+      : _vsAllVideos.filter(v => v.category === _vsCat);
+    _vsPlaylist = _vsShuffle(pool);
+    _vsIndex = 0;
+  }
+
+  function _vsLoadVideo(idx) {
+    const vid     = document.getElementById('vs-video');
+    const titleEl = document.getElementById('vs-title');
+    const metaEl  = document.getElementById('vs-meta');
+    const counter = document.getElementById('vs-counter');
+    const status  = document.getElementById('vs-status');
+    if (!vid || !_vsPlaylist.length) return;
+    const item = _vsPlaylist[idx];
+    if (!item) return;
+    if (status) { status.hidden = false; }
+    vid.src = item.url;
+    vid.load();
+    vid.play().catch(() => {});
+    if (titleEl) titleEl.textContent = item.title;
+    if (metaEl)  metaEl.textContent  = item.category;
+    if (counter) counter.textContent = `${idx + 1} / ${_vsPlaylist.length}`;
+  }
+
+  function _vsNext() {
+    if (!_vsPlaylist.length) return;
+    _vsIndex = (_vsIndex + 1) % _vsPlaylist.length;
+    _vsLoadVideo(_vsIndex);
+  }
+
+  function _vsPrev() {
+    if (!_vsPlaylist.length) return;
+    _vsIndex = (_vsIndex - 1 + _vsPlaylist.length) % _vsPlaylist.length;
+    _vsLoadVideo(_vsIndex);
+  }
+
+  function _vsKeyHandler(e) {
+    if (_currentPage !== 'voidscroll') return;
+    if (e.key === 'ArrowRight' || e.key === 'ArrowDown') { e.preventDefault(); _vsNext(); }
+    else if (e.key === 'ArrowLeft' || e.key === 'ArrowUp') { e.preventDefault(); _vsPrev(); }
+    else if (e.key === ' ') {
+      e.preventDefault();
+      const v = document.getElementById('vs-video');
+      if (v) { v.paused ? v.play() : v.pause(); }
+    }
+  }
+
+  function _vsBuildDOM(page) {
+    page.innerHTML = `
+      <div class="vs-cats" id="vs-cats">
+        ${VS_CATS.map(c => `<button class="filter-pill${c === _vsCat ? ' active' : ''}" data-cat="${c}">${c === 'all' ? 'All' : c[0].toUpperCase() + c.slice(1)}</button>`).join('')}
+      </div>
+      <div class="vs-player">
+        <video id="vs-video" class="vs-video" playsinline muted></video>
+        <div class="vs-overlay">
+          <div class="vs-side-btns">
+            <button class="vs-icon-btn" id="vs-mute-btn" title="Toggle mute" aria-label="Mute">🔇</button>
+            <button class="vs-icon-btn" id="vs-fit-btn"  title="Toggle fit"  aria-label="Fit">⊡</button>
+          </div>
+          <div class="vs-info">
+            <p class="vs-title" id="vs-title">Loading…</p>
+            <p class="vs-meta"  id="vs-meta"></p>
+          </div>
+        </div>
+        <div class="vs-status" id="vs-status">
+          <div class="vs-spinner"></div>
+          <span>Loading videos…</span>
+        </div>
+      </div>
+      <div class="vs-nav">
+        <button class="vs-nav-btn" id="vs-prev-btn">← Prev</button>
+        <span class="vs-counter" id="vs-counter">—</span>
+        <button class="vs-nav-btn" id="vs-next-btn">Next →</button>
+      </div>`;
+
+    const vid     = document.getElementById('vs-video');
+    const muteBtn = document.getElementById('vs-mute-btn');
+    const fitBtn  = document.getElementById('vs-fit-btn');
+
+    document.getElementById('vs-prev-btn').addEventListener('click', _vsPrev);
+    document.getElementById('vs-next-btn').addEventListener('click', _vsNext);
+
+    muteBtn.addEventListener('click', () => {
+      vid.muted = !vid.muted;
+      muteBtn.textContent = vid.muted ? '🔇' : '🔊';
+    });
+
+    fitBtn.addEventListener('click', () => {
+      const cover = vid.style.objectFit === 'cover';
+      vid.style.objectFit = cover ? 'contain' : 'cover';
+      fitBtn.textContent = cover ? '⊡' : '⊞';
+    });
+
+    document.getElementById('vs-cats').addEventListener('click', e => {
+      const btn = e.target.closest('.filter-pill');
+      if (!btn) return;
+      document.querySelectorAll('#vs-cats .filter-pill').forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+      _vsCat = btn.dataset.cat;
+      _vsRebuildPlaylist();
+      _vsLoadVideo(_vsIndex);
+    });
+
+    vid.addEventListener('click', () => { vid.paused ? vid.play() : vid.pause(); });
+    vid.addEventListener('ended', _vsNext);
+    vid.addEventListener('error', _vsNext);  // skip broken videos
+    vid.addEventListener('loadeddata', () => {
+      const st = document.getElementById('vs-status');
+      if (st) st.hidden = true;
+    });
+
+    document.addEventListener('keydown', _vsKeyHandler);
+    _vsBuilt = true;
+  }
+
+  async function _renderVoidScroll() {
+    document.getElementById('voidscroll-btn')?.classList.add('active');
+
+    const page = document.getElementById('page-voidscroll');
+    if (!page) return;
+
+    // Build DOM once
+    if (!_vsBuilt) _vsBuildDOM(page);
+
+    // If already has videos, just resume playback
+    if (_vsReady) {
+      const vid = document.getElementById('vs-video');
+      if (vid && vid.src && vid.paused) vid.play().catch(() => {});
+      return;
+    }
+
+    // Fetch JSON from the live VoidScroll repo
+    try {
+      const res = await fetch('https://voidscroll.org/videos.json');
+      if (!res.ok) throw new Error(res.status);
+      const raw = await res.json();
+      // Deduplicate by URL
+      const seen = new Set();
+      _vsAllVideos = raw.filter(v => v.url && !seen.has(v.url) && seen.add(v.url));
+      _vsReady = true;
+    } catch {
+      const st = document.getElementById('vs-status');
+      if (st) st.innerHTML = '<span style="padding:1rem;text-align:center">Could not load videos — check your connection.</span>';
+      return;
+    }
+
+    _vsRebuildPlaylist();
+    _vsLoadVideo(_vsIndex);
+  }
+
   function _openVoidScroll() {
     // 1. Pulse the ∞ button
     const btn = document.getElementById('voidscroll-btn');
     if (btn) {
       btn.classList.remove('vs-pulse');
-      void btn.offsetWidth; // reflow to restart animation
+      void btn.offsetWidth;
       btn.classList.add('vs-pulse');
       btn.classList.add('active');
       setTimeout(() => btn.classList.remove('vs-pulse'), 400);
@@ -3976,23 +4146,8 @@ const UI = (() => {
       }, 1800);
     }
 
-    // 3. Navigate to the embedded page
+    // 3. Navigate
     navigate('voidscroll');
-  }
-
-  function _renderVoidScroll() {
-    // Mark button active
-    document.getElementById('voidscroll-btn')?.classList.add('active');
-
-    // Show iframe (was hidden by _navigate when on other pages)
-    const frame = document.getElementById('voidscroll-frame');
-    if (frame) {
-      frame.classList.remove('voidscroll-frame--hidden');
-      // Lazy-load the iframe src (only set once to preserve scroll position)
-      if (!frame.src || frame.src === 'about:blank' || frame.src === window.location.href) {
-        frame.src = 'https://voidscroll.org';
-      }
-    }
   }
 
   /* ── Lightbox ─────────────────────────────────── */
