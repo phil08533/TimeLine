@@ -462,6 +462,78 @@ const UI = (() => {
     return wrap;
   }
 
+  // _buildFriendPicker — attach a Facebook-style searchable friend dropdown to an <input>.
+  // container: the DOM element that wraps the input (for relative positioning)
+  // inputEl:   the <input> that receives the typed/selected email
+  // friends:   array of {email, displayName, picture?}
+  // excludeEmails: Set or array of emails to hide
+  // onSelect(friend): called when a friend is chosen
+  function _buildFriendPicker(inputEl, friends, excludeEmails, onSelect) {
+    const excluded = new Set(excludeEmails || []);
+    const available = friends.filter(f => !excluded.has(f.email) && f.status !== 'pending_sent');
+
+    const dropdown = document.createElement('div');
+    dropdown.className = 'friend-picker-dropdown';
+    dropdown.hidden = true;
+    inputEl.parentNode.style.position = 'relative';
+    inputEl.parentNode.appendChild(dropdown);
+
+    function renderOptions(query) {
+      const q = (query || '').toLowerCase().trim();
+      const filtered = q
+        ? available.filter(f =>
+            (f.displayName || '').toLowerCase().includes(q) ||
+            f.email.toLowerCase().includes(q))
+        : available;
+
+      dropdown.innerHTML = '';
+      if (!filtered.length) {
+        dropdown.innerHTML = `<div class="friend-picker-empty">No friends found — type an email address</div>`;
+        return;
+      }
+      filtered.slice(0, 12).forEach(f => {
+        const initials = (f.displayName || f.email)[0].toUpperCase();
+        const opt = document.createElement('div');
+        opt.className = 'friend-picker-option';
+        opt.tabIndex = 0;
+        opt.innerHTML = `
+          <div class="friend-picker-option-avatar">${initials}</div>
+          <div>
+            <div class="friend-picker-option-name">${Utils.escapeHtml(f.displayName || f.email)}</div>
+            ${f.displayName ? `<div class="friend-picker-option-email">${Utils.escapeHtml(f.email)}</div>` : ''}
+          </div>`;
+        const select = () => {
+          inputEl.value = f.email;
+          dropdown.hidden = true;
+          onSelect && onSelect(f);
+        };
+        opt.addEventListener('mousedown', e => { e.preventDefault(); select(); });
+        opt.addEventListener('keydown', e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); select(); } });
+        dropdown.appendChild(opt);
+      });
+    }
+
+    inputEl.addEventListener('focus', () => {
+      if (available.length) { renderOptions(inputEl.value); dropdown.hidden = false; }
+    });
+    inputEl.addEventListener('input', () => {
+      renderOptions(inputEl.value);
+      dropdown.hidden = false;
+    });
+    inputEl.addEventListener('blur', () => {
+      // Delay so mousedown on option fires first
+      setTimeout(() => { dropdown.hidden = true; }, 150);
+    });
+    inputEl.addEventListener('keydown', e => {
+      if (e.key === 'Escape') dropdown.hidden = true;
+      if (e.key === 'ArrowDown') {
+        e.preventDefault();
+        const first = dropdown.querySelector('.friend-picker-option');
+        if (first) first.focus();
+      }
+    });
+  }
+
   function _openEditCaptionModal(currentCaption, onSave) {
     openModal(`
       <h3>Edit caption</h3>
@@ -1148,6 +1220,7 @@ const UI = (() => {
           <button class="post-comments-btn" data-album-id="${Utils.escapeHtml(album.id)}" data-loaded="0">
             💬 <span class="post-comments-count">0</span> comments
           </button>
+          <button class="post-share-btn" title="Share this post">↗ Share</button>
         </div>
         <div class="post-comments-section" id="comments-${Utils.escapeHtml(album.id)}" hidden></div>
       </div>
@@ -1318,6 +1391,13 @@ const UI = (() => {
       }
     });
     if (menu) menuSlot.appendChild(menu);
+
+    // Share button
+    card.querySelector('.post-share-btn')?.addEventListener('click', e => {
+      e.stopPropagation();
+      const fakeColl = { id: album.id, name: album.caption || album.name || 'Post', isPost: true };
+      _openShareModal(album.id, fakeColl);
+    });
 
     // Clicking the author avatar or name opens their profile
     if (!album._isOwn && album.sharerEmail) {
@@ -2516,33 +2596,20 @@ const UI = (() => {
   }
 
   async function _openAddMemberModal(folderId, circle) {
-    // Pre-load friends to offer as suggestions (non-blocking)
     let friends = [];
     try { friends = (await Data.getFriends()) || []; } catch { /* ignore */ }
-
-    // Exclude already-in-circle emails
     const existingEmails = new Set((circle.members || []).map(m => m.email));
-    const suggestions = friends.filter(f => !existingEmails.has(f.email) && f.status !== 'pending_sent');
-
-    const suggestHtml = suggestions.length ? `
-      <div class="form-field">
-        <label>Suggest from friends</label>
-        <div class="add-member-suggestions">
-          ${suggestions.map(f => `
-            <button type="button" class="member-suggest-pill" data-email="${Utils.escapeHtml(f.email)}" data-name="${Utils.escapeHtml(f.displayName || '')}">
-              ${Utils.escapeHtml(f.displayName || f.email)}
-            </button>
-          `).join('')}
-        </div>
-      </div>
-    ` : '';
 
     openModal(`
       <h3>Add Member to ${Utils.escapeHtml(circle.name)}</h3>
       <form id="mf" class="form-block">
-        ${suggestHtml}
-        <div class="form-field"><label>Email</label><input name="email" type="email" class="input" required placeholder="someone@example.com" /></div>
-        <div class="form-field"><label>Display name <span class="muted-text small">(optional)</span></label><input name="displayName" class="input" /></div>
+        <div class="form-field friend-picker">
+          <label>Search friends or enter email</label>
+          <div style="position:relative">
+            <input name="email" type="email" id="add-member-email" class="input friend-picker-input" required placeholder="Type a name or email…" autocomplete="off" />
+          </div>
+        </div>
+        <div class="form-field"><label>Display name <span class="muted-text small">(optional)</span></label><input name="displayName" id="add-member-name" class="input" autocomplete="off" /></div>
         <div class="modal-actions">
           <button type="button" class="btn btn-ghost btn-sm modal-cancel-btn">Cancel</button>
           <button type="submit" class="btn btn-primary btn-sm">Add</button>
@@ -2551,14 +2618,10 @@ const UI = (() => {
     `);
     document.querySelector('.modal-cancel-btn').addEventListener('click', closeModal);
 
-    // Wire suggestion pills
-    document.querySelectorAll('.member-suggest-pill').forEach(pill => {
-      pill.addEventListener('click', () => {
-        document.querySelector('#mf [name="email"]').value    = pill.dataset.email;
-        document.querySelector('#mf [name="displayName"]').value = pill.dataset.name;
-        document.querySelectorAll('.member-suggest-pill').forEach(p => p.classList.remove('active'));
-        pill.classList.add('active');
-      });
+    const emailInput = document.getElementById('add-member-email');
+    const nameInput  = document.getElementById('add-member-name');
+    _buildFriendPicker(emailInput, friends, existingEmails, f => {
+      nameInput.value = f.displayName || '';
     });
 
     document.getElementById('mf').addEventListener('submit', async e => {
@@ -2833,11 +2896,16 @@ const UI = (() => {
       }
 
       const isMedia = f => f.mimeType?.startsWith('image/') || f.mimeType?.startsWith('video/');
-      allFiles.forEach(f => {
+      const mediaFiles2 = allFiles.filter(isMedia);
+      allFiles.forEach((f, globalIdx) => {
         if (isMedia(f)) {
+          const mediaIdx = mediaFiles2.indexOf(f);
           const el = _el(`<div class="media-item"><img src="" alt="" loading="lazy" /></div>`);
           _loadThumbnail(el.querySelector('img'), f.id, f.thumbnailLink);
-          el.addEventListener('click', () => openLightbox(f.id, folderId, { canDelete: isOwner, thumbnailLink: f.thumbnailLink }));
+          el.addEventListener('click', () => openLightbox(f.id, folderId, {
+            canDelete: isOwner, thumbnailLink: f.thumbnailLink,
+            files: mediaFiles2, currentIndex: mediaIdx
+          }));
           grid.appendChild(el);
         } else {
           const wrapper = document.createElement('div');
@@ -2919,31 +2987,162 @@ const UI = (() => {
     });
   }
 
-  function _openShareModal(folderId, coll) {
+  async function _openShareModal(folderId, coll) {
+    // Load friends + circles + user's own albums for the three-path share flow
+    let friends = [], circles = [], albums = [];
+    try { [friends, circles, albums] = await Promise.all([
+      Data.getFriends().catch(() => []),
+      Data.listCircles().catch(() => []),
+      Data.listCollections().catch(() => [])
+    ]); } catch {}
+    albums = albums.filter(a => a.id !== folderId && !a.isPost);
+
     openModal(`
       <h3>Share "${Utils.escapeHtml(coll.name)}"</h3>
-      <form id="mf" class="form-block">
-        <div class="form-field">
-          <label>Email addresses (comma-separated)</label>
-          <textarea name="emails" class="input" rows="3" placeholder="friend@example.com, another@example.com"></textarea>
-        </div>
-        <div class="modal-actions">
-          <button type="button" class="btn btn-ghost btn-sm modal-cancel-btn">Cancel</button>
-          <button type="submit" class="btn btn-primary btn-sm">Share</button>
-        </div>
-      </form>
+      <p class="muted-text small">Choose how to share — nothing is downloaded or copied to anyone's Drive.</p>
+      <div class="share-options-grid">
+        <button type="button" class="share-option-btn" id="share-opt-person">
+          <span class="share-option-icon">👤</span>
+          <span class="share-option-label">Send to People</span>
+          <span class="share-option-desc">Share with friends or circles</span>
+        </button>
+        <button type="button" class="share-option-btn" id="share-opt-album">
+          <span class="share-option-icon">🗂</span>
+          <span class="share-option-label">Add to Album</span>
+          <span class="share-option-desc">Reference in another album</span>
+        </button>
+        <button type="button" class="share-option-btn" id="share-opt-feed">
+          <span class="share-option-icon">📣</span>
+          <span class="share-option-label">Post to Feed</span>
+          <span class="share-option-desc">Share on your timeline</span>
+        </button>
+      </div>
+      <div id="share-step-content" class="share-step"></div>
+      <div class="modal-actions" style="margin-top:.75rem">
+        <button type="button" class="btn btn-ghost btn-sm modal-cancel-btn">Cancel</button>
+      </div>
     `);
     document.querySelector('.modal-cancel-btn').addEventListener('click', closeModal);
-    document.getElementById('mf').addEventListener('submit', async e => {
-      e.preventDefault();
-      const emails = new FormData(e.target).get('emails').split(',').map(s => s.trim()).filter(Boolean);
-      if (!emails.length) return;
-      Utils.showLoading();
-      try {
-        await Data.shareCollection(folderId, emails);
-        closeModal(); Utils.showToast('Shared!');
-      } catch { Utils.showToast('Failed to share', 'error'); }
-      finally   { Utils.hideLoading(); }
+
+    const stepContent = document.getElementById('share-step-content');
+
+    function setActive(id) {
+      document.querySelectorAll('.share-option-btn').forEach(b => b.classList.toggle('active', b.id === id));
+    }
+
+    // --- Path 1: Send to People ---
+    document.getElementById('share-opt-person').addEventListener('click', () => {
+      setActive('share-opt-person');
+      stepContent.innerHTML = `
+        <div class="form-block" style="margin-top:0">
+          <div class="form-field">
+            <label>Search friends or enter email</label>
+            <div style="position:relative">
+              <input id="share-person-email" class="input" type="email" placeholder="Type a name or email…" autocomplete="off" />
+            </div>
+          </div>
+          ${circles.length ? `
+          <div class="form-field">
+            <label>Or share with a Circle</label>
+            <select id="share-circle-select" class="select-sm" style="width:100%">
+              <option value="">— pick a circle —</option>
+              ${circles.map(c => `<option value="${Utils.escapeHtml(c.id)}">${Utils.escapeHtml(c.name)}</option>`).join('')}
+            </select>
+          </div>` : ''}
+          <button id="share-person-btn" class="btn btn-primary btn-sm">Share Access</button>
+        </div>`;
+
+      const emailInput = document.getElementById('share-person-email');
+      _buildFriendPicker(emailInput, friends, [], null);
+
+      document.getElementById('share-person-btn').addEventListener('click', async () => {
+        const email  = emailInput.value.trim();
+        const circle = document.getElementById('share-circle-select')?.value;
+        if (!email && !circle) { Utils.showToast('Enter an email or pick a circle', 'error'); return; }
+        Utils.showLoading();
+        try {
+          const emails = [];
+          if (email) emails.push(email);
+          if (circle) {
+            const circ = await Data.getCircle(circle);
+            circ.members.filter(m => m.role !== 'owner').forEach(m => emails.push(m.email));
+          }
+          await Data.shareCollection(folderId, emails);
+          closeModal(); Utils.showToast('Shared! They now have view access.');
+        } catch { Utils.showToast('Failed to share', 'error'); }
+        finally { Utils.hideLoading(); }
+      });
+    });
+
+    // --- Path 2: Add to Album (reference, no file copy) ---
+    document.getElementById('share-opt-album').addEventListener('click', () => {
+      setActive('share-opt-album');
+      if (!albums.length) {
+        stepContent.innerHTML = `<p class="muted-text small">You don't have any other albums to add to.</p>`;
+        return;
+      }
+      stepContent.innerHTML = `
+        <div class="form-block" style="margin-top:0">
+          <div class="form-field">
+            <label>Choose an album</label>
+            <select id="share-album-select" class="select-sm" style="width:100%">
+              ${albums.map(a => `<option value="${Utils.escapeHtml(a.id)}">${Utils.escapeHtml(a.name)}</option>`).join('')}
+            </select>
+          </div>
+          <button id="share-album-btn" class="btn btn-primary btn-sm">Add Reference</button>
+        </div>`;
+
+      document.getElementById('share-album-btn').addEventListener('click', async () => {
+        const targetId = document.getElementById('share-album-select').value;
+        if (!targetId) return;
+        Utils.showLoading();
+        try {
+          // Store a reference JSON file in the target album (no file copy)
+          const ref = { type: 'album_ref', sourceId: folderId, sourceName: coll.name, addedAt: new Date().toISOString() };
+          await Drive.createJsonFile(`_ref_${folderId}.json`, ref, targetId);
+          closeModal(); Utils.showToast('Added to album — no files were copied.');
+        } catch { Utils.showToast('Failed to add reference', 'error'); }
+        finally { Utils.hideLoading(); }
+      });
+    });
+
+    // --- Path 3: Share to Feed ---
+    document.getElementById('share-opt-feed').addEventListener('click', () => {
+      setActive('share-opt-feed');
+      stepContent.innerHTML = `
+        <div class="form-block" style="margin-top:0">
+          <div class="form-field">
+            <label>Caption <span class="muted-text small">(optional)</span></label>
+            <textarea id="share-feed-caption" class="input" rows="2" placeholder="Say something about this album…"></textarea>
+          </div>
+          <div class="form-field">
+            <label>Audience</label>
+            <select id="share-feed-sharing" class="select-sm" style="width:100%">
+              <option value="friends">Friends</option>
+              ${circles.length ? `<option value="circles">My Circles</option>` : ''}
+              <option value="everyone">Anyone with link</option>
+            </select>
+          </div>
+          <button id="share-feed-btn" class="btn btn-primary btn-sm">Post to Feed</button>
+        </div>`;
+
+      document.getElementById('share-feed-btn').addEventListener('click', async () => {
+        const caption = document.getElementById('share-feed-caption').value.trim();
+        const sharing = document.getElementById('share-feed-sharing').value;
+        Utils.showLoading();
+        try {
+          // Create a post that references this album — no Drive.copyFile()
+          await Data.createPost({
+            caption: caption || `Shared: ${coll.name}`,
+            name:    coll.name,
+            sharing,
+            sourceAlbumId: folderId
+          });
+          closeModal(); Utils.showToast('Posted to your feed!');
+          if (_currentPage === 'feed') navigate('feed');
+        } catch { Utils.showToast('Failed to post', 'error'); }
+        finally { Utils.hideLoading(); }
+      });
     });
   }
 
@@ -2991,14 +3190,19 @@ const UI = (() => {
     });
   }
 
-  function _openInviteCollaboratorModal(folderId) {
+  async function _openInviteCollaboratorModal(folderId) {
+    let friends = [];
+    try { friends = (await Data.getFriends()) || []; } catch { /* ignore */ }
+
     openModal(`
       <h3>Invite a Collaborator</h3>
-      <p class="muted-text small">Collaborators can upload files to this collection.</p>
+      <p class="muted-text small">Collaborators can upload files to this album.</p>
       <form id="collab-form" class="form-block">
         <div class="form-field">
-          <label>Email address</label>
-          <input type="email" id="collab-email" class="input" placeholder="friend@example.com" required autocomplete="email" />
+          <label>Search friends or enter email</label>
+          <div style="position:relative">
+            <input type="email" id="collab-email" class="input" placeholder="Type a name or email…" required autocomplete="off" />
+          </div>
         </div>
         <p id="collab-status" class="muted-text small" aria-live="polite"></p>
         <div class="modal-actions">
@@ -3008,16 +3212,20 @@ const UI = (() => {
       </form>
     `);
     document.querySelector('.modal-cancel-btn').addEventListener('click', closeModal);
+
+    const emailInput = document.getElementById('collab-email');
+    _buildFriendPicker(emailInput, friends, [], null);
+
     document.getElementById('collab-form').addEventListener('submit', async e => {
       e.preventDefault();
-      const email  = document.getElementById('collab-email').value.trim();
+      const email  = emailInput.value.trim();
       const status = document.getElementById('collab-status');
       const btn    = e.target.querySelector('[type="submit"]');
       if (!email) return;
       btn.disabled = true; btn.textContent = 'Inviting…';
       try {
         await Data.inviteCollaborator(folderId, email);
-        Utils.showToast(`${email} can now upload to this collection`);
+        Utils.showToast(`${email} can now upload to this album`);
         closeModal();
       } catch {
         status.textContent = 'Could not invite collaborator.';
@@ -3689,23 +3897,67 @@ const UI = (() => {
   /* ── Lightbox ─────────────────────────────────── */
 
   let _lightboxBlobUrl = null;
+  let _lightboxFiles   = [];
+  let _lightboxIdx     = 0;
+
+  function _lightboxLoadFile(fileId, thumbnailLink) {
+    const img = document.getElementById('lightbox-img');
+    img.src = thumbnailLink || Drive.getThumbnailUrl(fileId, 'w800');
+    if (_lightboxBlobUrl) { URL.revokeObjectURL(_lightboxBlobUrl); _lightboxBlobUrl = null; }
+    const lb = document.getElementById('lightbox');
+    Drive.getFileAsBlob(fileId).then(blobUrl => {
+      if (!lb.hidden) { _lightboxBlobUrl = blobUrl; img.src = blobUrl; }
+      else URL.revokeObjectURL(blobUrl);
+    }).catch(() => {});
+  }
 
   async function openLightbox(fileId, collectionFolderId, opts = {}) {
     const lb  = document.getElementById('lightbox');
-    const img = document.getElementById('lightbox-img');
     lb.hidden = false;
 
-    // Show thumbnail immediately, then upgrade to full-resolution
-    img.src = opts.thumbnailLink || Drive.getThumbnailUrl(fileId, 'w800');
-    if (_lightboxBlobUrl) { URL.revokeObjectURL(_lightboxBlobUrl); _lightboxBlobUrl = null; }
-    Drive.getFileAsBlob(fileId).then(blobUrl => {
-      if (!lb.hidden) { // still open
-        _lightboxBlobUrl = blobUrl;
-        img.src = blobUrl;
-      } else {
-        URL.revokeObjectURL(blobUrl);
-      }
-    }).catch(() => { /* keep thumbnail */ });
+    // Multi-file navigation setup
+    _lightboxFiles = opts.files || [];
+    _lightboxIdx   = opts.currentIndex ?? 0;
+    // If files array provided, make sure fileId/thumbnailLink come from the indexed entry
+    if (_lightboxFiles.length > 0) {
+      const entry = _lightboxFiles[_lightboxIdx];
+      if (entry) { fileId = entry.id; opts.thumbnailLink = entry.thumbnailLink; }
+    }
+
+    _lightboxLoadFile(fileId, opts.thumbnailLink);
+
+    // Nav buttons
+    const prevBtn   = document.getElementById('lightbox-prev');
+    const nextBtn   = document.getElementById('lightbox-next');
+    const counter   = document.getElementById('lightbox-counter');
+    const hasMany   = _lightboxFiles.length > 1;
+    prevBtn.hidden  = !hasMany;
+    nextBtn.hidden  = !hasMany;
+    counter.hidden  = !hasMany;
+
+    function _lbGoTo(idx) {
+      _lightboxIdx = Math.max(0, Math.min(_lightboxFiles.length - 1, idx));
+      const f = _lightboxFiles[_lightboxIdx];
+      _lightboxLoadFile(f.id, f.thumbnailLink);
+      counter.textContent = `${_lightboxIdx + 1} / ${_lightboxFiles.length}`;
+    }
+    if (hasMany) {
+      counter.textContent = `${_lightboxIdx + 1} / ${_lightboxFiles.length}`;
+      prevBtn.onclick = e => { e.stopPropagation(); _lbGoTo(_lightboxIdx - 1); };
+      nextBtn.onclick = e => { e.stopPropagation(); _lbGoTo(_lightboxIdx + 1); };
+
+      // Touch swipe
+      let _lbTouchX = 0;
+      lb._lbTouchStart = e => { _lbTouchX = e.touches[0].clientX; };
+      lb._lbTouchEnd   = e => {
+        const dx = e.changedTouches[0].clientX - _lbTouchX;
+        if (Math.abs(dx) > 50) _lbGoTo(dx < 0 ? _lightboxIdx + 1 : _lightboxIdx - 1);
+      };
+      lb.addEventListener('touchstart', lb._lbTouchStart, { passive: true });
+      lb.addEventListener('touchend',   lb._lbTouchEnd);
+    }
+
+    // Remaining setup uses the initial fileId (updated above if files array provided)
 
     const user     = Auth.getCurrentUser();
     const reactBar = document.getElementById('lightbox-reactions');
@@ -3834,10 +4086,19 @@ const UI = (() => {
   }
 
   function closeLightbox() {
-    document.getElementById('lightbox').hidden = true;
+    const lb = document.getElementById('lightbox');
+    lb.hidden = true;
     document.getElementById('lightbox-img').src = '';
     document.getElementById('lightbox-comment-input').value = '';
     if (_lightboxBlobUrl) { URL.revokeObjectURL(_lightboxBlobUrl); _lightboxBlobUrl = null; }
+    // Remove touch listeners
+    if (lb._lbTouchStart) { lb.removeEventListener('touchstart', lb._lbTouchStart); delete lb._lbTouchStart; }
+    if (lb._lbTouchEnd)   { lb.removeEventListener('touchend',   lb._lbTouchEnd);   delete lb._lbTouchEnd; }
+    _lightboxFiles = []; _lightboxIdx = 0;
+    // Hide nav buttons
+    document.getElementById('lightbox-prev').hidden    = true;
+    document.getElementById('lightbox-next').hidden    = true;
+    document.getElementById('lightbox-counter').hidden = true;
   }
 
   /* ── Keyboard shortcuts ──────────────────────── */
@@ -3856,6 +4117,20 @@ const UI = (() => {
           if (storyOverlay) { storyOverlay.remove(); break; }
           break;
         }
+        case 'ArrowLeft': {
+          if (!document.getElementById('lightbox').hidden && _lightboxFiles.length > 1) {
+            e.preventDefault();
+            document.getElementById('lightbox-prev').click();
+          }
+          break;
+        }
+        case 'ArrowRight': {
+          if (!document.getElementById('lightbox').hidden && _lightboxFiles.length > 1) {
+            e.preventDefault();
+            document.getElementById('lightbox-next').click();
+          }
+          break;
+        }
         case '?': {
           e.preventDefault();
           _showKeyboardShortcutsModal();
@@ -3863,6 +4138,7 @@ const UI = (() => {
         }
         case 'j':
         case 'ArrowDown': {
+          if (!document.getElementById('lightbox').hidden) break;
           e.preventDefault();
           const cards = Array.from(document.querySelectorAll('.post-card'));
           if (!cards.length) break;
@@ -3873,6 +4149,7 @@ const UI = (() => {
         }
         case 'k':
         case 'ArrowUp': {
+          if (!document.getElementById('lightbox').hidden) break;
           e.preventDefault();
           const cards = Array.from(document.querySelectorAll('.post-card'));
           if (!cards.length) break;
