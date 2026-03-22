@@ -2041,6 +2041,9 @@ textarea.input { resize: vertical; min-height: 80px; }
   object-fit: contain;
   background: var(--bg);
   cursor: pointer;
+  -webkit-touch-callout: none;  /* prevent iOS long-press callout */
+  -webkit-user-select: none;
+  user-select: none;
 }
 
 /* Bottom gradient + text overlay per slide */

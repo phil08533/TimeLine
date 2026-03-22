@@ -3563,42 +3563,34 @@ const UI = (() => {
       }
     } catch (e) { console.warn('[Suggestions] Feed folders failed:', e); }
 
-    // Source 2: Circle members you're not friends with
+    // Source 2: Friends of friends — people in the same circles as your friends
     try {
       const circles = await Data.listCircles();
       for (const c of circles) {
+        const members = (c.members || []).map(m => m.email?.toLowerCase()).filter(Boolean);
+        // Find which of your friends are in this circle
+        const friendsInCircle = friends.filter(f => members.includes(f.email.toLowerCase()));
         for (const m of (c.members || [])) {
           if (!m.email || skip.has(m.email.toLowerCase())) continue;
           if (suggestions.some(s => s.email.toLowerCase() === m.email.toLowerCase())) continue;
+          const mutualFriend = friendsInCircle[0];
+          const source = mutualFriend
+            ? `Friends with ${mutualFriend.displayName || mutualFriend.email}`
+            : `In circle "${c.name}"`;
           suggestions.push({
             email: m.email,
             name: m.displayName || m.email,
             picture: null,
-            source: `In your circle "${c.name}"`
+            source
           });
         }
       }
     } catch (e) { console.warn('[Suggestions] Circles failed:', e); }
 
-    // Source 3: Google Contacts
-    try {
-      const contacts = await Drive.getContacts();
-      for (const c of contacts) {
-        if (!c.email || skip.has(c.email.toLowerCase())) continue;
-        if (suggestions.some(s => s.email.toLowerCase() === c.email.toLowerCase())) continue;
-        suggestions.push({
-          email: c.email,
-          name: c.name || c.email,
-          picture: null,
-          source: 'From your contacts'
-        });
-      }
-    } catch (e) { console.warn('[Suggestions] Contacts failed:', e); }
-
     // Always show the section — display a message if no suggestions found
     block.hidden = false;
     if (!suggestions.length) {
-      list.innerHTML = '<p class="muted-text">No suggestions yet — they\'ll appear as people share content with you or you add contacts.</p>';
+      list.innerHTML = '<p class="muted-text">No suggestions yet — they\'ll appear as people share content with you or join your circles.</p>';
       return;
     }
 
@@ -4141,14 +4133,20 @@ const UI = (() => {
   function _vsMakeSlide(item) {
     const slide = document.createElement('div');
     slide.className = 'vs-slide';
+    slide.style.touchAction = 'pan-y';           // allow vertical scroll, block long-press
     slide.dataset.vsUrl   = item.url;
     slide.dataset.vsTitle = item.title;
     slide.dataset.vsCat   = item.category;
     slide.dataset.vsId    = item.id || '';
+    // Block browser long-press menu on the entire slide (video + overlays)
+    slide.addEventListener('contextmenu', e => e.preventDefault());
 
     const vid = document.createElement('video');
     vid.src     = item.url;
     vid.setAttribute('playsinline', '');
+    vid.setAttribute('controlsList', 'nodownload');
+    vid.setAttribute('disablepictureinpicture', '');
+    vid.disableRemotePlayback = true;
     vid.muted   = _vsMuted;
     vid.preload = 'none';
 
