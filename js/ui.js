@@ -189,7 +189,11 @@ const UI = (() => {
           setTimeout(() => { item.remove(); _clearIfEmpty(); }, 1800);
           Utils.showToast(`Added ${label} as friend`);
           _refreshNotificationCount().catch(() => {});
-        } catch { Utils.showToast('Could not accept', 'error'); }
+        } catch {
+          Utils.showToast('Could not accept', 'error');
+          item.querySelector('.notif-accept').disabled = false;
+          item.querySelector('.notif-decline').disabled = false;
+        }
       });
       item.querySelector('.notif-decline').addEventListener('click', async () => {
         item.querySelector('.notif-accept').disabled = true;
@@ -4119,8 +4123,18 @@ const UI = (() => {
 
     if (!_vsBuilt) _vsBuildDOM(page);
 
-    // Already loaded — resume the visible slide
-    if (_vsReady) { _vsPlayCurrent(); return; }
+    // Already loaded — ensure feed is populated and resume
+    if (_vsReady) {
+      const feed = document.getElementById('vs-feed');
+      if (feed && !feed.children.length) {
+        _vsRebuildPlaylist();
+        _vsPopulateFeed();
+      }
+      const ld = document.getElementById('vs-loading');
+      if (ld) ld.hidden = true;
+      _vsPlayCurrent();
+      return;
+    }
 
     try {
       const res = await fetch('https://raw.githubusercontent.com/phil08533/VoidScroll/main/videos.json');
@@ -4275,7 +4289,8 @@ const UI = (() => {
         comments.forEach(c => {
           commArea.appendChild(_el(`
             <div class="comment-row">
-              <span class="comment-author">${Utils.escapeHtml(c.author?.displayName || 'Someone')}</span>${Utils.escapeHtml(c.content)}
+              <span class="comment-author">${Utils.escapeHtml(c.author?.displayName || 'Someone')}</span>
+              <span class="comment-text">${Utils.escapeHtml(c.content)}</span>
             </div>
           `));
         });
