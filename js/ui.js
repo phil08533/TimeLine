@@ -4206,7 +4206,10 @@ const UI = (() => {
       if (entry) { fileId = entry.id; opts.thumbnailLink = entry.thumbnailLink; }
     }
 
-    _lightboxLoadFile(fileId, opts.thumbnailLink);
+    // Use an object so closures always see the current fileId
+    const ctx = { fileId };
+
+    _lightboxLoadFile(ctx.fileId, opts.thumbnailLink);
 
     // Nav buttons
     const prevBtn   = document.getElementById('lightbox-prev');
@@ -4220,8 +4223,10 @@ const UI = (() => {
     function _lbGoTo(idx) {
       _lightboxIdx = Math.max(0, Math.min(_lightboxFiles.length - 1, idx));
       const f = _lightboxFiles[_lightboxIdx];
+      ctx.fileId = f.id;
       _lightboxLoadFile(f.id, f.thumbnailLink);
       counter.textContent = `${_lightboxIdx + 1} / ${_lightboxFiles.length}`;
+      refreshComments();
     }
     if (hasMany) {
       counter.textContent = `${_lightboxIdx + 1} / ${_lightboxFiles.length}`;
@@ -4279,8 +4284,10 @@ const UI = (() => {
     // Comments
     let _commentsEnabled = true;
     async function refreshComments() {
+      _commentsEnabled = true;
+      commArea.innerHTML = '<span class="muted-text small">Loading…</span>';
       try {
-        const comments = await Drive.getComments(fileId);
+        const comments = await Drive.getComments(ctx.fileId);
         if (!comments.length) {
           commArea.innerHTML = '<span class="muted-text small">No comments yet.</span>';
           return;
@@ -4299,7 +4306,7 @@ const UI = (() => {
           _commentsEnabled = false;
           commArea.innerHTML = '<span class="muted-text small">Comments unavailable — owner hasn\'t granted commenter access.</span>';
         } else {
-          commArea.innerHTML = '';
+          commArea.innerHTML = '<span class="muted-text small">Failed to load comments.</span>';
         }
       }
     }
@@ -4313,7 +4320,7 @@ const UI = (() => {
         copyBtn.textContent = 'Saving…';
         try {
           const folders = Data.getFolders();
-          await Drive.copyFile(fileId, folders.rootId);
+          await Drive.copyFile(ctx.fileId, folders.rootId);
           Utils.showToast('Saved to your Drive!');
           copyBtn.textContent = 'Saved ✓';
         } catch {
@@ -4331,7 +4338,7 @@ const UI = (() => {
       delBtn.addEventListener('click', async () => {
         if (!confirm('Delete this file?')) return;
         try {
-          await Drive.deleteFile(fileId);
+          await Drive.deleteFile(ctx.fileId);
           closeLightbox();
           Utils.showToast('File deleted');
           if (_currentPage === 'collection-detail') _renderCollectionDetail(_currentCollFolderId);
@@ -4348,10 +4355,11 @@ const UI = (() => {
     form.onsubmit = async e => {
       e.preventDefault();
       if (!_commentsEnabled) { Utils.showToast('Comments not available for this file', 'error'); return; }
+      if (!ctx.fileId) { Utils.showToast('Comments not available', 'error'); return; }
       const text = input.value.trim();
       if (!text) return;
       try {
-        await Drive.addComment(fileId, text);
+        await Drive.addComment(ctx.fileId, text);
         input.value = '';
         refreshComments();
       } catch (err) {
