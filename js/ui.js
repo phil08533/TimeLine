@@ -4069,6 +4069,7 @@ const UI = (() => {
 
   function _vsKeyHandler(e) {
     if (_currentPage !== 'voidscroll') return;
+    if (e.key === 'Escape') { navigate('feed'); return; }
     const feed = document.getElementById('vs-feed');
     if (!feed) return;
     const h = feed.offsetHeight || 1;
@@ -4095,6 +4096,7 @@ const UI = (() => {
       <div class="vs-loading" id="vs-loading">
         <div class="vs-spinner"></div>
         <span>Loading videos…</span>
+        <button class="btn btn-ghost btn-sm" id="vs-loading-back" style="margin-top:1rem;color:#fff;border-color:rgba(255,255,255,.3)">Go Back</button>
       </div>`;
 
     document.getElementById('vs-close-btn').addEventListener('click', () => {
@@ -4115,6 +4117,10 @@ const UI = (() => {
       _vsCat = btn.dataset.cat;
       _vsRebuildPlaylist();
       _vsPopulateFeed();
+    });
+
+    document.getElementById('vs-loading-back').addEventListener('click', () => {
+      navigate('feed');
     });
 
     document.addEventListener('keydown', _vsKeyHandler);
@@ -4171,9 +4177,19 @@ const UI = (() => {
       _vsReady = true;
     } catch (err) {
       console.error('[VoidScroll] load failed:', err);
-      if (loadingEl) loadingEl.innerHTML = `<span style="padding:1.5rem;text-align:center">Could not load videos.<br>${Utils.escapeHtml(err.message || 'Check your connection.')}</span>
-        <button class="btn btn-ghost btn-sm" style="margin-top:.75rem;color:#fff;border-color:rgba(255,255,255,.3)" onclick="_vsReady=false;document.getElementById('vs-loading').innerHTML='<div class=vs-spinner></div><span>Loading videos…</span>';location.hash='voidscroll'">Retry</button>
-        <button class="btn btn-ghost btn-sm" style="margin-top:.5rem;color:#fff;border-color:rgba(255,255,255,.3)" onclick="location.hash='feed'">Go Back</button>`;
+      if (loadingEl) {
+        loadingEl.innerHTML = `<span style="padding:1.5rem;text-align:center">Could not load videos.<br>${Utils.escapeHtml(err.message || 'Check your connection.')}</span>
+          <button class="btn btn-ghost btn-sm vs-retry-btn" style="margin-top:.75rem;color:#fff;border-color:rgba(255,255,255,.3)">Retry</button>
+          <button class="btn btn-ghost btn-sm vs-goback-btn" style="margin-top:.5rem;color:#fff;border-color:rgba(255,255,255,.3)">Go Back</button>`;
+        loadingEl.querySelector('.vs-retry-btn').addEventListener('click', () => {
+          _vsReady = false;
+          loadingEl.innerHTML = '<div class="vs-spinner"></div><span>Loading videos…</span>';
+          _renderVoidScroll();
+        });
+        loadingEl.querySelector('.vs-goback-btn').addEventListener('click', () => {
+          navigate('feed');
+        });
+      }
       return;
     }
 
