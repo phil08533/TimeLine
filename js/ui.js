@@ -3376,9 +3376,9 @@ const UI = (() => {
       ]);
       document.getElementById('friends-count').textContent = friends.length;
       _renderFriendsList(friends);
-      _renderFriendSuggestions(friends, blocked);
       _renderHiddenUsersList(hiddenUsers);
       _renderBlockedList(blocked);
+      await _renderFriendSuggestions(friends, blocked);
     } catch { Utils.showToast('Failed to load friends', 'error'); }
   }
 
@@ -4214,11 +4214,13 @@ const UI = (() => {
       const rect = vid.getBoundingClientRect();
       const x = e.touches[0].clientX - rect.left;
       const pct = x / rect.width;
-      if (pct < 0.25)      _startHold(-1);
-      else if (pct > 0.75) _startHold(1);
-    }, { passive: true });
-    vid.addEventListener('touchend', _stopHold, { passive: true });
-    vid.addEventListener('touchcancel', _stopHold, { passive: true });
+      if (pct < 0.25)      { e.preventDefault(); _startHold(-1); }
+      else if (pct > 0.75) { e.preventDefault(); _startHold(1); }
+    }, { passive: false });
+    vid.addEventListener('touchend', _stopHold);
+    vid.addEventListener('touchcancel', _stopHold);
+    // Block browser context menu (long-press "Download / Open in Chrome" popup)
+    vid.addEventListener('contextmenu', e => e.preventDefault());
     // Mouse hold zones
     vid.addEventListener('mousedown', e => {
       const rect = vid.getBoundingClientRect();
