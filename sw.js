@@ -1,7 +1,7 @@
 // sw.js — My Circle Service Worker (PWA offline support)
 'use strict';
 
-const CACHE_NAME = 'mycircle-v2';
+const CACHE_NAME = 'mycircle-v3';
 const STATIC_ASSETS = [
   '/',
   '/index.html',
@@ -79,7 +79,8 @@ self.addEventListener('fetch', event => {
         if (
           response.ok &&
           event.request.method === 'GET' &&
-          !url.pathname.includes('config.js') // don't cache secrets
+          !url.pathname.includes('config.js') && // don't cache secrets
+          !url.pathname.includes('videos.json')   // too large to cache (7MB)
         ) {
           const clone = response.clone();
           caches.open(CACHE_NAME).then(cache => cache.put(event.request, clone));

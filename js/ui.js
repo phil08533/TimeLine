@@ -4047,19 +4047,39 @@ const UI = (() => {
     });
   }
 
+  const VS_BATCH = 20;   // load 20 videos at a time
+  let _vsLoaded = 0;
+
+  function _vsLoadMore() {
+    const feed = document.getElementById('vs-feed');
+    if (!feed) return;
+    const end = Math.min(_vsLoaded + VS_BATCH, _vsPlaylist.length);
+    for (let i = _vsLoaded; i < end; i++) {
+      feed.appendChild(_vsMakeSlide(_vsPlaylist[i]));
+    }
+    _vsLoaded = end;
+  }
+
   function _vsPopulateFeed() {
     const feed = document.getElementById('vs-feed');
     if (!feed) return;
     feed.innerHTML = '';
     feed.scrollTop = 0;
+    _vsLoaded = 0;
 
-    // Build all slides
-    _vsPlaylist.forEach(item => feed.appendChild(_vsMakeSlide(item)));
+    // Build initial batch of slides
+    _vsLoadMore();
 
     // Scroll listener — debounced so it fires after snap settles
     feed.addEventListener('scroll', () => {
       clearTimeout(_vsScrollTimer);
-      _vsScrollTimer = setTimeout(_vsPlayCurrent, 120);
+      _vsScrollTimer = setTimeout(() => {
+        _vsPlayCurrent();
+        // Load more when nearing the end
+        const h = feed.offsetHeight || 1;
+        const slidesLeft = _vsLoaded - Math.round(feed.scrollTop / h);
+        if (slidesLeft < 5 && _vsLoaded < _vsPlaylist.length) _vsLoadMore();
+      }, 120);
     }, { passive: true });
 
     // Play first video immediately
@@ -4150,27 +4170,9 @@ const UI = (() => {
     const loadingEl = document.getElementById('vs-loading');
 
     try {
-      const controller = new AbortController();
-      const timer = setTimeout(() => controller.abort(), 15000);
-      const res = await fetch('https://raw.githubusercontent.com/phil08533/VoidScroll/main/videos.json', { signal: controller.signal });
-      clearTimeout(timer);
+      const res = await fetch('videos.json');
       if (!res.ok) throw new Error('HTTP ' + res.status);
-
-      // Parse JSON manually to handle truncated/malformed files
-      const text = await res.text();
-      let raw;
-      try {
-        raw = JSON.parse(text);
-      } catch (_jsonErr) {
-        // Try to salvage truncated JSON array – find last complete object
-        const lastBrace = text.lastIndexOf('}');
-        if (lastBrace > 0) {
-          const patched = text.slice(0, lastBrace + 1) + ']';
-          raw = JSON.parse(patched);
-        } else {
-          throw _jsonErr;
-        }
-      }
+      const raw = await res.json();
 
       const seen = new Set();
       _vsAllVideos = raw.filter(v => v.url && !seen.has(v.url) && seen.add(v.url));
