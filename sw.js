@@ -1,7 +1,7 @@
 // sw.js — My Circle Service Worker (PWA offline support)
 'use strict';
 
-const CACHE_NAME = 'mycircle-v3';
+const CACHE_NAME = 'mycircle-v4';
 const STATIC_ASSETS = [
   '/',
   '/index.html',

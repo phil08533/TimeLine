@@ -391,6 +391,7 @@ const Data = (() => {
       sharedWith: [], allowCopying: false,
       createdAt: new Date().toISOString()
     };
+    if (opts.voidscroll) meta.voidscroll = opts.voidscroll;
     await Drive.createJsonFile('_meta.json', meta, folderId);
 
     // Share based on audience
@@ -508,7 +509,7 @@ const Data = (() => {
   // Each post is a subfolder inside the circle folder, containing _post.json + media/doc files.
   // This avoids write conflicts — each user creates their own subfolder.
 
-  async function createCirclePost(circleFolderId, { caption = '', members = [] }) {
+  async function createCirclePost(circleFolderId, { caption = '', members = [], voidscroll = null }) {
     const id = Utils.generateId('cpost');
     const postFolderId = await Drive.getOrCreateFolder(id, circleFolderId);
     const user = Auth.getCurrentUser();
@@ -518,6 +519,7 @@ const Data = (() => {
       authorName:  user.name || user.email,
       createdAt:   new Date().toISOString()
     };
+    if (voidscroll) meta.voidscroll = voidscroll;
     await Drive.createJsonFile('_post.json', meta, postFolderId);
 
     // Notify other circle members about the new post

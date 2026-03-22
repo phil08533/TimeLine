@@ -1989,18 +1989,11 @@ textarea.input { resize: vertical; min-height: 80px; }
   overflow: hidden;
   border-radius: 0;
 }
-
-/* Close button */
-.vs-close-btn {
-  position: absolute; top: 8px; right: 12px; z-index: 30;
-  background: rgba(0,0,0,.5); border: none;
-  color: #fff; font-size: 1.6rem; line-height: 1;
-  width: 36px; height: 36px; border-radius: 50%;
-  display: flex; align-items: center; justify-content: center;
-  cursor: pointer;
-  backdrop-filter: blur(4px);
+/* Fullscreen mode — cover topbar too */
+.page-voidscroll.vs-fullscreen {
+  top: 0;
+  z-index: 1200;
 }
-.vs-close-btn:hover { background: rgba(0,0,0,.7); }
 
 /* Floating category bar — glassmorphism overlay, doesn't push content */
 .vs-cats {
@@ -2065,7 +2058,7 @@ textarea.input { resize: vertical; min-height: 80px; }
 }
 .vs-slide-info {
   position: absolute; bottom: 0; left: 0; right: 0;
-  padding: .75rem 3.5rem .9rem 1rem;
+  padding: .75rem 3.5rem 2.8rem 1rem;
   pointer-events: none;
 }
 .vs-slide-title {
@@ -2086,11 +2079,77 @@ textarea.input { resize: vertical; min-height: 80px; }
   margin: 0;
 }
 
-/* Floating mute button (bottom-right, above slide info) */
-.vs-mute-btn {
-  position: absolute;
-  right: .75rem; bottom: .9rem;
+/* ── Scrub bar (per slide, bottom) ── */
+.vs-scrub {
+  position: absolute; bottom: 0; left: 0; right: 0;
+  z-index: 8;
+  display: flex; align-items: center; gap: .5rem;
+  padding: .3rem .75rem .45rem;
+  background: linear-gradient(transparent, rgba(0,0,0,.55));
+}
+.vs-scrub-bar {
+  flex: 1; height: 4px;
+  -webkit-appearance: none; appearance: none;
+  background: rgba(255,255,255,.25);
+  border-radius: 2px;
+  outline: none; cursor: pointer;
+}
+.vs-scrub-bar::-webkit-slider-thumb {
+  -webkit-appearance: none; appearance: none;
+  width: 12px; height: 12px;
+  border-radius: 50%;
+  background: #fff;
+  border: none;
+  cursor: pointer;
+}
+.vs-scrub-bar::-moz-range-thumb {
+  width: 12px; height: 12px;
+  border-radius: 50%;
+  background: #fff;
+  border: none;
+  cursor: pointer;
+}
+.vs-scrub-time {
+  font-size: .65rem;
+  color: rgba(255,255,255,.7);
+  white-space: nowrap;
+  min-width: 5.5em;
+  text-align: right;
+}
+
+/* ── Seek indicators (hold left/right) ── */
+.vs-seek-indicator {
+  position: absolute; top: 50%; transform: translateY(-50%);
+  z-index: 6;
+  font-size: 2rem;
+  opacity: 0; pointer-events: none;
+  transition: opacity .15s;
+}
+.vs-seek-rew { left: 1.5rem; }
+.vs-seek-fwd { right: 1.5rem; }
+
+/* ── Right-side action buttons (share) ── */
+.vs-slide-actions {
+  position: absolute; right: .6rem; bottom: 4.5rem;
+  z-index: 9;
+  display: flex; flex-direction: column; align-items: center; gap: .6rem;
+}
+.vs-action-btn {
+  display: flex; flex-direction: column; align-items: center; gap: .15rem;
+  background: none; border: none; color: #fff; cursor: pointer;
+  filter: drop-shadow(0 1px 3px rgba(0,0,0,.6));
+}
+.vs-action-icon { font-size: 1.5rem; }
+.vs-action-label { font-size: .6rem; text-transform: uppercase; letter-spacing: .03em; }
+
+/* ── Bottom bar (mute + fullscreen) ── */
+.vs-bottom-bar {
+  position: absolute; right: .75rem; bottom: 2.8rem;
   z-index: 10;
+  display: flex; flex-direction: column; gap: .4rem;
+}
+.vs-mute-btn,
+.vs-fullscreen-btn {
   width: 38px; height: 38px;
   border-radius: 50%;
   background: rgba(0,0,0,.45);
@@ -2100,7 +2159,8 @@ textarea.input { resize: vertical; min-height: 80px; }
   cursor: pointer;
   backdrop-filter: blur(6px);
 }
-.vs-mute-btn:hover { background: rgba(0,0,0,.65); }
+.vs-mute-btn:hover,
+.vs-fullscreen-btn:hover { background: rgba(0,0,0,.65); }
 
 /* Full-screen loading / error */
 .vs-loading {
@@ -2119,6 +2179,63 @@ textarea.input { resize: vertical; min-height: 80px; }
   border-top-color: rgba(255,255,255,.8);
   border-radius: 50%;
   animation: spin .7s linear infinite;
+}
+
+/* ── VoidScroll embed in feed posts ── */
+.vs-embed {
+  position: relative;
+  background: #000;
+  border-radius: var(--card-radius) var(--card-radius) 0 0;
+  overflow: hidden;
+  aspect-ratio: 9/16;
+  max-height: 480px;
+}
+.vs-embed-video {
+  width: 100%; height: 100%;
+  object-fit: contain;
+  display: block;
+  cursor: pointer;
+}
+.vs-embed-overlay {
+  position: absolute; inset: 0;
+  display: flex; align-items: center; justify-content: center;
+  background: rgba(0,0,0,.35);
+}
+.vs-embed-overlay[hidden] { display: none !important; }
+.vs-embed-play-btn {
+  width: 56px; height: 56px;
+  border-radius: 50%;
+  background: rgba(255,255,255,.9);
+  border: none;
+  font-size: 1.4rem;
+  cursor: pointer;
+  display: flex; align-items: center; justify-content: center;
+  transition: transform .15s;
+}
+.vs-embed-play-btn:hover { transform: scale(1.1); }
+.vs-embed-open-btn {
+  position: absolute; bottom: .75rem; left: 50%; transform: translateX(-50%);
+  z-index: 5;
+  display: flex; align-items: center; gap: .4rem;
+  padding: .4rem 1rem;
+  border-radius: 20px;
+  background: linear-gradient(90deg, #2dd4bf, #06b6d4, #3b82f6);
+  border: none;
+  color: #fff; font-size: .78rem; font-weight: 600;
+  cursor: pointer;
+  white-space: nowrap;
+  box-shadow: 0 2px 8px rgba(0,0,0,.3);
+  transition: transform .15s, box-shadow .15s;
+}
+.vs-embed-open-btn:hover {
+  transform: translateX(-50%) scale(1.05);
+  box-shadow: 0 4px 12px rgba(0,0,0,.4);
+}
+.vs-share-preview {
+  font-size: .85rem;
+  color: var(--muted);
+  margin: .25rem 0 .75rem;
+  display: flex; align-items: center; gap: .4rem;
 }
 
 /* ── Post carousel ── */
