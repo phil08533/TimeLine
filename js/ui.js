@@ -4086,6 +4086,7 @@ const UI = (() => {
 
   function _vsBuildDOM(page) {
     page.innerHTML = `
+      <button class="vs-close-btn" id="vs-close-btn" aria-label="Close VoidScroll">&times;</button>
       <div class="vs-cats" id="vs-cats">
         ${VS_CATS.map(c => `<button class="filter-pill${c === _vsCat ? ' active' : ''}" data-cat="${c}">${c === 'all' ? 'All' : c[0].toUpperCase() + c.slice(1)}</button>`).join('')}
       </div>
@@ -4095,6 +4096,10 @@ const UI = (() => {
         <div class="vs-spinner"></div>
         <span>Loading videos…</span>
       </div>`;
+
+    document.getElementById('vs-close-btn').addEventListener('click', () => {
+      navigate('feed');
+    });
 
     document.getElementById('vs-mute-btn').addEventListener('click', () => {
       _vsMuted = !_vsMuted;
@@ -4137,15 +4142,19 @@ const UI = (() => {
     }
 
     try {
-      const res = await fetch('https://raw.githubusercontent.com/phil08533/VoidScroll/main/videos.json');
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), 15000);
+      const res = await fetch('https://raw.githubusercontent.com/phil08533/VoidScroll/main/videos.json', { signal: controller.signal });
+      clearTimeout(timer);
       if (!res.ok) throw new Error(res.status);
       const raw  = await res.json();
       const seen = new Set();
       _vsAllVideos = raw.filter(v => v.url && !seen.has(v.url) && seen.add(v.url));
       _vsReady = true;
-    } catch {
+    } catch (err) {
       const el = document.getElementById('vs-loading');
-      if (el) el.innerHTML = '<span style="padding:1.5rem;text-align:center">Could not load videos.<br>Check your connection.</span>';
+      if (el) el.innerHTML = `<span style="padding:1.5rem;text-align:center">Could not load videos.<br>${Utils.escapeHtml(err.message || 'Check your connection.')}</span>
+        <button class="btn btn-ghost btn-sm" style="margin-top:.75rem;color:#fff;border-color:rgba(255,255,255,.3)" onclick="location.hash='feed'">Go Back</button>`;
       return;
     }
 
