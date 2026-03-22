@@ -595,6 +595,12 @@ const Data = (() => {
   async function sendFriendRequest(email) {
     const data = await _getFriendsFile();
     if (data.friends.find(f => f.email === email)) return; // already in list
+
+    // Auto-make profile public on first friend request so others can see your posts
+    if (!data.friends.length) {
+      await makeProfilePublic().catch(() => {});
+    }
+
     const user = Auth.getCurrentUser();
     const reqPayload = {
       type:        'mc_friend_request',
