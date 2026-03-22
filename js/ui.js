@@ -3950,7 +3950,7 @@ const UI = (() => {
     document.querySelectorAll('.theme-pill').forEach(b => b.classList.toggle('active', b.dataset.vtheme === settings.theme));
     document.querySelectorAll('.color-dot').forEach(b => b.classList.toggle('active', b.dataset.ctheme === settings.colorTheme));
     const lbl = document.getElementById('color-theme-label');
-    if (lbl) lbl.textContent = Theme.getColorName(settings.colorTheme || 'paper');
+    if (lbl) lbl.textContent = Theme.getColorName(settings.colorTheme || 'slate');
     const ds = document.getElementById('default-sharing');
     if (ds) ds.value = settings.defaultSharing || 'friends';
     const ac = document.getElementById('allow-copying');
