@@ -673,8 +673,24 @@ const Data = (() => {
   // Keep old name as alias for backwards compatibility
   async function _getDeclinedRequestIds() { return _getHandledNotifIds(); }
 
+  let _acceptLock = null;
   async function acceptFriendRequest(fromEmail, fromName, fromPicture, requestFileId) {
+    // Serialize accept calls to prevent duplicate entries from concurrent clicks
+    while (_acceptLock) await _acceptLock;
+    let unlock;
+    _acceptLock = new Promise(r => { unlock = r; });
+    try {
+      return await _doAcceptFriend(fromEmail, fromName, fromPicture, requestFileId);
+    } finally { _acceptLock = null; unlock(); }
+  }
+  async function _doAcceptFriend(fromEmail, fromName, fromPicture, requestFileId) {
     const data = await _getFriendsFile();
+    // Deduplicate: remove any extra entries for this email, keep only the first
+    const dupes = data.friends.filter(f => f.email === fromEmail);
+    if (dupes.length > 1) {
+      data.friends = data.friends.filter(f => f.email !== fromEmail);
+      data.friends.push(dupes[0]);
+    }
     const existing = data.friends.find(f => f.email === fromEmail);
     if (!existing) {
       data.friends.push({
@@ -724,6 +740,7 @@ const Data = (() => {
       const handled = await _getHandledNotifIds();
       const data  = await _getFriendsFile();
       let changed = false;
+      const handledIds = [];
 
       for (const f of files) {
         if (handled.includes(f.id)) continue;
@@ -738,7 +755,7 @@ const Data = (() => {
               if (d.fromPicture) friend.picture = d.fromPicture;
               changed = true;
             }
-          } else {
+          } else if (!data.friends.some(fr => fr.email === d.fromEmail)) {
             // They accepted but we don't have them in our list yet — add them
             data.friends.push({
               email:       d.fromEmail,
@@ -749,12 +766,16 @@ const Data = (() => {
             });
             changed = true;
           }
-          // Mark this acceptance file as handled
-          await _markNotifHandled(f.id).catch(() => {});
+          handledIds.push(f.id);
         } catch {}
       }
 
+      // Persist friends BEFORE marking notifications as handled
       if (changed) await Drive.upsertJsonFile('friends.json', data, _folders.contactsFolderId);
+      // Now safe to mark as handled
+      for (const id of handledIds) {
+        await _markNotifHandled(id).catch(() => {});
+      }
     } catch {}
   }
 

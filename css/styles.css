@@ -1159,6 +1159,7 @@ textarea.input { resize: vertical; min-height: 80px; }
 .comments-area { display: flex; flex-direction: column; gap: .45rem; margin-bottom: .75rem; }
 .comment-row { font-size: .84rem; line-height: 1.5; }
 .comment-author { font-weight: 700; margin-right: .3rem; }
+.comment-text { word-break: break-word; }
 .comment-form { display: flex; gap: .5rem; }
 .comment-form .input { flex: 1; }
 
