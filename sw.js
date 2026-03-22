@@ -50,8 +50,7 @@ self.addEventListener('fetch', event => {
   if (
     url.hostname === 'www.googleapis.com' ||
     url.hostname === 'apis.google.com' ||
-    url.hostname === 'accounts.google.com' ||
-    url.hostname === 'people.googleapis.com'
+    url.hostname === 'accounts.google.com'
   ) {
     event.respondWith(
       fetch(event.request).catch(() => {
