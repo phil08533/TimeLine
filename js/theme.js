@@ -15,11 +15,21 @@ const Theme = (() => {
     _color  = COLORS.includes(color)  ? color  : 'slate';
     document.documentElement.setAttribute('data-theme', _visual);
     document.documentElement.setAttribute('data-color', _color);
+    // Cache locally so next load doesn't flash the wrong theme
+    try { localStorage.setItem('mc_theme', _visual); localStorage.setItem('mc_color', _color); } catch {}
   }
 
   function init(settings = {}) {
-    apply(settings.theme || 'soft', settings.colorTheme || 'slate');
+    // Prefer saved settings, fall back to localStorage cache, then defaults
+    const cachedVisual = _tryLS('mc_theme');
+    const cachedColor  = _tryLS('mc_color');
+    apply(
+      settings.theme      || cachedVisual || 'soft',
+      settings.colorTheme || cachedColor  || 'slate'
+    );
   }
+
+  function _tryLS(key) { try { return localStorage.getItem(key); } catch { return null; } }
 
   function setVisual(v) {
     apply(v, _color);
