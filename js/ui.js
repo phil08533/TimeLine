@@ -1269,7 +1269,7 @@ const UI = (() => {
     // VoidScroll embed
     const vsEmbed = album.voidscroll ? `
       <div class="vs-embed">
-        <video class="vs-embed-video" src="${Utils.escapeHtml(album.voidscroll.videoUrl)}" playsinline muted loop preload="none"></video>
+        <video class="vs-embed-video" src="${Utils.escapeHtml(album.voidscroll.videoUrl)}" playsinline muted loop preload="metadata"></video>
         <div class="vs-embed-overlay">
           <button class="vs-embed-play-btn" aria-label="Play">▶</button>
         </div>
@@ -3376,6 +3376,7 @@ const UI = (() => {
       ]);
       document.getElementById('friends-count').textContent = friends.length;
       _renderFriendsList(friends);
+      _renderFriendSuggestions(friends, blocked);
       _renderHiddenUsersList(hiddenUsers);
       _renderBlockedList(blocked);
     } catch { Utils.showToast('Failed to load friends', 'error'); }
@@ -3533,39 +3534,109 @@ const UI = (() => {
     } catch { Utils.showToast('Failed to send friend request', 'error'); }
   }
 
-  async function _renderContactSuggestions(friends) {
+  async function _renderFriendSuggestions(friends, blocked) {
     const block = document.getElementById('friend-suggestions-block');
     const list  = document.getElementById('friend-suggestions-list');
     block.hidden = true;
+    list.innerHTML = '';
+
+    const me = Auth.getCurrentUser();
+    const friendEmails = new Set(friends.map(f => f.email.toLowerCase()));
+    const blockedEmails = new Set((blocked || []).map(b => (b.email || b).toLowerCase()));
+    const skip = new Set([me?.email?.toLowerCase(), ...friendEmails, ...blockedEmails]);
+    const suggestions = []; // { email, name, picture, source }
+
+    // Source 1: People who shared content with you (from your feed) but aren't friends
+    try {
+      const shared = await Data.getFeedFolders();
+      const seen = new Set();
+      for (const f of shared) {
+        const email = f.owners?.[0]?.emailAddress;
+        if (!email || skip.has(email.toLowerCase()) || seen.has(email.toLowerCase())) continue;
+        seen.add(email.toLowerCase());
+        suggestions.push({
+          email,
+          name: f.owners[0].displayName || email,
+          picture: f.owners[0].photoLink || null,
+          source: 'Shared content with you'
+        });
+      }
+    } catch (e) { console.warn('[Suggestions] Feed folders failed:', e); }
+
+    // Source 2: Circle members you're not friends with
+    try {
+      const circles = await Data.listCircles();
+      for (const c of circles) {
+        for (const m of (c.members || [])) {
+          if (!m.email || skip.has(m.email.toLowerCase())) continue;
+          if (suggestions.some(s => s.email.toLowerCase() === m.email.toLowerCase())) continue;
+          suggestions.push({
+            email: m.email,
+            name: m.displayName || m.email,
+            picture: null,
+            source: `In your circle "${c.name}"`
+          });
+        }
+      }
+    } catch (e) { console.warn('[Suggestions] Circles failed:', e); }
+
+    // Source 3: Google Contacts
     try {
       const contacts = await Drive.getContacts();
-      const me = Auth.getCurrentUser();
-      const skip = new Set([me?.email?.toLowerCase(), ...friends.map(f => f.email.toLowerCase())]);
-      const suggestions = contacts.filter(c => !skip.has(c.email.toLowerCase())).slice(0, 8);
-      if (!suggestions.length) return;
-      list.innerHTML = '';
-      suggestions.forEach(c => {
-        const row = _el(`
-          <div class="person-row">
-            <div class="avatar-sm">${(c.name || c.email)[0].toUpperCase()}</div>
-            <div class="person-info">
-              <div class="person-name">${Utils.escapeHtml(c.name || c.email)}</div>
-              <div class="person-email">${Utils.escapeHtml(c.email)}</div>
-            </div>
-            <div class="person-actions">
-              <button class="btn btn-primary btn-sm">Add</button>
-            </div>
-          </div>
-        `);
-        row.querySelector('button').addEventListener('click', async () => {
-          await Data.sendFriendRequest(c.email);
-          _renderFriends();
-          Utils.showToast(`Friend request sent to ${c.email}!`);
+      for (const c of contacts) {
+        if (!c.email || skip.has(c.email.toLowerCase())) continue;
+        if (suggestions.some(s => s.email.toLowerCase() === c.email.toLowerCase())) continue;
+        suggestions.push({
+          email: c.email,
+          name: c.name || c.email,
+          picture: null,
+          source: 'From your contacts'
         });
-        list.appendChild(row);
+      }
+    } catch (e) { console.warn('[Suggestions] Contacts failed:', e); }
+
+    // Always show the section — display a message if no suggestions found
+    block.hidden = false;
+    if (!suggestions.length) {
+      list.innerHTML = '<p class="muted-text">No suggestions yet — they\'ll appear as people share content with you or you add contacts.</p>';
+      return;
+    }
+
+    suggestions.slice(0, 10).forEach(s => {
+      const avatarHtml = s.picture
+        ? `<img src="${Utils.escapeHtml(s.picture)}" alt="" class="avatar-sm avatar-sm-img" referrerpolicy="no-referrer" />`
+        : `<div class="avatar-sm">${(s.name || s.email)[0].toUpperCase()}</div>`;
+      const row = _el(`
+        <div class="person-row person-row--clickable">
+          ${avatarHtml}
+          <div class="person-info">
+            <div class="person-name">${Utils.escapeHtml(s.name || s.email)}</div>
+            <div class="person-email">${Utils.escapeHtml(s.email)} <span style="opacity:.55">· ${Utils.escapeHtml(s.source)}</span></div>
+          </div>
+          <div class="person-actions">
+            <button class="btn btn-primary btn-sm suggest-add-btn">Add</button>
+          </div>
+        </div>
+      `);
+      row.addEventListener('click', () => {
+        navigate('user-profile', { person: { email: s.email, displayName: s.name, picture: s.picture } });
       });
-      block.hidden = false;
-    } catch { /* contacts permission not granted or unavailable — skip silently */ }
+      row.querySelector('.suggest-add-btn').addEventListener('click', async e => {
+        e.stopPropagation();
+        const btn = e.target;
+        btn.disabled = true; btn.textContent = 'Sending...';
+        try {
+          await Data.sendFriendRequest(s.email);
+          btn.textContent = 'Sent!';
+          Utils.showToast(`Friend request sent to ${s.email}!`);
+        } catch {
+          Utils.showToast('Could not send request', 'error');
+          btn.disabled = false; btn.textContent = 'Add';
+        }
+      });
+      list.appendChild(row);
+    });
+    block.hidden = false;
   }
 
   /* ── User Profile (other people) ─────────────── */

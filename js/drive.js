@@ -371,7 +371,10 @@ const Drive = (() => {
     removePermission:  _dw(removePermission, async () => {}),
     makePublic:        _dw(makePublic,     async () => {}),
     listSharedFilesWithName: _dw(listSharedFilesWithName, async () => []),
-    listSharedWithMe:  _dw(listSharedWithMe, async () => []),
+    listSharedWithMe:  _dw(listSharedWithMe, async () => [
+      { id: 'demo/shared/1', name: 'Beach Trip', owners: [{ displayName: 'Jordan Lee', emailAddress: 'jordan.lee@example.com', photoLink: null }], createdTime: new Date(Date.now() - 86400000 * 3).toISOString(), sharedWithMeTime: new Date(Date.now() - 86400000 * 3).toISOString() },
+      { id: 'demo/shared/2', name: 'Graduation', owners: [{ displayName: 'Sam Rivera', emailAddress: 'sam.rivera@example.com', photoLink: null }], createdTime: new Date(Date.now() - 86400000 * 7).toISOString(), sharedWithMeTime: new Date(Date.now() - 86400000 * 7).toISOString() },
+    ]),
     listAllFiles:      _dw(listAllFiles,   async () => ({ files: [], nextPageToken: null })),
     getQuota:          _dw(getQuota,       async () => ({ limit: '16106127360', usage: '1073741824', usageInDrive: '536870912' })),
     listLargeFiles:    _dw(listLargeFiles, async () => []),
@@ -380,6 +383,10 @@ const Drive = (() => {
     getThumbnailUrl,
     getMediaUrl,
     getFileAsBlob:     _dw(getFileAsBlob, getFileAsBlob),
-    getContacts:       _dw(getContacts,   async () => [])
+    getContacts:       _dw(getContacts,   async () => [
+      { email: 'alex.chen@example.com', name: 'Alex Chen' },
+      { email: 'maya.patel@example.com', name: 'Maya Patel' },
+      { email: 'chris.nguyen@example.com', name: 'Chris Nguyen' },
+    ])
   };
 })();
