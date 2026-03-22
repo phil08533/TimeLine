@@ -327,10 +327,14 @@ const UI = (() => {
 
     document.querySelectorAll('.page').forEach(p => { p.style.display = 'none'; });
     _currentPage = page;
-    // Pause VoidScroll video when navigating away
+    // Pause VoidScroll video and exit fullscreen when navigating away
     if (page !== 'voidscroll') {
       document.querySelectorAll('#vs-feed video').forEach(v => v.pause());
       document.getElementById('voidscroll-btn')?.classList.remove('active');
+      document.getElementById('page-voidscroll')?.classList.remove('vs-fullscreen');
+      _vsFullscreen = false;
+      const fsBtn = document.getElementById('vs-fullscreen-btn');
+      if (fsBtn) fsBtn.textContent = '⛶';
     }
     // Lock body scroll while VoidScroll is active (it uses position:fixed)
     document.body.style.overflow = page === 'voidscroll' ? 'hidden' : '';
@@ -834,6 +838,7 @@ const UI = (() => {
           sharerPicture: me?.picture || null,
           sharedAt: p.createdAt || new Date().toISOString(),
           caption: p.caption,
+          voidscroll: p.voidscroll || null,
           _isOwn: true
         }))
       ];
@@ -851,7 +856,11 @@ const UI = (() => {
           const allFiles = await Drive.listFiles(album.id);
           const metaFile = allFiles.find(f => f.name === '_meta.json');
           const files    = allFiles.filter(f => f.mimeType?.startsWith('image/') || f.mimeType?.startsWith('video/'));
-          return { ...album, files, metaFileId: metaFile?.id || null };
+          let voidscroll = album.voidscroll || null;
+          if (!voidscroll && metaFile) {
+            try { const m = await Drive.readJsonFile(metaFile.id); voidscroll = m.voidscroll || null; } catch {}
+          }
+          return { ...album, files, metaFileId: metaFile?.id || null, voidscroll };
         } catch {
           return { ...album, files: [], metaFileId: null };
         }
@@ -887,7 +896,11 @@ const UI = (() => {
           const allFiles = await Drive.listFiles(album.id);
           const metaFile = allFiles.find(f => f.name === '_meta.json');
           const files    = allFiles.filter(f => f.mimeType?.startsWith('image/') || f.mimeType?.startsWith('video/'));
-          return { ...album, files, metaFileId: metaFile?.id || null };
+          let voidscroll = album.voidscroll || null;
+          if (!voidscroll && metaFile) {
+            try { const m = await Drive.readJsonFile(metaFile.id); voidscroll = m.voidscroll || null; } catch {}
+          }
+          return { ...album, files, metaFileId: metaFile?.id || null, voidscroll };
         } catch { return { ...album, files: [], metaFileId: null }; }
       }));
       _feedAlbums = _feedAlbums.concat(loaded);
@@ -1186,7 +1199,7 @@ const UI = (() => {
       if (_feedFilter === 'friends') return !a._isOwn;
       if (_feedFilter === 'mine')    return a._isOwn;
       return true;
-    }).filter(a => a.files.length > 0 || a.caption);
+    }).filter(a => a.files.length > 0 || a.caption || a.voidscroll);
 
     if (!visible.length) {
       empty.hidden = false;
@@ -1220,7 +1233,7 @@ const UI = (() => {
       if (_feedFilter === 'friends') return !a._isOwn;
       if (_feedFilter === 'mine')    return a._isOwn;
       return true;
-    }).filter(a => a.files.length > 0 || a.caption);
+    }).filter(a => a.files.length > 0 || a.caption || a.voidscroll);
     visible.forEach(album => _renderSingleFeedPost(album, list));
     // Move sentinel to end
     const sentinel = document.getElementById('feed-sentinel');
@@ -1252,7 +1265,19 @@ const UI = (() => {
       </div>` : '';
 
     // Text-only detection
-    const isTextOnly = count === 0 && !!album.caption;
+    const isTextOnly = count === 0 && !!album.caption && !album.voidscroll;
+
+    // VoidScroll embed
+    const vsEmbed = album.voidscroll ? `
+      <div class="vs-embed">
+        <video class="vs-embed-video" src="${Utils.escapeHtml(album.voidscroll.videoUrl)}" playsinline muted loop preload="none"></video>
+        <div class="vs-embed-overlay">
+          <button class="vs-embed-play-btn" aria-label="Play">▶</button>
+        </div>
+        <button class="vs-embed-open-btn">
+          <span class="voidscroll-icon" style="font-size:.85rem">∞</span> View in VoidScroll
+        </button>
+      </div>` : '';
 
     const card = _el(`
       <div class="post-card${isTextOnly ? ' post-card--text-only' : ''}" tabindex="-1" data-album-id="${Utils.escapeHtml(album.id)}">
@@ -1267,6 +1292,7 @@ const UI = (() => {
         ${isTextOnly
           ? `<div class="post-text-only-body">${Utils.escapeHtml(album.caption)}</div>`
           : (album.caption ? `<div class="post-caption">${Utils.escapeHtml(album.caption)}</div>` : '')}
+        ${vsEmbed}
         ${mediaHtml}
         <div class="post-actions">
           <div class="post-reactions" id="reactions-${Utils.escapeHtml(album.id)}">
@@ -1457,6 +1483,27 @@ const UI = (() => {
       const fakeColl = { id: album.id, name: album.caption || album.name || 'Post', isPost: true };
       _openShareModal(album.id, fakeColl);
     });
+
+    // VoidScroll embed — play and open-in-vs buttons
+    const vsEmbedEl = card.querySelector('.vs-embed');
+    if (vsEmbedEl) {
+      const vsVid    = vsEmbedEl.querySelector('.vs-embed-video');
+      const vsPlay   = vsEmbedEl.querySelector('.vs-embed-play-btn');
+      const vsOverlay = vsEmbedEl.querySelector('.vs-embed-overlay');
+      vsPlay.addEventListener('click', e => {
+        e.stopPropagation();
+        vsOverlay.hidden = true;
+        vsVid.muted = false; vsVid.play().catch(() => {});
+      });
+      vsVid.addEventListener('click', () => {
+        vsVid.paused ? vsVid.play() : vsVid.pause();
+      });
+      vsEmbedEl.querySelector('.vs-embed-open-btn')?.addEventListener('click', e => {
+        e.stopPropagation();
+        vsVid.pause();
+        _openVoidScroll();
+      });
+    }
 
     // Clicking the author avatar or name opens their profile
     if (!album._isOwn && album.sharerEmail) {
@@ -3998,16 +4045,31 @@ const UI = (() => {
     _vsPlaylist = _vsShuffle(pool);
   }
 
+  let _vsFullscreen = false;  // inline (false) vs fullscreen (true)
+
   function _vsMakeSlide(item) {
     const slide = document.createElement('div');
     slide.className = 'vs-slide';
+    slide.dataset.vsUrl   = item.url;
+    slide.dataset.vsTitle = item.title;
+    slide.dataset.vsCat   = item.category;
+    slide.dataset.vsId    = item.id || '';
 
     const vid = document.createElement('video');
     vid.src     = item.url;
     vid.setAttribute('playsinline', '');
     vid.muted   = _vsMuted;
-    vid.preload = 'none';   // browser won't download until play() is called
-    vid.addEventListener('click', () => { vid.paused ? vid.play() : vid.pause(); });
+    vid.preload = 'none';
+
+    // Tap center to play/pause (not left/right zones)
+    vid.addEventListener('click', e => {
+      const rect = vid.getBoundingClientRect();
+      const x = e.clientX - rect.left;
+      const pct = x / rect.width;
+      if (pct > 0.25 && pct < 0.75) {
+        vid.paused ? vid.play() : vid.pause();
+      }
+    });
     vid.addEventListener('ended', () => {
       const feed = document.getElementById('vs-feed');
       if (feed) feed.scrollBy({ top: feed.offsetHeight, behavior: 'smooth' });
@@ -4016,6 +4078,74 @@ const UI = (() => {
       const feed = document.getElementById('vs-feed');
       if (feed) feed.scrollBy({ top: feed.offsetHeight, behavior: 'smooth' });
     });
+
+    // Scrub bar
+    const scrubWrap = document.createElement('div');
+    scrubWrap.className = 'vs-scrub';
+    const scrubBar = document.createElement('input');
+    scrubBar.type = 'range'; scrubBar.min = '0'; scrubBar.max = '1000'; scrubBar.value = '0';
+    scrubBar.className = 'vs-scrub-bar';
+    const scrubTime = document.createElement('span');
+    scrubTime.className = 'vs-scrub-time';
+    scrubTime.textContent = '0:00 / 0:00';
+    scrubWrap.append(scrubBar, scrubTime);
+
+    function fmtTime(s) {
+      if (!isFinite(s)) return '0:00';
+      const m = Math.floor(s / 60), sec = Math.floor(s % 60);
+      return m + ':' + String(sec).padStart(2, '0');
+    }
+    vid.addEventListener('timeupdate', () => {
+      if (!vid.duration) return;
+      scrubBar.value = String(Math.round((vid.currentTime / vid.duration) * 1000));
+      scrubTime.textContent = fmtTime(vid.currentTime) + ' / ' + fmtTime(vid.duration);
+    });
+    scrubBar.addEventListener('input', () => {
+      if (!vid.duration) return;
+      vid.currentTime = (parseInt(scrubBar.value) / 1000) * vid.duration;
+    });
+
+    // Hold left/right for seek
+    let _holdTimer = null, _holdInterval = null;
+    function _startHold(dir) {
+      _holdTimer = setTimeout(() => {
+        _holdInterval = setInterval(() => {
+          vid.currentTime = Math.max(0, Math.min(vid.duration || 0, vid.currentTime + dir * 2));
+        }, 100);
+      }, 300);
+    }
+    function _stopHold() {
+      clearTimeout(_holdTimer); clearInterval(_holdInterval);
+      _holdTimer = null; _holdInterval = null;
+    }
+    // Touch hold zones (left 25% = rewind, right 25% = fast-forward)
+    vid.addEventListener('touchstart', e => {
+      const rect = vid.getBoundingClientRect();
+      const x = e.touches[0].clientX - rect.left;
+      const pct = x / rect.width;
+      if (pct < 0.25)      _startHold(-1);
+      else if (pct > 0.75) _startHold(1);
+    }, { passive: true });
+    vid.addEventListener('touchend', _stopHold, { passive: true });
+    vid.addEventListener('touchcancel', _stopHold, { passive: true });
+    // Mouse hold zones
+    vid.addEventListener('mousedown', e => {
+      const rect = vid.getBoundingClientRect();
+      const x = e.clientX - rect.left;
+      const pct = x / rect.width;
+      if (pct < 0.25)      _startHold(-1);
+      else if (pct > 0.75) _startHold(1);
+    });
+    vid.addEventListener('mouseup', _stopHold);
+    vid.addEventListener('mouseleave', _stopHold);
+
+    // Seek indicator overlays
+    const seekRew = document.createElement('div');
+    seekRew.className = 'vs-seek-indicator vs-seek-rew';
+    seekRew.innerHTML = '⏪';
+    const seekFwd = document.createElement('div');
+    seekFwd.className = 'vs-seek-indicator vs-seek-fwd';
+    seekFwd.innerHTML = '⏩';
 
     const grad = document.createElement('div');
     grad.className = 'vs-slide-grad';
@@ -4026,7 +4156,21 @@ const UI = (() => {
       <p class="vs-slide-title">${Utils.escapeHtml(item.title)}</p>
       <p class="vs-slide-cat">${Utils.escapeHtml(item.category)}</p>`;
 
-    slide.append(vid, grad, info);
+    // Right-side action buttons (share)
+    const actions = document.createElement('div');
+    actions.className = 'vs-slide-actions';
+    actions.innerHTML = `
+      <button class="vs-action-btn vs-share-btn" title="Share this video">
+        <span class="vs-action-icon">↗</span>
+        <span class="vs-action-label">Share</span>
+      </button>`;
+
+    actions.querySelector('.vs-share-btn').addEventListener('click', e => {
+      e.stopPropagation();
+      _openVsShareModal(item);
+    });
+
+    slide.append(vid, seekRew, seekFwd, grad, info, scrubWrap, actions);
     return slide;
   }
 
@@ -4107,26 +4251,31 @@ const UI = (() => {
 
   function _vsBuildDOM(page) {
     page.innerHTML = `
-      <button class="vs-close-btn" id="vs-close-btn" aria-label="Close VoidScroll">&times;</button>
       <div class="vs-cats" id="vs-cats">
         ${VS_CATS.map(c => `<button class="filter-pill${c === _vsCat ? ' active' : ''}" data-cat="${c}">${c === 'all' ? 'All' : c[0].toUpperCase() + c.slice(1)}</button>`).join('')}
       </div>
       <div class="vs-feed" id="vs-feed"></div>
-      <button class="vs-mute-btn" id="vs-mute-btn" aria-label="Toggle mute">🔇</button>
+      <div class="vs-bottom-bar">
+        <button class="vs-mute-btn" id="vs-mute-btn" aria-label="Toggle mute">🔇</button>
+        <button class="vs-fullscreen-btn" id="vs-fullscreen-btn" aria-label="Toggle fullscreen">⛶</button>
+      </div>
       <div class="vs-loading" id="vs-loading">
         <div class="vs-spinner"></div>
         <span>Loading videos…</span>
         <button class="btn btn-ghost btn-sm" id="vs-loading-back" style="margin-top:1rem;color:#fff;border-color:rgba(255,255,255,.3)">Go Back</button>
       </div>`;
 
-    document.getElementById('vs-close-btn').addEventListener('click', () => {
-      navigate('feed');
-    });
-
     document.getElementById('vs-mute-btn').addEventListener('click', () => {
       _vsMuted = !_vsMuted;
       document.getElementById('vs-mute-btn').textContent = _vsMuted ? '🔇' : '🔊';
       document.querySelectorAll('#vs-feed video').forEach(v => { v.muted = _vsMuted; });
+    });
+
+    document.getElementById('vs-fullscreen-btn').addEventListener('click', () => {
+      _vsFullscreen = !_vsFullscreen;
+      const pg = document.getElementById('page-voidscroll');
+      if (pg) pg.classList.toggle('vs-fullscreen', _vsFullscreen);
+      document.getElementById('vs-fullscreen-btn').textContent = _vsFullscreen ? '⊡' : '⛶';
     });
 
     document.getElementById('vs-cats').addEventListener('click', e => {
@@ -4219,6 +4368,141 @@ const UI = (() => {
       }, 1800);
     }
     navigate('voidscroll');
+  }
+
+  // --- VoidScroll share modal ---
+  async function _openVsShareModal(item) {
+    let circles = [], albums = [];
+    try { [circles, albums] = await Promise.all([
+      Data.listCircles().catch(() => []),
+      Data.listCollections().catch(() => [])
+    ]); } catch {}
+    albums = albums.filter(a => !a.isPost);
+
+    openModal(`
+      <h3>Share Video</h3>
+      <p class="vs-share-preview"><span class="voidscroll-icon" style="font-size:1rem">∞</span> ${Utils.escapeHtml(item.title)}</p>
+      <div class="share-options-grid">
+        <button type="button" class="share-option-btn" id="vs-share-opt-feed">
+          <span class="share-option-icon">📣</span>
+          <span class="share-option-label">Post to Feed</span>
+          <span class="share-option-desc">Share on your timeline</span>
+        </button>
+        <button type="button" class="share-option-btn" id="vs-share-opt-circle">
+          <span class="share-option-icon">⭕</span>
+          <span class="share-option-label">Send to Circle</span>
+          <span class="share-option-desc">Share in a circle</span>
+        </button>
+        <button type="button" class="share-option-btn" id="vs-share-opt-album">
+          <span class="share-option-icon">🗂</span>
+          <span class="share-option-label">Save to Album</span>
+          <span class="share-option-desc">Bookmark in an album</span>
+        </button>
+      </div>
+      <div id="vs-share-step" class="share-step"></div>
+      <div class="modal-actions" style="margin-top:.75rem">
+        <button type="button" class="btn btn-ghost btn-sm modal-cancel-btn">Cancel</button>
+      </div>
+    `);
+    document.querySelector('.modal-cancel-btn').addEventListener('click', closeModal);
+
+    const step = document.getElementById('vs-share-step');
+    function setActive(id) {
+      document.querySelectorAll('.share-option-btn').forEach(b => b.classList.toggle('active', b.id === id));
+    }
+
+    // Metadata embedded in the post
+    const vsData = { type: 'voidscroll', videoUrl: item.url, videoTitle: item.title, videoCategory: item.category, videoId: item.id || '' };
+
+    // --- Post to Feed ---
+    document.getElementById('vs-share-opt-feed').addEventListener('click', () => {
+      setActive('vs-share-opt-feed');
+      step.innerHTML = `
+        <div class="form-block" style="margin-top:0">
+          <div class="form-field">
+            <label>Caption <span class="muted-text small">(optional)</span></label>
+            <textarea id="vs-share-caption" class="input" rows="2" placeholder="Say something…"></textarea>
+          </div>
+          <button id="vs-share-feed-btn" class="btn btn-primary btn-sm">Post</button>
+        </div>`;
+      document.getElementById('vs-share-feed-btn').addEventListener('click', async () => {
+        const caption = document.getElementById('vs-share-caption').value.trim();
+        Utils.showLoading();
+        try {
+          await Data.createPost({
+            caption: caption || 'Check out this video!',
+            name: item.title,
+            sharing: 'friends',
+            voidscroll: vsData
+          });
+          closeModal(); Utils.showToast('Posted to feed!');
+          if (_currentPage === 'feed') navigate('feed');
+        } catch { Utils.showToast('Failed to post', 'error'); }
+        finally { Utils.hideLoading(); }
+      });
+    });
+
+    // --- Send to Circle ---
+    document.getElementById('vs-share-opt-circle').addEventListener('click', () => {
+      setActive('vs-share-opt-circle');
+      if (!circles.length) {
+        step.innerHTML = '<p class="muted-text small">You don\'t have any circles yet.</p>';
+        return;
+      }
+      step.innerHTML = `
+        <div class="form-block" style="margin-top:0">
+          <div class="form-field">
+            <label>Choose a circle</label>
+            <select id="vs-share-circle-sel" class="select-sm" style="width:100%">
+              ${circles.map(c => `<option value="${Utils.escapeHtml(c.id)}">${Utils.escapeHtml(c.name)}</option>`).join('')}
+            </select>
+          </div>
+          <div class="form-field">
+            <label>Caption <span class="muted-text small">(optional)</span></label>
+            <textarea id="vs-share-circle-cap" class="input" rows="2" placeholder="Say something…"></textarea>
+          </div>
+          <button id="vs-share-circle-btn" class="btn btn-primary btn-sm">Share</button>
+        </div>`;
+      document.getElementById('vs-share-circle-btn').addEventListener('click', async () => {
+        const fid = document.getElementById('vs-share-circle-sel').value;
+        const cap = document.getElementById('vs-share-circle-cap').value.trim();
+        Utils.showLoading();
+        try {
+          await Data.createCirclePost(fid, { caption: cap || 'Check out this video!', voidscroll: vsData });
+          closeModal(); Utils.showToast('Shared to circle!');
+        } catch { Utils.showToast('Failed to share', 'error'); }
+        finally { Utils.hideLoading(); }
+      });
+    });
+
+    // --- Save to Album ---
+    document.getElementById('vs-share-opt-album').addEventListener('click', () => {
+      setActive('vs-share-opt-album');
+      if (!albums.length) {
+        step.innerHTML = '<p class="muted-text small">You don\'t have any albums yet.</p>';
+        return;
+      }
+      step.innerHTML = `
+        <div class="form-block" style="margin-top:0">
+          <div class="form-field">
+            <label>Choose an album</label>
+            <select id="vs-share-album-sel" class="select-sm" style="width:100%">
+              ${albums.map(a => `<option value="${Utils.escapeHtml(a.id)}">${Utils.escapeHtml(a.name)}</option>`).join('')}
+            </select>
+          </div>
+          <button id="vs-share-album-btn" class="btn btn-primary btn-sm">Save</button>
+        </div>`;
+      document.getElementById('vs-share-album-btn').addEventListener('click', async () => {
+        const targetId = document.getElementById('vs-share-album-sel').value;
+        Utils.showLoading();
+        try {
+          const ref = { type: 'voidscroll_ref', ...vsData, addedAt: new Date().toISOString() };
+          await Drive.createJsonFile(`_vs_${item.id || Date.now()}.json`, ref, targetId);
+          closeModal(); Utils.showToast('Saved to album!');
+        } catch { Utils.showToast('Failed to save', 'error'); }
+        finally { Utils.hideLoading(); }
+      });
+    });
   }
 
   /* ── Lightbox ─────────────────────────────────── */
