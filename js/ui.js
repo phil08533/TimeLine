@@ -1489,6 +1489,14 @@ const UI = (() => {
       const vsVid    = vsEmbedEl.querySelector('.vs-embed-video');
       const vsPlay   = vsEmbedEl.querySelector('.vs-embed-play-btn');
       const vsOverlay = vsEmbedEl.querySelector('.vs-embed-overlay');
+
+      // Auto-size container to match video dimensions once loaded
+      vsVid.addEventListener('loadedmetadata', () => {
+        const w = vsVid.videoWidth, h = vsVid.videoHeight;
+        if (w && h) vsEmbedEl.style.aspectRatio = w + '/' + h;
+      });
+      vsVid.preload = 'metadata';
+
       vsPlay.addEventListener('click', e => {
         e.stopPropagation();
         vsOverlay.hidden = true;
