@@ -1942,13 +1942,13 @@ textarea.input { resize: vertical; min-height: 80px; }
 
 /* ── VoidScroll slide-down banner ── */
 .voidscroll-banner {
-  position: fixed; top: 48px; left: 50%; transform: translateX(-50%);
+  position: fixed; top: calc(var(--topbar-h, 52px) + 1%); left: 50%; transform: translateX(-50%);
   z-index: 1100;
   display: flex; align-items: center; gap: .55rem;
   background: linear-gradient(90deg, #2dd4bf, #06b6d4, #3b82f6);
   color: #fff;
   padding: .45rem 1.25rem;
-  border-radius: 0 0 999px 999px;
+  border-radius: 999px;
   font-size: .875rem; font-weight: 600;
   box-shadow: 0 4px 18px rgba(59,130,246,.35);
   pointer-events: none;
@@ -1970,11 +1970,13 @@ textarea.input { resize: vertical; min-height: 80px; }
 /* ── VoidScroll native page ── */
 .page-voidscroll {
   padding: 0 !important;
-  height: calc(100vh - var(--topbar-h));
+  position: fixed;
+  top: var(--topbar-h, 52px);
+  left: 0; right: 0; bottom: 0;
+  z-index: 50;
   background: #000;
-  position: relative;
   overflow: hidden;
-  border-radius: 14px;  /* rounded card — clips the snap feed inside */
+  border-radius: 0;
 }
 
 /* Floating category bar — glassmorphism overlay, doesn't push content */
@@ -2016,7 +2018,7 @@ textarea.input { resize: vertical; min-height: 80px; }
 /* Each slide = exactly one viewport */
 .vs-slide {
   width: 100%;
-  height: calc(100vh - var(--topbar-h));
+  height: 100%;
   scroll-snap-align: start;
   scroll-snap-stop: always;
   position: relative;
