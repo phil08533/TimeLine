@@ -59,7 +59,7 @@ const Data = (() => {
   }
 
   function _defaultSettings() {
-    return { theme: 'minimal', colorTheme: 'paper', defaultSharing: 'friends', allowCopying: 'friends' };
+    return { theme: 'soft', colorTheme: 'slate', defaultSharing: 'friends', allowCopying: 'friends' };
   }
 
   async function saveSettings(data) {
