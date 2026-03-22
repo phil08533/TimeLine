@@ -3729,46 +3729,42 @@ const UI = (() => {
       <div class="profile-stat"><span class="profile-stat-n">${isFriend ? '✓' : '—'}</span><span class="profile-stat-l">Friend</span></div>
     `;
 
-    // Posts grid
+    // Posts — render using the same feed-style cards
     grid.innerHTML = '';
     if (!theirPosts.length) { empty.hidden = false; return; }
 
-    for (const folder of theirPosts.slice(0, 30)) {
+    const albums = await Promise.all(theirPosts.slice(0, 30).map(async folder => {
       try {
-        const files   = await Drive.listFiles(folder.id);
-        const meta    = files.find(f => f.name === '_meta.json');
-        const media   = files.filter(f => f.mimeType?.startsWith('image/') || f.mimeType?.startsWith('video/'));
-        const cover   = media[0];
-        const timeStr = Utils.formatRelativeTime(folder.sharedWithMeTime || folder.createdTime);
-
-        let caption = '';
-        if (meta) {
+        const allFiles = await Drive.listFiles(folder.id);
+        const metaFile = allFiles.find(f => f.name === '_meta.json');
+        const files    = allFiles.filter(f => f.mimeType?.startsWith('image/') || f.mimeType?.startsWith('video/'));
+        let caption = '', voidscroll = null;
+        if (metaFile) {
           try {
-            const m = await Drive.readJsonFile(meta.id);
+            const m = await Drive.readJsonFile(metaFile.id);
             caption = m.caption || '';
+            voidscroll = m.voidscroll || null;
           } catch {}
         }
+        return {
+          id: folder.id,
+          name: folder.name,
+          caption,
+          voidscroll,
+          sharer: name,
+          sharerEmail: email,
+          sharerPicture: picture,
+          sharedAt: folder.sharedWithMeTime || folder.createdTime,
+          files,
+          metaFileId: metaFile?.id || null,
+          _isOwn: false
+        };
+      } catch { return null; }
+    }));
 
-        const card = _el(`
-          <div class="profile-post-card">
-            <div class="profile-post-thumb"></div>
-            ${caption ? `<div class="profile-post-caption">${Utils.escapeHtml(caption.length > 60 ? caption.slice(0, 60) + '…' : caption)}</div>` : ''}
-            <div class="profile-post-actions">
-              <span class="profile-post-time muted-text small">${timeStr}</span>
-              ${media.length > 1 ? `<span class="muted-text small">${media.length} photos</span>` : ''}
-            </div>
-          </div>
-        `);
-
-        if (cover) {
-          _loadCardCover(folder.id, card.querySelector('.profile-post-thumb'));
-          card.style.cursor = 'pointer';
-          card.addEventListener('click', () => openLightbox(cover.id, folder.id, { canCopy: true, thumbnailLink: cover.thumbnailLink }));
-        }
-        grid.appendChild(card);
-      } catch {}
-    }
-    if (!grid.children.length) empty.hidden = false;
+    const visible = albums.filter(a => a && (a.files.length > 0 || a.caption || a.voidscroll));
+    if (!visible.length) { empty.hidden = false; return; }
+    visible.forEach(album => _renderSingleFeedPost(album, grid));
   }
 
   /* ── Profile ─────────────────────────────────── */
@@ -3900,37 +3896,39 @@ const UI = (() => {
 
       posts.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
 
-      posts.forEach(post => {
-        const card = _el(`
-          <div class="profile-post-card">
-            <div class="profile-post-thumb"></div>
-            ${post.caption ? `<div class="profile-post-caption">${Utils.escapeHtml(post.caption.length > 60 ? post.caption.slice(0, 60) + '…' : post.caption)}</div>` : ''}
-            <div class="profile-post-actions">
-              <span class="profile-post-time muted-text small">${Utils.formatRelativeTime(post.createdAt)}</span>
-              <button class="btn btn-ghost btn-sm danger-btn profile-post-del">Delete</button>
-            </div>
-          </div>
-        `);
+      const me = Auth.getCurrentUser();
 
-        _loadCardCover(post.folderId, card.querySelector('.profile-post-thumb'));
+      // Build feed-style album objects and render with the same function used for the feed
+      const albums = await Promise.all(posts.map(async post => {
+        try {
+          const allFiles  = await Drive.listFiles(post.folderId);
+          const metaFile  = allFiles.find(f => f.name === '_meta.json');
+          const files     = allFiles.filter(f => f.mimeType?.startsWith('image/') || f.mimeType?.startsWith('video/'));
+          let voidscroll  = post.voidscroll || null;
+          if (!voidscroll && metaFile) {
+            try { const m = await Drive.readJsonFile(metaFile.id); voidscroll = m.voidscroll || null; } catch {}
+          }
+          return {
+            id: post.folderId,
+            name: post.name,
+            caption: post.caption,
+            sharer: me?.name || 'You',
+            sharerEmail: me?.email || '',
+            sharerPicture: me?.picture || null,
+            sharedAt: post.createdAt || new Date().toISOString(),
+            voidscroll,
+            files,
+            metaFileId: metaFile?.id || null,
+            _isOwn: true
+          };
+        } catch {
+          return null;
+        }
+      }));
 
-        card.querySelector('.profile-post-del').addEventListener('click', async e => {
-          e.stopPropagation();
-          if (!confirm('Delete this post? This cannot be undone.')) return;
-          const btn = e.currentTarget;
-          btn.disabled = true;
-          try {
-            await Data.deleteCollection(post.folderId);
-            card.remove();
-            Utils.showToast('Post deleted');
-            if (!grid.children.length) empty.hidden = false;
-            // Also refresh stats
-            _renderProfileStats();
-          } catch { Utils.showToast('Could not delete post', 'error'); btn.disabled = false; }
-        });
-
-        grid.appendChild(card);
-      });
+      const visible = albums.filter(a => a && (a.files.length > 0 || a.caption || a.voidscroll));
+      if (!visible.length) { empty.hidden = false; return; }
+      visible.forEach(album => _renderSingleFeedPost(album, grid));
     } catch {
       grid.innerHTML = '';
       Utils.showToast('Could not load posts', 'error');
