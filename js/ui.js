@@ -1269,7 +1269,7 @@ const UI = (() => {
     // VoidScroll embed
     const vsEmbed = album.voidscroll ? `
       <div class="vs-embed">
-        <video class="vs-embed-video" src="${Utils.escapeHtml(album.voidscroll.videoUrl)}" playsinline muted loop preload="none"></video>
+        <video class="vs-embed-video" src="${Utils.escapeHtml(album.voidscroll.videoUrl)}" playsinline muted loop preload="metadata"></video>
         <div class="vs-embed-overlay">
           <button class="vs-embed-play-btn" aria-label="Play">▶</button>
         </div>
