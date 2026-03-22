@@ -4142,16 +4142,20 @@ const UI = (() => {
     }
 
     try {
+      Utils.showToast('[debug] Fetching videos.json…', 'info');
       const controller = new AbortController();
       const timer = setTimeout(() => controller.abort(), 15000);
       const res = await fetch('https://raw.githubusercontent.com/phil08533/VoidScroll/main/videos.json', { signal: controller.signal });
       clearTimeout(timer);
-      if (!res.ok) throw new Error(res.status);
+      Utils.showToast(`[debug] Fetch status: ${res.status}`, 'info');
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const raw  = await res.json();
+      Utils.showToast(`[debug] Got ${raw.length} videos`, 'info');
       const seen = new Set();
       _vsAllVideos = raw.filter(v => v.url && !seen.has(v.url) && seen.add(v.url));
       _vsReady = true;
     } catch (err) {
+      Utils.showToast(`[debug] VS fetch FAILED: ${err.name}: ${err.message}`, 'error');
       const el = document.getElementById('vs-loading');
       if (el) el.innerHTML = `<span style="padding:1.5rem;text-align:center">Could not load videos.<br>${Utils.escapeHtml(err.message || 'Check your connection.')}</span>
         <button class="btn btn-ghost btn-sm" style="margin-top:.75rem;color:#fff;border-color:rgba(255,255,255,.3)" onclick="location.hash='feed'">Go Back</button>`;
@@ -4160,9 +4164,11 @@ const UI = (() => {
 
     if (_currentPage !== 'voidscroll') return;
     _vsRebuildPlaylist();
+    Utils.showToast(`[debug] Playlist: ${_vsPlaylist.length} items, populating feed…`, 'info');
     _vsPopulateFeed();
     const loading = document.getElementById('vs-loading');
     if (loading) loading.hidden = true;
+    Utils.showToast('[debug] VoidScroll ready', 'info');
   }
 
   function _openVoidScroll() {
