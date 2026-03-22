@@ -1493,11 +1493,7 @@ const UI = (() => {
       return;
     }
 
-    const mode = Auth.isDemoMode() ? 'demo' : 'live';
-    Utils.showToast(`[debug] Loading comments (${mode}) fileId: ${fileId.slice(0,20)}…`, 'info');
-
     Drive.getComments(fileId).then(comments => {
-      Utils.showToast(`[debug] Got ${comments.length} comment(s)`, 'info');
       section.innerHTML = '';
       if (comments.length) {
         const area = document.createElement('div');
@@ -1520,7 +1516,6 @@ const UI = (() => {
       }
       _renderCommentInput(album, section, fileId, countBtn);
     }).catch(err => {
-      Utils.showToast(`[debug] Comment load FAILED: ${err?.status || err?.message || err}`, 'error');
       section.innerHTML = '';
       const msg = err?.status === 403
         ? "Comments unavailable — the owner hasn't granted commenter access."
@@ -1546,16 +1541,13 @@ const UI = (() => {
       const btn = form.querySelector('[type="submit"]');
       btn.disabled = true;
       try {
-        Utils.showToast(`[debug] Posting comment to ${fileId.slice(0,20)}…`, 'info');
         await Drive.addComment(fileId, text);
-        Utils.showToast('[debug] Comment posted OK', 'info');
         input.value = '';
         // Reload comments
         countBtn.dataset.loaded = '0';
         section.innerHTML = '';
         _loadPostComments(album, section, countBtn);
       } catch (err) {
-        Utils.showToast(`[debug] Post FAILED: ${err?.status} ${err?.detail || err?.message || err}`, 'error');
         if (err?.status === 403) Utils.showToast('No commenter access on this post', 'error');
         else Utils.showToast('Failed to post comment', 'error');
       } finally { btn.disabled = false; }
@@ -4094,6 +4086,7 @@ const UI = (() => {
 
   function _vsBuildDOM(page) {
     page.innerHTML = `
+      <button class="vs-close-btn" id="vs-close-btn" aria-label="Close VoidScroll">&times;</button>
       <div class="vs-cats" id="vs-cats">
         ${VS_CATS.map(c => `<button class="filter-pill${c === _vsCat ? ' active' : ''}" data-cat="${c}">${c === 'all' ? 'All' : c[0].toUpperCase() + c.slice(1)}</button>`).join('')}
       </div>
@@ -4103,6 +4096,10 @@ const UI = (() => {
         <div class="vs-spinner"></div>
         <span>Loading videos…</span>
       </div>`;
+
+    document.getElementById('vs-close-btn').addEventListener('click', () => {
+      navigate('feed');
+    });
 
     document.getElementById('vs-mute-btn').addEventListener('click', () => {
       _vsMuted = !_vsMuted;
@@ -4145,15 +4142,19 @@ const UI = (() => {
     }
 
     try {
-      const res = await fetch('https://raw.githubusercontent.com/phil08533/VoidScroll/main/videos.json');
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), 15000);
+      const res = await fetch('https://raw.githubusercontent.com/phil08533/VoidScroll/main/videos.json', { signal: controller.signal });
+      clearTimeout(timer);
       if (!res.ok) throw new Error(res.status);
       const raw  = await res.json();
       const seen = new Set();
       _vsAllVideos = raw.filter(v => v.url && !seen.has(v.url) && seen.add(v.url));
       _vsReady = true;
-    } catch {
+    } catch (err) {
       const el = document.getElementById('vs-loading');
-      if (el) el.innerHTML = '<span style="padding:1.5rem;text-align:center">Could not load videos.<br>Check your connection.</span>';
+      if (el) el.innerHTML = `<span style="padding:1.5rem;text-align:center">Could not load videos.<br>${Utils.escapeHtml(err.message || 'Check your connection.')}</span>
+        <button class="btn btn-ghost btn-sm" style="margin-top:.75rem;color:#fff;border-color:rgba(255,255,255,.3)" onclick="location.hash='feed'">Go Back</button>`;
       return;
     }
 
@@ -4293,12 +4294,9 @@ const UI = (() => {
     let _commentsEnabled = true;
     async function refreshComments() {
       _commentsEnabled = true;
-      const mode = Auth.isDemoMode() ? 'demo' : 'live';
       commArea.innerHTML = '<span class="muted-text small">Loading…</span>';
-      Utils.showToast(`[debug] Lightbox comments (${mode}) fileId: ${(ctx.fileId || 'NULL').slice(0,20)}…`, 'info');
       try {
         const comments = await Drive.getComments(ctx.fileId);
-        Utils.showToast(`[debug] Lightbox got ${comments.length} comment(s)`, 'info');
         if (!comments.length) {
           commArea.innerHTML = '<span class="muted-text small">No comments yet.</span>';
           return;
@@ -4313,7 +4311,6 @@ const UI = (() => {
           `));
         });
       } catch (err) {
-        Utils.showToast(`[debug] Lightbox comments FAILED: ${err?.status || err?.message || err}`, 'error');
         if (err?.status === 403) {
           _commentsEnabled = false;
           commArea.innerHTML = '<span class="muted-text small">Comments unavailable — owner hasn\'t granted commenter access.</span>';
@@ -4371,13 +4368,10 @@ const UI = (() => {
       const text = input.value.trim();
       if (!text) return;
       try {
-        Utils.showToast(`[debug] Lightbox posting to ${ctx.fileId.slice(0,20)}…`, 'info');
         await Drive.addComment(ctx.fileId, text);
-        Utils.showToast('[debug] Lightbox comment posted OK', 'info');
         input.value = '';
         refreshComments();
       } catch (err) {
-        Utils.showToast(`[debug] Lightbox post FAILED: ${err?.status || err?.message || err}`, 'error');
         if (err?.status === 403) {
           _commentsEnabled = false;
           Utils.showToast('No commenter access on this file', 'error');
