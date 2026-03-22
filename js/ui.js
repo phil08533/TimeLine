@@ -327,11 +327,10 @@ const UI = (() => {
 
     document.querySelectorAll('.page').forEach(p => { p.style.display = 'none'; });
     _currentPage = page;
-    // Pause VoidScroll video and exit fullscreen when navigating away
+    // Pause VoidScroll video and reset zoom when navigating away
     if (page !== 'voidscroll') {
-      document.querySelectorAll('#vs-feed video').forEach(v => v.pause());
+      document.querySelectorAll('#vs-feed video').forEach(v => { v.pause(); v.style.objectFit = ''; });
       document.getElementById('voidscroll-btn')?.classList.remove('active');
-      document.getElementById('page-voidscroll')?.classList.remove('vs-fullscreen');
       _vsFullscreen = false;
       const fsBtn = document.getElementById('vs-fullscreen-btn');
       if (fsBtn) fsBtn.textContent = '⛶';
@@ -4169,21 +4168,7 @@ const UI = (() => {
       <p class="vs-slide-title">${Utils.escapeHtml(item.title)}</p>
       <p class="vs-slide-cat">${Utils.escapeHtml(item.category)}</p>`;
 
-    // Right-side action buttons (share)
-    const actions = document.createElement('div');
-    actions.className = 'vs-slide-actions';
-    actions.innerHTML = `
-      <button class="vs-action-btn vs-share-btn" title="Share this video">
-        <span class="vs-action-icon">↗</span>
-        <span class="vs-action-label">Share</span>
-      </button>`;
-
-    actions.querySelector('.vs-share-btn').addEventListener('click', e => {
-      e.stopPropagation();
-      _openVsShareModal(item);
-    });
-
-    slide.append(vid, seekRew, seekFwd, grad, info, scrubWrap, actions);
+    slide.append(vid, seekRew, seekFwd, grad, info, scrubWrap);
     return slide;
   }
 
@@ -4212,7 +4197,12 @@ const UI = (() => {
     if (!feed) return;
     const end = Math.min(_vsLoaded + VS_BATCH, _vsPlaylist.length);
     for (let i = _vsLoaded; i < end; i++) {
-      feed.appendChild(_vsMakeSlide(_vsPlaylist[i]));
+      const slide = _vsMakeSlide(_vsPlaylist[i]);
+      if (_vsFullscreen) {
+        const v = slide.querySelector('video');
+        if (v) v.style.objectFit = 'cover';
+      }
+      feed.appendChild(slide);
     }
     _vsLoaded = end;
   }
@@ -4270,12 +4260,13 @@ const UI = (() => {
       <div class="vs-feed" id="vs-feed"></div>
       <div class="vs-bottom-bar">
         <button class="vs-mute-btn" id="vs-mute-btn" aria-label="Toggle mute">🔇</button>
-        <button class="vs-fullscreen-btn" id="vs-fullscreen-btn" aria-label="Toggle fullscreen">⛶</button>
+        <button class="vs-fullscreen-btn" id="vs-fullscreen-btn" aria-label="Toggle zoom">⛶</button>
+        <button class="vs-share-btn" id="vs-share-btn" aria-label="Share video">↗</button>
       </div>
       <div class="vs-loading" id="vs-loading">
         <div class="vs-spinner"></div>
         <span>Loading videos…</span>
-        <button class="btn btn-ghost btn-sm" id="vs-loading-back" style="margin-top:1rem;color:#fff;border-color:rgba(255,255,255,.3)">Go Back</button>
+        <button class="btn btn-ghost btn-sm" id="vs-loading-back" style="margin-top:1rem">Go Back</button>
       </div>`;
 
     document.getElementById('vs-mute-btn').addEventListener('click', () => {
@@ -4286,9 +4277,28 @@ const UI = (() => {
 
     document.getElementById('vs-fullscreen-btn').addEventListener('click', () => {
       _vsFullscreen = !_vsFullscreen;
-      const pg = document.getElementById('page-voidscroll');
-      if (pg) pg.classList.toggle('vs-fullscreen', _vsFullscreen);
+      // Toggle object-fit on all videos: contain (letterbox) vs cover (zoom-to-fill)
+      document.querySelectorAll('#vs-feed .vs-slide video').forEach(v => {
+        v.style.objectFit = _vsFullscreen ? 'cover' : '';
+      });
       document.getElementById('vs-fullscreen-btn').textContent = _vsFullscreen ? '⊡' : '⛶';
+    });
+
+    document.getElementById('vs-share-btn').addEventListener('click', () => {
+      // Share whichever slide is currently visible
+      const feed = document.getElementById('vs-feed');
+      if (!feed) return;
+      const h = feed.offsetHeight || 1;
+      const idx = Math.round(feed.scrollTop / h);
+      const slide = feed.querySelectorAll('.vs-slide')[idx];
+      if (!slide) return;
+      const item = {
+        url:      slide.dataset.vsUrl   || '',
+        title:    slide.dataset.vsTitle || 'VoidScroll Video',
+        category: slide.dataset.vsCat   || '',
+        id:       slide.dataset.vsId    || ''
+      };
+      _openVsShareModal(item);
     });
 
     document.getElementById('vs-cats').addEventListener('click', e => {
@@ -4343,8 +4353,8 @@ const UI = (() => {
       console.error('[VoidScroll] load failed:', err);
       if (loadingEl) {
         loadingEl.innerHTML = `<span style="padding:1.5rem;text-align:center">Could not load videos.<br>${Utils.escapeHtml(err.message || 'Check your connection.')}</span>
-          <button class="btn btn-ghost btn-sm vs-retry-btn" style="margin-top:.75rem;color:#fff;border-color:rgba(255,255,255,.3)">Retry</button>
-          <button class="btn btn-ghost btn-sm vs-goback-btn" style="margin-top:.5rem;color:#fff;border-color:rgba(255,255,255,.3)">Go Back</button>`;
+          <button class="btn btn-ghost btn-sm vs-retry-btn" style="margin-top:.75rem">Retry</button>
+          <button class="btn btn-ghost btn-sm vs-goback-btn" style="margin-top:.5rem">Go Back</button>`;
         loadingEl.querySelector('.vs-retry-btn').addEventListener('click', () => {
           _vsReady = false;
           loadingEl.innerHTML = '<div class="vs-spinner"></div><span>Loading videos…</span>';

@@ -1985,17 +1985,11 @@ textarea.input { resize: vertical; min-height: 80px; }
   top: var(--topbar-h, 52px);
   left: 0; right: 0; bottom: 0;
   z-index: 50;
-  background: #000;
+  background: var(--bg);
   overflow: hidden;
   border-radius: 0;
 }
-/* Fullscreen mode — cover topbar too */
-.page-voidscroll.vs-fullscreen {
-  top: 0;
-  z-index: 1200;
-}
-
-/* Floating category bar — glassmorphism overlay, doesn't push content */
+/* Floating category bar — uses user's theme colors */
 .vs-cats {
   position: absolute;
   top: 0; left: 0; right: 0;
@@ -2005,15 +1999,15 @@ textarea.input { resize: vertical; min-height: 80px; }
   padding: .45rem .6rem;
   overflow-x: auto; overflow-y: hidden;
   scrollbar-width: none;
-  background: linear-gradient(to bottom, rgba(0,0,0,.6) 0%, transparent 100%);
+  background: linear-gradient(to bottom, color-mix(in srgb, var(--bg) 70%, transparent) 0%, transparent 100%);
 }
 .vs-cats::-webkit-scrollbar { display: none; }
 .vs-cats .filter-pill {
   flex-shrink: 0;
   font-size: .72rem; padding: .25rem .65rem;
-  background: rgba(255,255,255,.12) !important;
-  color:      rgba(255,255,255,.85) !important;
-  border-color: rgba(255,255,255,.15) !important;
+  background: color-mix(in srgb, var(--surface) 80%, transparent) !important;
+  color:      var(--text) !important;
+  border-color: var(--border) !important;
 }
 .vs-cats .filter-pill.active {
   background:   var(--accent)     !important;
@@ -2038,14 +2032,14 @@ textarea.input { resize: vertical; min-height: 80px; }
   scroll-snap-align: start;
   scroll-snap-stop: always;
   position: relative;
-  background: #000;
+  background: var(--bg);
   overflow: hidden;
 }
 .vs-slide video {
   width: 100%; height: 100%;
   display: block;
   object-fit: contain;
-  background: #000;
+  background: var(--bg);
   cursor: pointer;
 }
 
@@ -2053,7 +2047,7 @@ textarea.input { resize: vertical; min-height: 80px; }
 .vs-slide-grad {
   position: absolute; bottom: 0; left: 0; right: 0;
   height: 45%;
-  background: linear-gradient(transparent, rgba(0,0,0,.75));
+  background: linear-gradient(transparent, color-mix(in srgb, var(--bg) 75%, transparent));
   pointer-events: none;
 }
 .vs-slide-info {
@@ -2063,8 +2057,8 @@ textarea.input { resize: vertical; min-height: 80px; }
 }
 .vs-slide-title {
   font-size: .9rem; font-weight: 600;
-  color: #fff;
-  text-shadow: 0 1px 4px rgba(0,0,0,.6);
+  color: var(--text);
+  text-shadow: 0 1px 4px color-mix(in srgb, var(--bg) 60%, transparent);
   margin: 0 0 .2rem;
   display: -webkit-box;
   -webkit-line-clamp: 2;
@@ -2073,7 +2067,7 @@ textarea.input { resize: vertical; min-height: 80px; }
 }
 .vs-slide-cat {
   font-size: .7rem;
-  color: rgba(255,255,255,.6);
+  color: var(--muted);
   text-transform: uppercase;
   letter-spacing: .07em;
   margin: 0;
@@ -2085,12 +2079,12 @@ textarea.input { resize: vertical; min-height: 80px; }
   z-index: 8;
   display: flex; align-items: center; gap: .5rem;
   padding: .3rem .75rem .45rem;
-  background: linear-gradient(transparent, rgba(0,0,0,.55));
+  background: linear-gradient(transparent, color-mix(in srgb, var(--bg) 55%, transparent));
 }
 .vs-scrub-bar {
   flex: 1; height: 4px;
   -webkit-appearance: none; appearance: none;
-  background: rgba(255,255,255,.25);
+  background: var(--border);
   border-radius: 2px;
   outline: none; cursor: pointer;
 }
@@ -2098,20 +2092,20 @@ textarea.input { resize: vertical; min-height: 80px; }
   -webkit-appearance: none; appearance: none;
   width: 12px; height: 12px;
   border-radius: 50%;
-  background: #fff;
+  background: var(--accent);
   border: none;
   cursor: pointer;
 }
 .vs-scrub-bar::-moz-range-thumb {
   width: 12px; height: 12px;
   border-radius: 50%;
-  background: #fff;
+  background: var(--accent);
   border: none;
   cursor: pointer;
 }
 .vs-scrub-time {
   font-size: .65rem;
-  color: rgba(255,255,255,.7);
+  color: var(--muted);
   white-space: nowrap;
   min-width: 5.5em;
   text-align: right;
@@ -2128,39 +2122,29 @@ textarea.input { resize: vertical; min-height: 80px; }
 .vs-seek-rew { left: 1.5rem; }
 .vs-seek-fwd { right: 1.5rem; }
 
-/* ── Right-side action buttons (share) ── */
-.vs-slide-actions {
-  position: absolute; right: .6rem; bottom: 4.5rem;
-  z-index: 9;
-  display: flex; flex-direction: column; align-items: center; gap: .6rem;
-}
-.vs-action-btn {
-  display: flex; flex-direction: column; align-items: center; gap: .15rem;
-  background: none; border: none; color: #fff; cursor: pointer;
-  filter: drop-shadow(0 1px 3px rgba(0,0,0,.6));
-}
-.vs-action-icon { font-size: 1.5rem; }
-.vs-action-label { font-size: .6rem; text-transform: uppercase; letter-spacing: .03em; }
-
-/* ── Bottom bar (mute + fullscreen) ── */
+/* ── Bottom bar (mute + fullscreen + share) ── */
 .vs-bottom-bar {
   position: absolute; right: .75rem; bottom: 2.8rem;
   z-index: 10;
   display: flex; flex-direction: column; gap: .4rem;
 }
 .vs-mute-btn,
-.vs-fullscreen-btn {
+.vs-fullscreen-btn,
+.vs-bottom-bar .vs-share-btn {
   width: 38px; height: 38px;
   border-radius: 50%;
-  background: rgba(0,0,0,.45);
-  border: 1px solid rgba(255,255,255,.18);
-  color: #fff; font-size: .95rem;
+  background: color-mix(in srgb, var(--surface) 85%, transparent);
+  border: 1px solid var(--border);
+  color: var(--text); font-size: .95rem;
   display: flex; align-items: center; justify-content: center;
   cursor: pointer;
   backdrop-filter: blur(6px);
 }
 .vs-mute-btn:hover,
-.vs-fullscreen-btn:hover { background: rgba(0,0,0,.65); }
+.vs-fullscreen-btn:hover,
+.vs-bottom-bar .vs-share-btn:hover {
+  background: var(--surface);
+}
 
 /* Full-screen loading / error */
 .vs-loading {
@@ -2168,15 +2152,15 @@ textarea.input { resize: vertical; min-height: 80px; }
   display: flex; flex-direction: column;
   align-items: center; justify-content: center;
   gap: .75rem;
-  background: #000;
-  color: rgba(255,255,255,.7);
+  background: var(--bg);
+  color: var(--muted);
   font-size: .9rem;
 }
 .vs-loading[hidden] { display: none !important; }
 .vs-spinner {
   width: 32px; height: 32px;
-  border: 3px solid rgba(255,255,255,.15);
-  border-top-color: rgba(255,255,255,.8);
+  border: 3px solid var(--border);
+  border-top-color: var(--accent);
   border-radius: 50%;
   animation: spin .7s linear infinite;
 }
