@@ -279,7 +279,8 @@ const Drive = (() => {
   }
 
   async function addComment(fileId, content) {
-    return _json(`${BASE}/files/${fileId}/comments`, {
+    const params = new URLSearchParams({ fields: 'id,content,author,createdTime' });
+    return _json(`${BASE}/files/${fileId}/comments?${params}`, {
       method: 'POST',
       headers: _headers({ 'Content-Type': 'application/json' }),
       body: JSON.stringify({ content })
