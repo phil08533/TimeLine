@@ -3966,9 +3966,9 @@ const UI = (() => {
   /* ── VoidScroll ─────────────────────────────────── */
 
   const VS_CATS = [
-    'all','nature','space','animals','science','tech','history',
+    'all','nature','space','animals','science','technology','history',
     'sleep','environment','travel','engineering','vehicles','math',
-    'gaming','docs','diy'
+    'gaming','documentary','diy'
   ];
   let _vsAllVideos   = [];
   let _vsPlaylist    = [];
