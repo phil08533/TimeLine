@@ -1555,7 +1555,7 @@ const UI = (() => {
         section.innerHTML = '';
         _loadPostComments(album, section, countBtn);
       } catch (err) {
-        Utils.showToast(`[debug] Post FAILED: ${err?.status || err?.message || err}`, 'error');
+        Utils.showToast(`[debug] Post FAILED: ${err?.status} ${err?.detail || err?.message || err}`, 'error');
         if (err?.status === 403) Utils.showToast('No commenter access on this post', 'error');
         else Utils.showToast('Failed to post comment', 'error');
       } finally { btn.disabled = false; }

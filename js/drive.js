@@ -35,7 +35,11 @@ const Drive = (() => {
           throw Object.assign(new Error('Rate limit'), { status: 429 });
         throw Object.assign(new Error('Forbidden'), { status: 403 });
       }
-      if (!r.ok) throw Object.assign(new Error(`HTTP ${r.status}`), { status: r.status });
+      if (!r.ok) {
+        const body = await r.clone().json().catch(() => ({}));
+        const detail = body?.error?.message || '';
+        throw Object.assign(new Error(detail || `HTTP ${r.status}`), { status: r.status, detail });
+      }
       return r;
     }, 3, 1000);
   }
