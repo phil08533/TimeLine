@@ -3970,26 +3970,35 @@ const UI = (() => {
       `).join('');
     }).catch(() => {});
 
+    // Replace nodes to prevent duplicate listeners on repeated visits
     document.querySelectorAll('.theme-pill').forEach(btn => {
-      btn.addEventListener('click', async () => {
-        Theme.setVisual(btn.dataset.vtheme);
-        document.querySelectorAll('.theme-pill').forEach(b => b.classList.toggle('active', b === btn));
+      const fresh = btn.cloneNode(true);
+      btn.parentNode.replaceChild(fresh, btn);
+      fresh.addEventListener('click', async () => {
+        Theme.setVisual(fresh.dataset.vtheme);
+        document.querySelectorAll('.theme-pill').forEach(b => b.classList.toggle('active', b === fresh));
         await _saveSettingsFromUI();
       });
     });
 
     document.querySelectorAll('.color-dot').forEach(btn => {
-      btn.addEventListener('click', async () => {
-        Theme.setColor(btn.dataset.ctheme);
-        document.querySelectorAll('.color-dot').forEach(b => b.classList.toggle('active', b === btn));
+      const fresh = btn.cloneNode(true);
+      btn.parentNode.replaceChild(fresh, btn);
+      fresh.addEventListener('click', async () => {
+        Theme.setColor(fresh.dataset.ctheme);
+        document.querySelectorAll('.color-dot').forEach(b => b.classList.toggle('active', b === fresh));
         const lbl = document.getElementById('color-theme-label');
-        if (lbl) lbl.textContent = Theme.getColorName(btn.dataset.ctheme);
+        if (lbl) lbl.textContent = Theme.getColorName(fresh.dataset.ctheme);
         await _saveSettingsFromUI();
       });
     });
 
     ['default-sharing', 'allow-copying'].forEach(id => {
-      document.getElementById(id)?.addEventListener('change', _saveSettingsFromUI);
+      const el = document.getElementById(id);
+      if (!el) return;
+      const fresh = el.cloneNode(true);
+      el.parentNode.replaceChild(fresh, el);
+      fresh.addEventListener('change', _saveSettingsFromUI);
     });
   }
 
@@ -4011,7 +4020,11 @@ const UI = (() => {
       defaultSharing: document.getElementById('default-sharing')?.value || 'friends',
       allowCopying:   document.getElementById('allow-copying')?.value   || 'friends'
     };
-    await Data.saveSettings(settings).catch(() => {});
+    try {
+      await Data.saveSettings(settings);
+    } catch {
+      Utils.showToast('Could not save settings', 'error');
+    }
   }
 
   /* ── VoidScroll ─────────────────────────────────── */
