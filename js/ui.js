@@ -328,6 +328,8 @@ const UI = (() => {
       document.querySelectorAll('#vs-feed video').forEach(v => v.pause());
       document.getElementById('voidscroll-btn')?.classList.remove('active');
     }
+    // Lock body scroll while VoidScroll is active (it uses position:fixed)
+    document.body.style.overflow = page === 'voidscroll' ? 'hidden' : '';
 
     switch (page) {
       case 'feed':
@@ -1511,9 +1513,10 @@ const UI = (() => {
       _renderCommentInput(album, section, fileId, countBtn);
     }).catch(err => {
       section.innerHTML = '';
-      if (err?.status === 403) {
-        section.appendChild(_el('<span class="muted-text small">Comments unavailable — owner hasn\'t granted commenter access.</span>'));
-      }
+      const msg = err?.status === 403
+        ? "Comments unavailable — the owner hasn't granted commenter access."
+        : 'Failed to load comments. Please try again.';
+      section.appendChild(_el(`<span class="muted-text small">${Utils.escapeHtml(msg)}</span>`));
       _renderCommentInput(album, section, fileId, countBtn);
     });
   }
@@ -4120,7 +4123,7 @@ const UI = (() => {
     if (_vsReady) { _vsPlayCurrent(); return; }
 
     try {
-      const res = await fetch('https://voidscroll.org/videos.json');
+      const res = await fetch('https://raw.githubusercontent.com/phil08533/VoidScroll/main/videos.json');
       if (!res.ok) throw new Error(res.status);
       const raw  = await res.json();
       const seen = new Set();
