@@ -4141,34 +4141,46 @@ const UI = (() => {
       return;
     }
 
+    const loadingEl = document.getElementById('vs-loading');
+
     try {
-      Utils.showToast('[debug] Fetching videos.json…', 'info');
       const controller = new AbortController();
       const timer = setTimeout(() => controller.abort(), 15000);
       const res = await fetch('https://raw.githubusercontent.com/phil08533/VoidScroll/main/videos.json', { signal: controller.signal });
       clearTimeout(timer);
-      Utils.showToast(`[debug] Fetch status: ${res.status}`, 'info');
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const raw  = await res.json();
-      Utils.showToast(`[debug] Got ${raw.length} videos`, 'info');
+      if (!res.ok) throw new Error('HTTP ' + res.status);
+
+      // Parse JSON manually to handle truncated/malformed files
+      const text = await res.text();
+      let raw;
+      try {
+        raw = JSON.parse(text);
+      } catch (_jsonErr) {
+        // Try to salvage truncated JSON array – find last complete object
+        const lastBrace = text.lastIndexOf('}');
+        if (lastBrace > 0) {
+          const patched = text.slice(0, lastBrace + 1) + ']';
+          raw = JSON.parse(patched);
+        } else {
+          throw _jsonErr;
+        }
+      }
+
       const seen = new Set();
       _vsAllVideos = raw.filter(v => v.url && !seen.has(v.url) && seen.add(v.url));
       _vsReady = true;
     } catch (err) {
-      Utils.showToast(`[debug] VS fetch FAILED: ${err.name}: ${err.message}`, 'error');
-      const el = document.getElementById('vs-loading');
-      if (el) el.innerHTML = `<span style="padding:1.5rem;text-align:center">Could not load videos.<br>${Utils.escapeHtml(err.message || 'Check your connection.')}</span>
-        <button class="btn btn-ghost btn-sm" style="margin-top:.75rem;color:#fff;border-color:rgba(255,255,255,.3)" onclick="location.hash='feed'">Go Back</button>`;
+      console.error('[VoidScroll] load failed:', err);
+      if (loadingEl) loadingEl.innerHTML = `<span style="padding:1.5rem;text-align:center">Could not load videos.<br>${Utils.escapeHtml(err.message || 'Check your connection.')}</span>
+        <button class="btn btn-ghost btn-sm" style="margin-top:.75rem;color:#fff;border-color:rgba(255,255,255,.3)" onclick="_vsReady=false;document.getElementById('vs-loading').innerHTML='<div class=vs-spinner></div><span>Loading videos…</span>';location.hash='voidscroll'">Retry</button>
+        <button class="btn btn-ghost btn-sm" style="margin-top:.5rem;color:#fff;border-color:rgba(255,255,255,.3)" onclick="location.hash='feed'">Go Back</button>`;
       return;
     }
 
     if (_currentPage !== 'voidscroll') return;
     _vsRebuildPlaylist();
-    Utils.showToast(`[debug] Playlist: ${_vsPlaylist.length} items, populating feed…`, 'info');
     _vsPopulateFeed();
-    const loading = document.getElementById('vs-loading');
-    if (loading) loading.hidden = true;
-    Utils.showToast('[debug] VoidScroll ready', 'info');
+    if (loadingEl) loadingEl.hidden = true;
   }
 
   function _openVoidScroll() {
