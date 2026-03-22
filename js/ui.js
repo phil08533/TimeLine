@@ -3561,7 +3561,7 @@ const UI = (() => {
           source: 'Shared content with you'
         });
       }
-    } catch {}
+    } catch (e) { console.warn('[Suggestions] Feed folders failed:', e); }
 
     // Source 2: Circle members you're not friends with
     try {
@@ -3578,7 +3578,7 @@ const UI = (() => {
           });
         }
       }
-    } catch {}
+    } catch (e) { console.warn('[Suggestions] Circles failed:', e); }
 
     // Source 3: Google Contacts
     try {
@@ -3593,9 +3593,14 @@ const UI = (() => {
           source: 'From your contacts'
         });
       }
-    } catch {}
+    } catch (e) { console.warn('[Suggestions] Contacts failed:', e); }
 
-    if (!suggestions.length) return;
+    // Always show the section — display a message if no suggestions found
+    block.hidden = false;
+    if (!suggestions.length) {
+      list.innerHTML = '<p class="muted-text">No suggestions yet — they\'ll appear as people share content with you or you add contacts.</p>';
+      return;
+    }
 
     suggestions.slice(0, 10).forEach(s => {
       const avatarHtml = s.picture
