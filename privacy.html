@@ -1,0 +1,104 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="soft" data-color="slate">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Privacy Policy — My Circle</title>
+  <meta name="description" content="Privacy policy for My Circle, a private photo and file sharing app powered by Google Drive." />
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>◎</text></svg>" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="css/styles.css" />
+  <style>
+    body { background: var(--bg); color: var(--text); }
+    .privacy { max-width: 720px; margin: 0 auto; padding: 2rem 1.5rem 4rem; }
+    .privacy-nav {
+      display: flex; align-items: center; gap: .5rem;
+      padding: 1.25rem 0; margin-bottom: 1rem;
+      border-bottom: 1px solid var(--border);
+    }
+    .privacy-nav a { font-weight: 700; font-size: 1.1rem; text-decoration: none; color: var(--text); display: flex; align-items: center; gap: .5rem; }
+    .privacy-nav .brand-mark { font-size: 1.4rem; }
+    .privacy h1 { font-size: 1.75rem; margin: 2rem 0 .5rem; }
+    .privacy h2 { font-size: 1.2rem; margin: 2rem 0 .5rem; }
+    .privacy p, .privacy li { line-height: 1.7; color: var(--text); }
+    .privacy ul { padding-left: 1.25rem; }
+    .privacy li { margin-bottom: .4rem; }
+    .privacy .updated { color: var(--muted); font-size: .85rem; margin-bottom: 2rem; }
+    .privacy a { color: var(--accent); text-decoration: none; }
+    .privacy a:hover { text-decoration: underline; }
+    .privacy-footer { text-align: center; padding: 2rem 0; font-size: .82rem; color: var(--muted); border-top: 1px solid var(--border); margin-top: 3rem; }
+  </style>
+</head>
+<body>
+  <div class="privacy">
+    <nav class="privacy-nav">
+      <a href="landing.html"><span class="brand-mark">◎</span> My Circle</a>
+    </nav>
+
+    <h1>Privacy Policy</h1>
+    <p class="updated">Last updated: March 23, 2026</p>
+
+    <h2>Overview</h2>
+    <p>My Circle is a client-side web application with <strong>no backend server</strong>. We do not collect, store, or transmit any of your personal data. All your content lives exclusively in your own Google Drive account.</p>
+
+    <h2>What data we access</h2>
+    <p>When you sign in with Google, My Circle requests the following permissions:</p>
+    <ul>
+      <li><strong>Google Drive</strong> (<code>drive</code>) — to create, read, and manage files within the <code>mycircle/</code> folder in your Google Drive. This is how your posts, circles, collections, and friend list are stored.</li>
+      <li><strong>Basic profile</strong> (<code>openid</code>, <code>email</code>, <code>profile</code>) — to display your name and profile picture within the app.</li>
+    </ul>
+
+    <h2>What we do NOT do</h2>
+    <ul>
+      <li>We do <strong>not</strong> collect, store, or have access to your data — everything stays in your Google Drive</li>
+      <li>We do <strong>not</strong> operate any backend servers or databases</li>
+      <li>We do <strong>not</strong> use cookies, analytics, telemetry, or tracking of any kind</li>
+      <li>We do <strong>not</strong> serve ads</li>
+      <li>We do <strong>not</strong> sell or share your information with third parties</li>
+      <li>We do <strong>not</strong> access your Google Contacts</li>
+    </ul>
+
+    <h2>How your data is stored</h2>
+    <ul>
+      <li>All content (photos, posts, circles, friend lists) is stored as files and folders in your Google Drive under <code>mycircle/</code></li>
+      <li>Sharing uses Google Drive's native permission system — when you share with a friend, you are granting them Google Drive access to that specific folder</li>
+      <li>Comments use the Google Drive Comments API, stored on the file itself</li>
+      <li>Reactions are stored as a <code>reactions.json</code> file inside each collection folder</li>
+      <li>Your friend list is stored in <code>mycircle/contacts/friends.json</code>, readable only by you</li>
+    </ul>
+
+    <h2>Authentication &amp; tokens</h2>
+    <p>OAuth tokens from Google Sign-In are stored in <code>sessionStorage</code> only. They are automatically cleared when you close your browser tab. No tokens are persisted to disk, sent to any server, or stored long-term.</p>
+
+    <h2>Data deletion</h2>
+    <p>Since all data lives in your Google Drive, you have full control:</p>
+    <ul>
+      <li>Delete posts, circles, or collections from within the app</li>
+      <li>Delete the entire <code>mycircle/</code> folder from your Google Drive to remove all app data</li>
+      <li>Revoke My Circle's access at any time from your <a href="https://myaccount.google.com/permissions" target="_blank" rel="noopener">Google Account permissions</a></li>
+    </ul>
+
+    <h2>Open source</h2>
+    <p>My Circle is fully open source under the MIT License. You can inspect, audit, and self-host the entire application. <a href="https://github.com/phil08533/TimeLine" target="_blank" rel="noopener">View the source code on GitHub</a>.</p>
+
+    <h2>Google API Services</h2>
+    <p>My Circle's use and transfer of information received from Google APIs adheres to the <a href="https://developers.google.com/terms/api-services-user-data-policy" target="_blank" rel="noopener">Google API Services User Data Policy</a>, including the Limited Use requirements.</p>
+
+    <h2>Changes to this policy</h2>
+    <p>If this policy is updated, the "Last updated" date at the top will be revised. Since My Circle has no backend and collects no data, material changes are unlikely.</p>
+
+    <h2>Contact</h2>
+    <p>For questions about this privacy policy, open an issue on <a href="https://github.com/phil08533/TimeLine/issues" target="_blank" rel="noopener">GitHub</a>.</p>
+
+    <div class="privacy-footer">
+      <p>
+        <a href="landing.html">Home</a> ·
+        <a href="index.html">Open App</a> ·
+        <a href="https://github.com/phil08533/TimeLine" target="_blank" rel="noopener">GitHub</a>
+      </p>
+    </div>
+  </div>
+</body>
+</html>

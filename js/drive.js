@@ -49,20 +49,6 @@ const Drive = (() => {
     return r.json();
   }
 
-  /* ── Google People API (Contacts) ────────── */
-
-  async function getContacts() {
-    const url = 'https://people.googleapis.com/v1/people/me/connections' +
-      '?personFields=names,emailAddresses&pageSize=200&sortOrder=LAST_NAME_ASCENDING';
-    const data = await _json(url, { headers: _headers() });
-    return (data.connections || [])
-      .map(p => ({
-        email: p.emailAddresses?.[0]?.value || null,
-        name:  p.names?.[0]?.displayName   || null
-      }))
-      .filter(c => c.email);
-  }
-
   /* ── Demo store ───────────────────────────── */
 
   const _demo = {
@@ -382,11 +368,6 @@ const Drive = (() => {
     addComment:        _dw(addComment,     _demoAddComment),
     getThumbnailUrl,
     getMediaUrl,
-    getFileAsBlob:     _dw(getFileAsBlob, getFileAsBlob),
-    getContacts:       _dw(getContacts,   async () => [
-      { email: 'alex.chen@example.com', name: 'Alex Chen' },
-      { email: 'maya.patel@example.com', name: 'Maya Patel' },
-      { email: 'chris.nguyen@example.com', name: 'Chris Nguyen' },
-    ])
+    getFileAsBlob:     _dw(getFileAsBlob, getFileAsBlob)
   };
 })();
