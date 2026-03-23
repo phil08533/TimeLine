@@ -1655,14 +1655,16 @@ textarea.input { resize: vertical; min-height: 80px; }
 }
 .post-menu-btn:hover { background: var(--bg); color: var(--text); }
 .post-menu {
-  position: absolute; top: calc(100% + .3rem); right: 0;
-  min-width: 160px;
+  min-width: 168px;
   background: var(--surface);
   border: 1px solid var(--border);
   border-radius: var(--radius);
   box-shadow: 0 4px 16px rgba(0,0,0,.12);
-  z-index: 50;
   overflow: hidden;
+}
+.post-menu-fixed {
+  position: fixed;
+  z-index: 9999;
 }
 .post-menu-item {
   display: block; width: 100%;
@@ -1970,6 +1972,21 @@ textarea.input { resize: vertical; min-height: 80px; }
   min-height: 80px;
   display: flex; align-items: center;
 }
+
+/* ── Circle feed ── */
+#circle-detail-feed { display: flex; flex-direction: column; gap: .75rem; }
+
+/* ── Circle / small post card variant ── */
+.post-card--sm .post-card-header { padding: .55rem .75rem .35rem; }
+.post-card--sm .post-avatar { width: 30px; height: 30px; }
+.post-card--sm .post-avatar-initials { font-size: .75rem; }
+.post-card--sm .post-author-name { font-size: .82rem; }
+.post-card--sm .post-author-time { font-size: .68rem; }
+.post-card--sm .post-caption { padding: .3rem .75rem .4rem; font-size: .82rem; }
+.post-card--sm .post-actions { padding: .4rem .75rem .5rem; gap: .3rem; }
+.post-card--sm .post-react-btn { font-size: .75rem; padding: .18rem .4rem; }
+.post-carousel--sm { aspect-ratio: 4/3; max-height: 340px; }
+.post-actions--sm { flex-wrap: wrap; }
 
 /* ── Video media items ── */
 .post-media-item--video { position: relative; }
