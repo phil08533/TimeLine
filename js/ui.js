@@ -1020,7 +1020,7 @@ const UI = (() => {
       bar.appendChild(circle);
     });
 
-    bar.hidden = bar.children.length <= 1; // hide if only "Add Story" button
+    bar.hidden = false; // always show so "Add Story" button is always accessible
   }
 
   function _openAddStoryModal() {
