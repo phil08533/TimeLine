@@ -17,7 +17,7 @@ const UI = (() => {
     document.querySelectorAll('#sign-in-btn, .auth-hero-signin, .auth-final-signin, .auth-signin-btn').forEach(btn => {
       btn.addEventListener('click', () => Auth.signIn());
     });
-    document.getElementById('demo-btn').addEventListener('click', () => Auth.signIn());
+    document.getElementById('demo-btn').addEventListener('click', () => Auth.signInDemo());
 
     const demoSignInLink = document.getElementById('demo-sign-in-link');
     if (demoSignInLink) demoSignInLink.addEventListener('click', e => { e.preventDefault(); Auth.signOut(); });
@@ -52,10 +52,12 @@ const UI = (() => {
 
     const hasCredentials = Auth.hasRealCredentials();
 
+    // Always show the demo button so visitors can try before signing in
+    if (demoBtn) demoBtn.hidden = false;
+
     if (!hasCredentials) {
-      // No Google Client ID — show demo option and setup panel
+      // No Google Client ID — show setup panel for self-hosters
       setupSection.hidden = false;
-      if (demoBtn) demoBtn.hidden = false;
       if (authNote) authNote.textContent = 'No Google Client ID configured — Sign in will use a local demo account.';
     } else {
       if (authNote) authNote.textContent = 'Your photos stay in your Google Drive. We never see them.';

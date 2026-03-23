@@ -253,6 +253,7 @@ const Auth = (() => {
     setClientId,
     clearClientId,
     hasRealCredentials,
-    requestReauth
+    requestReauth,
+    signInDemo: _signInDemo
   };
 })();
