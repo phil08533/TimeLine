@@ -1,8 +1,11 @@
 /* ============================================================
    My Circle — styles.css
    Theme system: [data-theme] × [data-color] on <html>
-   Visual themes: minimal | brutalist | soft | editorial
+   Visual themes: minimal | brutalist | soft | editorial | glass
    Color themes:  paper | midnight | forest | coral | slate
+                  ocean | lavender | ember | sand | rose
+                  arctic | bronze | plum | neon | sage
+                  charcoal | honey | dusk | mint | wine
    ============================================================ */
 
 /* ── Reset ── */
@@ -63,6 +66,156 @@ a { color: inherit; text-decoration: none; }
   --text:     #1a2840;
   --muted:    #607090;
   --accent:   #2c5fa0;
+  --accent-fg:#ffffff;
+}
+
+[data-color="ocean"] {
+  --bg:       #0a1628;
+  --surface:  #0f1f3a;
+  --border:   #1e3a5f;
+  --text:     #c8ddf0;
+  --muted:    #6a8eb8;
+  --accent:   #3b9eff;
+  --accent-fg:#ffffff;
+}
+
+[data-color="lavender"] {
+  --bg:       #f3eef8;
+  --surface:  #faf7ff;
+  --border:   #d4c4e8;
+  --text:     #2a1f3d;
+  --muted:    #8070a0;
+  --accent:   #7c4dbd;
+  --accent-fg:#ffffff;
+}
+
+[data-color="ember"] {
+  --bg:       #1a0e08;
+  --surface:  #2a1810;
+  --border:   #4a2e1e;
+  --text:     #f0d0b8;
+  --muted:    #b07850;
+  --accent:   #e8652a;
+  --accent-fg:#ffffff;
+}
+
+[data-color="sand"] {
+  --bg:       #f5f0e6;
+  --surface:  #faf8f2;
+  --border:   #d8ceb8;
+  --text:     #3a3428;
+  --muted:    #908060;
+  --accent:   #a08040;
+  --accent-fg:#ffffff;
+}
+
+[data-color="rose"] {
+  --bg:       #fdf0f3;
+  --surface:  #fff7f9;
+  --border:   #f0c0cc;
+  --text:     #3a1520;
+  --muted:    #b06878;
+  --accent:   #d44060;
+  --accent-fg:#ffffff;
+}
+
+[data-color="arctic"] {
+  --bg:       #eaf6f8;
+  --surface:  #f2fbfc;
+  --border:   #b0dce4;
+  --text:     #14363e;
+  --muted:    #508890;
+  --accent:   #1a9aaa;
+  --accent-fg:#ffffff;
+}
+
+[data-color="bronze"] {
+  --bg:       #181210;
+  --surface:  #262018;
+  --border:   #4a3a28;
+  --text:     #e0d0b8;
+  --muted:    #a09070;
+  --accent:   #c89a50;
+  --accent-fg:#1a1410;
+}
+
+[data-color="plum"] {
+  --bg:       #1a0e20;
+  --surface:  #281830;
+  --border:   #4a2860;
+  --text:     #e0c8f0;
+  --muted:    #9870b8;
+  --accent:   #c06ee8;
+  --accent-fg:#ffffff;
+}
+
+[data-color="neon"] {
+  --bg:       #0a0a0f;
+  --surface:  #12121a;
+  --border:   #2a2a3a;
+  --text:     #e0e0f0;
+  --muted:    #7878a0;
+  --accent:   #00e8a0;
+  --accent-fg:#0a0a0f;
+}
+
+[data-color="sage"] {
+  --bg:       #eef2ec;
+  --surface:  #f6f8f4;
+  --border:   #c4d0be;
+  --text:     #1e2a1a;
+  --muted:    #6a8060;
+  --accent:   #4a8040;
+  --accent-fg:#ffffff;
+}
+
+[data-color="charcoal"] {
+  --bg:       #1e1e22;
+  --surface:  #2a2a30;
+  --border:   #404048;
+  --text:     #d0d0d4;
+  --muted:    #88888e;
+  --accent:   #a0a0a8;
+  --accent-fg:#1e1e22;
+}
+
+[data-color="honey"] {
+  --bg:       #fdf8ee;
+  --surface:  #fffcf5;
+  --border:   #e8d8b0;
+  --text:     #3a3018;
+  --muted:    #a09060;
+  --accent:   #d4a020;
+  --accent-fg:#ffffff;
+}
+
+[data-color="dusk"] {
+  --bg:       #181620;
+  --surface:  #201e2a;
+  --border:   #383450;
+  --text:     #d4d0e8;
+  --muted:    #8880a8;
+  --accent:   #8070d0;
+  --accent-fg:#ffffff;
+}
+
+[data-color="mint"] {
+  --bg:       #eef8f4;
+  --surface:  #f4fcf8;
+  --border:   #b0dcc8;
+  --text:     #142a22;
+  --muted:    #508868;
+  --accent:   #20a870;
+  --accent-fg:#ffffff;
+}
+
+[data-color="wine"] {
+  --bg:       #1e0e14;
+  --surface:  #2a1820;
+  --border:   #4a2838;
+  --text:     #f0c8d8;
+  --muted:    #a86880;
+  --accent:   #c83060;
   --accent-fg:#ffffff;
 }
 
@@ -129,6 +282,75 @@ a { color: inherit; text-decoration: none; }
 [data-theme="editorial"] .brand-name-sm,
 [data-theme="editorial"] .brand-name { font-family: var(--font-display); font-style: italic; }
 [data-theme="editorial"] .topbar { border-bottom: 3px double var(--border); }
+
+/* ── Visual: glass ── */
+[data-theme="glass"] {
+  --font-body:    'Inter', system-ui, sans-serif;
+  --font-display: 'Inter', system-ui, sans-serif;
+  --font-mono:    'JetBrains Mono', monospace;
+  --font-sz:      15px;
+  --line-h:       1.65;
+  --card-radius:  16px;
+  --topbar-h:     54px;
+  --bw:           1px;
+  --shadow:       0 4px 24px rgba(0,0,0,.08);
+  --glass-blur:   12px;
+  --glass-bg:     rgba(255,255,255,.45);
+  --glass-border: rgba(255,255,255,.25);
+}
+[data-theme="glass"] .card,
+[data-theme="glass"] .section-block {
+  background: var(--glass-bg);
+  backdrop-filter: blur(var(--glass-blur));
+  -webkit-backdrop-filter: blur(var(--glass-blur));
+  border: 1px solid var(--glass-border);
+  box-shadow: var(--shadow);
+}
+[data-theme="glass"] .topbar {
+  background: var(--glass-bg);
+  backdrop-filter: blur(var(--glass-blur));
+  -webkit-backdrop-filter: blur(var(--glass-blur));
+  border-bottom: 1px solid var(--glass-border);
+}
+[data-theme="glass"] .btn-primary {
+  border-radius: 20px;
+  backdrop-filter: blur(4px);
+}
+[data-theme="glass"] .btn-ghost {
+  border-radius: 20px;
+  background: var(--glass-bg);
+  backdrop-filter: blur(4px);
+}
+[data-theme="glass"] .input {
+  background: var(--glass-bg);
+  backdrop-filter: blur(4px);
+  border-color: var(--glass-border);
+}
+[data-theme="glass"] .modal-box {
+  background: var(--glass-bg);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  border: 1px solid var(--glass-border);
+}
+[data-theme="glass"] .bottomnav {
+  background: var(--glass-bg);
+  backdrop-filter: blur(var(--glass-blur));
+  -webkit-backdrop-filter: blur(var(--glass-blur));
+  border-top: 1px solid var(--glass-border);
+}
+/* Glass adapts to dark color themes */
+[data-theme="glass"][data-color="midnight"],
+[data-theme="glass"][data-color="ocean"],
+[data-theme="glass"][data-color="ember"],
+[data-theme="glass"][data-color="bronze"],
+[data-theme="glass"][data-color="plum"],
+[data-theme="glass"][data-color="neon"],
+[data-theme="glass"][data-color="charcoal"],
+[data-theme="glass"][data-color="dusk"],
+[data-theme="glass"][data-color="wine"] {
+  --glass-bg:     rgba(0,0,0,.35);
+  --glass-border: rgba(255,255,255,.1);
+}
 
 /* ── Base ── */
 html {

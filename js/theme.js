@@ -3,9 +3,19 @@
 
 const Theme = (() => {
 
-  const VISUAL  = ['minimal', 'brutalist', 'soft', 'editorial'];
-  const COLORS  = ['paper', 'midnight', 'forest', 'coral', 'slate'];
-  const COLOR_NAMES = { paper: 'Paper', midnight: 'Midnight', forest: 'Forest', coral: 'Coral', slate: 'Slate' };
+  const VISUAL  = ['minimal', 'brutalist', 'soft', 'editorial', 'glass'];
+  const COLORS  = [
+    'paper', 'midnight', 'forest', 'coral', 'slate',
+    'ocean', 'lavender', 'ember', 'sand', 'rose',
+    'arctic', 'bronze', 'plum', 'neon', 'sage',
+    'charcoal', 'honey', 'dusk', 'mint', 'wine'
+  ];
+  const COLOR_NAMES = {
+    paper: 'Paper', midnight: 'Midnight', forest: 'Forest', coral: 'Coral', slate: 'Slate',
+    ocean: 'Ocean', lavender: 'Lavender', ember: 'Ember', sand: 'Sand', rose: 'Rose',
+    arctic: 'Arctic', bronze: 'Bronze', plum: 'Plum', neon: 'Neon', sage: 'Sage',
+    charcoal: 'Charcoal', honey: 'Honey', dusk: 'Dusk', mint: 'Mint', wine: 'Wine'
+  };
 
   let _visual = 'soft';
   let _color  = 'slate';
