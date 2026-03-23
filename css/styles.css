@@ -2452,7 +2452,6 @@ textarea.input { resize: vertical; min-height: 80px; }
   position: relative;
   overflow: hidden;
   background: var(--bg);
-  border-radius: var(--card-radius) var(--card-radius) 0 0;
   aspect-ratio: 4/3;
   max-height: 480px;
 }
@@ -2468,10 +2467,14 @@ textarea.input { resize: vertical; min-height: 80px; }
   position: relative;
   overflow: hidden;
 }
+.post-carousel-slide {
+  display: flex; align-items: center; justify-content: center;
+}
 .post-carousel-slide img,
 .post-carousel-slide video {
   width: 100%; height: 100%;
   object-fit: cover;
+  object-position: center;
   display: block;
 }
 .post-carousel-arrow {
@@ -2515,6 +2518,36 @@ textarea.input { resize: vertical; min-height: 80px; }
   transition: background .2s, transform .2s;
 }
 .post-carousel-dot.active { background: #fff; transform: scale(1.3); }
+
+/* ── Video fullscreen button ── */
+.video-fullscreen-btn {
+  position: absolute;
+  bottom: .5rem; right: .5rem;
+  z-index: 6;
+  background: rgba(0,0,0,.5);
+  border: none; color: #fff;
+  width: 32px; height: 32px;
+  border-radius: 50%;
+  font-size: 1rem;
+  display: flex; align-items: center; justify-content: center;
+  cursor: pointer;
+  transition: background .15s;
+}
+.video-fullscreen-btn:hover { background: rgba(0,0,0,.8); }
+
+/* ── View All button for multi-item posts ── */
+.post-view-all-btn {
+  display: block; width: 100%;
+  padding: .45rem 1rem;
+  background: var(--bg);
+  border: none; border-top: 1px solid var(--border);
+  color: var(--accent);
+  font-size: .82rem; font-weight: 600;
+  text-align: center;
+  cursor: pointer;
+  transition: background .15s;
+}
+.post-view-all-btn:hover { background: var(--border); }
 
 /* ── Circle cover upload ── */
 .circle-cover-upload {
