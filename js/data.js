@@ -6,6 +6,43 @@ const Data = (() => {
 
   let _folders = null; // { rootId, circlesFolderId, collectionsFolderId, contactsFolderId }
 
+  /* ── Simple cache with TTL ──────────────────── */
+
+  const _cache = {};
+  const _inflight = {};
+  const CACHE_TTL = 30_000; // 30 seconds
+
+  function _cacheGet(key) {
+    const entry = _cache[key];
+    if (!entry) return undefined;
+    if (Date.now() - entry.ts > CACHE_TTL) { delete _cache[key]; return undefined; }
+    return entry.val;
+  }
+
+  function _cacheSet(key, val) {
+    _cache[key] = { val, ts: Date.now() };
+  }
+
+  function _cacheDel(key) { delete _cache[key]; }
+
+  // Dedup concurrent calls to the same async function
+  function _dedup(key, fn) {
+    if (_inflight[key]) return _inflight[key];
+    const p = fn().finally(() => { delete _inflight[key]; });
+    _inflight[key] = p;
+    return p;
+  }
+
+  /* ── Write lock (serializes friends/notifs writes) ── */
+
+  let _writeLockP = Promise.resolve();
+
+  function _withWriteLock(fn) {
+    const next = _writeLockP.then(fn, fn);
+    _writeLockP = next.catch(() => {});
+    return next;
+  }
+
   /* ── Init ──────────────────────────────────── */
 
   async function init() {
@@ -49,33 +86,62 @@ const Data = (() => {
   /* ── Settings ──────────────────────────────── */
 
   async function getSettings() {
-    try {
-      const f = await Drive.findFile('settings.json', _folders.rootId);
-      if (!f) return _defaultSettings();
-      return await Drive.readJsonFile(f.id);
-    } catch {
-      return _defaultSettings();
-    }
+    const cached = _cacheGet('settings');
+    if (cached) return cached;
+    return _dedup('settings', async () => {
+      try {
+        const f = await Drive.findFile('settings.json', _folders.rootId);
+        if (!f) return _defaultSettings();
+        const s = await Drive.readJsonFile(f.id);
+        _cacheSet('settings', s);
+        return s;
+      } catch {
+        return _defaultSettings();
+      }
+    });
   }
 
   function _defaultSettings() {
     return { theme: 'soft', colorTheme: 'slate', defaultSharing: 'friends', allowCopying: 'friends' };
   }
 
+  const _VALID_THEMES   = new Set(['minimal', 'brutalist', 'soft', 'editorial']);
+  const _VALID_COLORS   = new Set(['paper', 'midnight', 'forest', 'coral', 'slate']);
+  const _VALID_SHARING  = new Set(['everyone', 'friends', 'circles', 'select']);
+
   async function saveSettings(data) {
-    return Drive.upsertJsonFile('settings.json', data, _folders.rootId);
+    // Whitelist known fields to prevent injection of arbitrary keys
+    const safe = {
+      theme:          _VALID_THEMES.has(data.theme) ? data.theme : 'soft',
+      colorTheme:     _VALID_COLORS.has(data.colorTheme) ? data.colorTheme : 'slate',
+      defaultSharing: _VALID_SHARING.has(data.defaultSharing) ? data.defaultSharing : 'friends',
+      allowCopying:   data.allowCopying || 'friends'
+    };
+    _cacheDel('settings');
+    return Drive.upsertJsonFile('settings.json', safe, _folders.rootId);
   }
 
   /* ── Friends ───────────────────────────────── */
 
   async function _getFriendsFile() {
-    try {
-      const f = await Drive.findFile('friends.json', _folders.contactsFolderId);
-      if (!f) return { friends: [] };
-      return await Drive.readJsonFile(f.id);
-    } catch {
-      return { friends: [] };
-    }
+    const cached = _cacheGet('friends');
+    if (cached) return JSON.parse(JSON.stringify(cached)); // deep clone so callers can mutate
+    return _dedup('friendsFile', async () => {
+      try {
+        const f = await Drive.findFile('friends.json', _folders.contactsFolderId);
+        if (!f) return { friends: [] };
+        const data = await Drive.readJsonFile(f.id);
+        _cacheSet('friends', data);
+        return JSON.parse(JSON.stringify(data));
+      } catch {
+        return { friends: [] };
+      }
+    });
+  }
+
+  async function _saveFriendsFile(data) {
+    await Drive.upsertJsonFile('friends.json', data, _folders.contactsFolderId);
+    _cacheSet('friends', data);
   }
 
   async function getFriends() {
@@ -85,28 +151,38 @@ const Data = (() => {
   }
 
   async function addFriend(email, displayName = '') {
-    const data = await _getFriendsFile();
-    if (data.friends.find(f => f.email === email)) return; // already added
-    data.friends.push({ email, displayName, addedAt: new Date().toISOString() });
-    await Drive.upsertJsonFile('friends.json', data, _folders.contactsFolderId);
+    return _withWriteLock(async () => {
+      const data = await _getFriendsFile();
+      if (data.friends.find(f => f.email === email)) return;
+      data.friends.push({ email, displayName, addedAt: new Date().toISOString(), status: 'accepted' });
+      await _saveFriendsFile(data);
+    });
   }
 
   async function removeFriend(email) {
-    const data = await _getFriendsFile();
-    data.friends = data.friends.filter(f => f.email !== email);
-    await Drive.upsertJsonFile('friends.json', data, _folders.contactsFolderId);
+    return _withWriteLock(async () => {
+      const data = await _getFriendsFile();
+      data.friends = data.friends.filter(f => f.email !== email);
+      await _saveFriendsFile(data);
+    });
   }
 
   /* ── Blocked ───────────────────────────────── */
 
   async function _getBlockedFile() {
-    try {
-      const f = await Drive.findFile('blocked.json', _folders.contactsFolderId);
-      if (!f) return { blocked: [] };
-      return await Drive.readJsonFile(f.id);
-    } catch {
-      return { blocked: [] };
-    }
+    const cached = _cacheGet('blocked');
+    if (cached) return JSON.parse(JSON.stringify(cached));
+    return _dedup('blockedFile', async () => {
+      try {
+        const f = await Drive.findFile('blocked.json', _folders.contactsFolderId);
+        if (!f) return { blocked: [] };
+        const data = await Drive.readJsonFile(f.id);
+        _cacheSet('blocked', data);
+        return JSON.parse(JSON.stringify(data));
+      } catch {
+        return { blocked: [] };
+      }
+    });
   }
 
   async function getBlocked() {
@@ -114,16 +190,22 @@ const Data = (() => {
   }
 
   async function blockUser(email) {
-    const data = await _getBlockedFile();
-    if (data.blocked.find(b => b.email === email)) return;
-    data.blocked.push({ email, blockedAt: new Date().toISOString() });
-    await Drive.upsertJsonFile('blocked.json', data, _folders.contactsFolderId);
+    return _withWriteLock(async () => {
+      const data = await _getBlockedFile();
+      if (data.blocked.find(b => b.email === email)) return;
+      data.blocked.push({ email, blockedAt: new Date().toISOString() });
+      _cacheDel('blocked');
+      await Drive.upsertJsonFile('blocked.json', data, _folders.contactsFolderId);
+    });
   }
 
   async function unblockUser(email) {
-    const data = await _getBlockedFile();
-    data.blocked = data.blocked.filter(b => b.email !== email);
-    await Drive.upsertJsonFile('blocked.json', data, _folders.contactsFolderId);
+    return _withWriteLock(async () => {
+      const data = await _getBlockedFile();
+      data.blocked = data.blocked.filter(b => b.email !== email);
+      _cacheDel('blocked');
+      await Drive.upsertJsonFile('blocked.json', data, _folders.contactsFolderId);
+    });
   }
 
   /* ── Circles ───────────────────────────────── */
@@ -198,22 +280,37 @@ const Data = (() => {
     return { ...meta, folderId };
   }
 
+  function _assertCircleOwner(meta) {
+    const user = Auth.getCurrentUser();
+    if (!user || meta.ownerEmail !== user.email) throw new Error('Not the circle owner');
+  }
+
   async function updateCircleMeta(folderId, patch) {
     const f = await Drive.findFile('_meta.json', folderId);
     if (!f) throw new Error('Circle not found');
     const meta = await Drive.readJsonFile(f.id);
+    _assertCircleOwner(meta);
     const updated = { ...meta, ...patch };
     await Drive.updateJsonFile(f.id, updated);
     return updated;
   }
 
   async function deleteCircle(folderId) {
+    const f = await Drive.findFile('_meta.json', folderId);
+    if (f) {
+      const meta = await Drive.readJsonFile(f.id);
+      _assertCircleOwner(meta);
+    }
     await Drive.deleteFile(folderId);
   }
 
   async function addMemberToCircle(folderId, email, displayName = '') {
     const f = await Drive.findFile('_meta.json', folderId);
+    if (!f) throw new Error('Circle not found');
     const meta = await Drive.readJsonFile(f.id);
+    const user = Auth.getCurrentUser();
+    // Only owner or any_member policy can add
+    if (meta.addPolicy !== 'any_member') _assertCircleOwner(meta);
     if (meta.members.find(m => m.email === email)) return meta;
     meta.members.push({ email, displayName, role: 'member', addedAt: new Date().toISOString() });
     await Drive.updateJsonFile(f.id, meta);
@@ -224,7 +321,9 @@ const Data = (() => {
 
   async function removeMemberFromCircle(folderId, email) {
     const f = await Drive.findFile('_meta.json', folderId);
+    if (!f) throw new Error('Circle not found');
     const meta = await Drive.readJsonFile(f.id);
+    _assertCircleOwner(meta);
     meta.members = meta.members.filter(m => m.email !== email);
     await Drive.updateJsonFile(f.id, meta);
     // Revoke Drive permission
@@ -253,6 +352,7 @@ const Data = (() => {
   }
 
   async function createCollection(name, description = '', sharing = 'friends', allowCopying = true) {
+    sharing = _VALID_SHARING.has(sharing) ? sharing : 'friends';
     const id = Utils.generateId('coll');
     const folderId = await Drive.getOrCreateFolder(id, _folders.collectionsFolderId);
     const meta = {
@@ -276,6 +376,7 @@ const Data = (() => {
 
   async function updateCollectionMeta(folderId, patch) {
     const f = await Drive.findFile('_meta.json', folderId);
+    if (!f) throw new Error('Collection not found');
     const meta = await Drive.readJsonFile(f.id);
     const updated = { ...meta, ...patch };
     await Drive.updateJsonFile(f.id, updated);
@@ -296,6 +397,15 @@ const Data = (() => {
 
   /* ── Reactions ─────────────────────────────── */
 
+  const _REACTION_DEFAULTS = { likes: [], laughs: [], claps: [], wows: [], sads: [], seenBy: [] };
+
+  function _ensureReactionArrays(obj) {
+    for (const k of Object.keys(_REACTION_DEFAULTS)) {
+      if (!Array.isArray(obj[k])) obj[k] = [];
+    }
+    return obj;
+  }
+
   // Reactions are stored in the user's own Drive root to avoid permission errors
   // on folders shared by friends (reader access can't write files).
   // File name: react-{sanitised folderId}.json
@@ -307,14 +417,10 @@ const Data = (() => {
     try {
       const key = _reactKey(collectionFolderId);
       const f = await Drive.findFile(key, _folders.rootId);
-      const _defaults = { likes: [], laughs: [], claps: [], wows: [], sads: [], seenBy: [] };
-      if (!f) return { ..._defaults };
-      const data = await Drive.readJsonFile(f.id);
-      // Ensure all arrays exist (backward compat)
-      Object.keys(_defaults).forEach(k => { if (!Array.isArray(data[k])) data[k] = []; });
-      return data;
+      if (!f) return { ..._REACTION_DEFAULTS };
+      return _ensureReactionArrays(await Drive.readJsonFile(f.id));
     } catch {
-      return { likes: [], laughs: [], claps: [], wows: [], sads: [], seenBy: [] };
+      return { ..._REACTION_DEFAULTS };
     }
   }
 
@@ -323,10 +429,7 @@ const Data = (() => {
     const user = Auth.getCurrentUser();
     const key  = _reactKey(collectionFolderId);
     const f    = await Drive.findFile(key, _folders.rootId);
-    const _defaults = { likes: [], laughs: [], claps: [], wows: [], sads: [] };
-    let reactions = f ? await Drive.readJsonFile(f.id) : { ..._defaults };
-    // Ensure all arrays exist (backward compat with old files that only have likes)
-    Object.keys(_defaults).forEach(k => { if (!Array.isArray(reactions[k])) reactions[k] = []; });
+    let reactions = f ? _ensureReactionArrays(await Drive.readJsonFile(f.id)) : { ..._REACTION_DEFAULTS };
 
     const arrayKey = { like: 'likes', laugh: 'laughs', clap: 'claps', wow: 'wows', sad: 'sads' }[type] || 'likes';
     const arr = reactions[arrayKey];
@@ -355,9 +458,7 @@ const Data = (() => {
     if (!user) return;
     const key  = _reactKey(collectionFolderId);
     const f    = await Drive.findFile(key, _folders.rootId);
-    const _defaults = { likes: [], laughs: [], claps: [], wows: [], sads: [], seenBy: [] };
-    let reactions = f ? await Drive.readJsonFile(f.id) : { ..._defaults };
-    Object.keys(_defaults).forEach(k => { if (!Array.isArray(reactions[k])) reactions[k] = []; });
+    let reactions = f ? _ensureReactionArrays(await Drive.readJsonFile(f.id)) : { ..._REACTION_DEFAULTS };
     if (!reactions.seenBy.some(s => s.userId === user.userId)) {
       reactions.seenBy.push({ userId: user.userId, email: user.email, at: new Date().toISOString() });
       await Drive.upsertJsonFile(key, reactions, _folders.rootId);
@@ -367,6 +468,30 @@ const Data = (() => {
   async function getSeenBy(collectionFolderId) {
     const r = await getReactions(collectionFolderId);
     return r.seenBy || [];
+  }
+
+  /* ── Sharing helper ──────────────────────── */
+
+  async function _shareByAudience(folderId, sharing, circleIds = []) {
+    if (sharing === 'everyone') {
+      await Drive.makePublic(folderId).catch(() => {});
+    } else if (sharing === 'friends') {
+      const friends = await getFriends();
+      await Promise.all(friends.map(f =>
+        Drive.shareWithEmail(folderId, f.email, 'commenter').catch(() => {})
+      ));
+    } else if (sharing === 'circles' && circleIds.length) {
+      const circles = await Promise.all(
+        circleIds.map(fid => getCircle(fid).catch(() => null))
+      );
+      const emails = new Set();
+      circles.filter(Boolean).forEach(c => {
+        c.members.filter(m => m.role !== 'owner').forEach(m => emails.add(m.email));
+      });
+      await Promise.all([...emails].map(email =>
+        Drive.shareWithEmail(folderId, email, 'commenter').catch(() => {})
+      ));
+    }
   }
 
   /* ── Posts ─────────────────────────────────── */
@@ -380,7 +505,7 @@ const Data = (() => {
   async function createPost(opts = {}) {
     const caption   = opts.caption   || '';
     const name      = opts.name      || `Post ${new Date().toLocaleDateString()}`;
-    const sharing   = opts.sharing   || 'friends';
+    const sharing   = _VALID_SHARING.has(opts.sharing) ? opts.sharing : 'friends';
     const circleIds = opts.circleIds || [];
 
     const id = Utils.generateId('post');
@@ -393,29 +518,7 @@ const Data = (() => {
     };
     if (opts.voidscroll) meta.voidscroll = opts.voidscroll;
     await Drive.createJsonFile('_meta.json', meta, folderId);
-
-    // Share based on audience
-    if (sharing === 'everyone') {
-      await Drive.makePublic(folderId).catch(() => {});
-    } else if (sharing === 'friends') {
-      const friends = await getFriends();
-      await Promise.all(friends.map(f =>
-        Drive.shareWithEmail(folderId, f.email, 'commenter').catch(() => {})
-      ));
-    } else if (sharing === 'circles' && circleIds.length) {
-      // Collect all unique member emails across selected circles
-      const circles = await Promise.all(
-        circleIds.map(fid => getCircle(fid).catch(() => null))
-      );
-      const emails = new Set();
-      circles.filter(Boolean).forEach(c => {
-        c.members.filter(m => m.role !== 'owner').forEach(m => emails.add(m.email));
-      });
-      await Promise.all([...emails].map(email =>
-        Drive.shareWithEmail(folderId, email, 'commenter').catch(() => {})
-      ));
-    }
-
+    await _shareByAudience(folderId, sharing, circleIds);
     return { ...meta, folderId };
   }
 
@@ -429,7 +532,7 @@ const Data = (() => {
   // opts: { caption, sharing, circleIds }
   async function createStory(opts = {}) {
     const caption   = opts.caption   || '';
-    const sharing   = opts.sharing   || 'friends';
+    const sharing   = _VALID_SHARING.has(opts.sharing) ? opts.sharing : 'friends';
     const circleIds = opts.circleIds || [];
     const expiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString();
 
@@ -444,24 +547,7 @@ const Data = (() => {
       createdAt: new Date().toISOString()
     };
     await Drive.createJsonFile('_meta.json', meta, folderId);
-
-    if (sharing === 'everyone') {
-      await Drive.makePublic(folderId).catch(() => {});
-    } else if (sharing === 'friends') {
-      const friends = await getFriends();
-      await Promise.all(friends.map(f =>
-        Drive.shareWithEmail(folderId, f.email, 'commenter').catch(() => {})
-      ));
-    } else if (sharing === 'circles' && circleIds.length) {
-      const circles = await Promise.all(circleIds.map(fid => getCircle(fid).catch(() => null)));
-      const emails = new Set();
-      circles.filter(Boolean).forEach(c => {
-        c.members.filter(m => m.role !== 'owner').forEach(m => emails.add(m.email));
-      });
-      await Promise.all([...emails].map(email =>
-        Drive.shareWithEmail(folderId, email, 'commenter').catch(() => {})
-      ));
-    }
+    await _shareByAudience(folderId, sharing, circleIds);
 
     return { ...meta, folderId };
   }
@@ -482,26 +568,36 @@ const Data = (() => {
   /* ── Hidden files ──────────────────────────── */
 
   async function getHiddenIds() {
+    const cached = _cacheGet('hiddenIds');
+    if (cached) return [...cached];
     try {
       const f = await Drive.findFile('hidden.json', _folders.rootId);
       if (!f) return [];
       const data = await Drive.readJsonFile(f.id);
-      return data.ids || [];
+      const ids = data.ids || [];
+      _cacheSet('hiddenIds', ids);
+      return [...ids];
     } catch { return []; }
   }
 
   async function hideFile(fileId) {
-    const ids = await getHiddenIds();
-    if (!ids.includes(fileId)) {
-      ids.push(fileId);
-      await Drive.upsertJsonFile('hidden.json', { ids }, _folders.rootId);
-    }
+    return _withWriteLock(async () => {
+      const ids = await getHiddenIds();
+      if (!ids.includes(fileId)) {
+        ids.push(fileId);
+        _cacheSet('hiddenIds', ids);
+        await Drive.upsertJsonFile('hidden.json', { ids }, _folders.rootId);
+      }
+    });
   }
 
   async function unhideFile(fileId) {
-    const ids = await getHiddenIds();
-    const filtered = ids.filter(id => id !== fileId);
-    await Drive.upsertJsonFile('hidden.json', { ids: filtered }, _folders.rootId);
+    return _withWriteLock(async () => {
+      const ids = await getHiddenIds();
+      const filtered = ids.filter(id => id !== fileId);
+      _cacheSet('hiddenIds', filtered);
+      await Drive.upsertJsonFile('hidden.json', { ids: filtered }, _folders.rootId);
+    });
   }
 
   /* ── Circle Posts ──────────────────────────── */
@@ -593,29 +689,30 @@ const Data = (() => {
   }
 
   async function sendFriendRequest(email) {
-    const data = await _getFriendsFile();
-    if (data.friends.find(f => f.email === email)) return; // already in list
+    return _withWriteLock(async () => {
+      const data = await _getFriendsFile();
+      if (data.friends.find(f => f.email === email)) return; // already in list
 
-    // Auto-make profile public on first friend request so others can see your posts
-    if (!data.friends.length) {
-      await makeProfilePublic().catch(() => {});
-    }
+      // Auto-make profile public on first friend request so others can see your posts
+      if (!data.friends.length) {
+        await makeProfilePublic().catch(() => {});
+      }
 
-    const user = Auth.getCurrentUser();
-    const reqPayload = {
-      type:        'mc_friend_request',
-      fromEmail:   user.email,
-      fromName:    user.name  || user.email,
-      fromPicture: user.picture || null,
-      toEmail:     email,
-      sentAt:      new Date().toISOString()
-    };
-    const key    = _freqKey(email);
-    const fileId = await Drive.upsertJsonFile(key, reqPayload, _folders.rootId);
-    await Drive.shareWithEmail(fileId, email, 'reader').catch(() => {});
-    // Use email as placeholder; displayName is updated when they accept
-    data.friends.push({ email, displayName: email, addedAt: new Date().toISOString(), status: 'pending_sent' });
-    await Drive.upsertJsonFile('friends.json', data, _folders.contactsFolderId);
+      const user = Auth.getCurrentUser();
+      const reqPayload = {
+        type:        'mc_friend_request',
+        fromEmail:   user.email,
+        fromName:    user.name  || user.email,
+        fromPicture: user.picture || null,
+        toEmail:     email,
+        sentAt:      new Date().toISOString()
+      };
+      const key    = _freqKey(email);
+      const fileId = await Drive.upsertJsonFile(key, reqPayload, _folders.rootId);
+      await Drive.shareWithEmail(fileId, email, 'reader');
+      data.friends.push({ email, displayName: email, picture: null, addedAt: new Date().toISOString(), status: 'pending_sent' });
+      await _saveFriendsFile(data);
+    });
   }
 
   async function getIncomingFriendRequests() {
@@ -662,78 +759,82 @@ const Data = (() => {
 
   // General-purpose "handled notifications" list — covers friend requests, acceptances, circle posts.
   async function _getHandledNotifIds() {
-    try {
-      const f = await Drive.findFile('handled-notifs.json', _folders.rootId);
-      if (!f) return [];
-      const d = await Drive.readJsonFile(f.id);
-      return d.ids || [];
-    } catch { return []; }
+    const cached = _cacheGet('handledNotifs');
+    if (cached) return [...cached];
+    return _dedup('handledNotifs', async () => {
+      try {
+        const f = await Drive.findFile('handled-notifs.json', _folders.rootId);
+        if (!f) return [];
+        const d = await Drive.readJsonFile(f.id);
+        const ids = d.ids || [];
+        _cacheSet('handledNotifs', ids);
+        return [...ids];
+      } catch { return []; }
+    });
   }
 
   async function _markNotifHandled(fileId) {
-    const ids = await _getHandledNotifIds();
-    if (!ids.includes(fileId)) {
+    return _withWriteLock(async () => {
+      const ids = await _getHandledNotifIds();
+      if (ids.includes(fileId)) return;
       ids.push(fileId);
+      _cacheSet('handledNotifs', ids);
       await Drive.upsertJsonFile('handled-notifs.json', { ids }, _folders.rootId);
-    }
+    });
   }
 
-  // Keep old name as alias for backwards compatibility
-  async function _getDeclinedRequestIds() { return _getHandledNotifIds(); }
-
-  let _acceptLock = null;
   async function acceptFriendRequest(fromEmail, fromName, fromPicture, requestFileId) {
-    // Serialize accept calls to prevent duplicate entries from concurrent clicks
-    while (_acceptLock) await _acceptLock;
-    let unlock;
-    _acceptLock = new Promise(r => { unlock = r; });
-    try {
-      return await _doAcceptFriend(fromEmail, fromName, fromPicture, requestFileId);
-    } finally { _acceptLock = null; unlock(); }
-  }
-  async function _doAcceptFriend(fromEmail, fromName, fromPicture, requestFileId) {
-    const data = await _getFriendsFile();
-    // Deduplicate: remove any extra entries for this email, keep only the first
-    const dupes = data.friends.filter(f => f.email === fromEmail);
-    if (dupes.length > 1) {
-      data.friends = data.friends.filter(f => f.email !== fromEmail);
-      data.friends.push(dupes[0]);
-    }
-    const existing = data.friends.find(f => f.email === fromEmail);
-    if (!existing) {
-      data.friends.push({
-        email:       fromEmail,
-        displayName: fromName || fromEmail,
-        picture:     fromPicture || null,
-        addedAt:     new Date().toISOString(),
-        status:      'accepted'
-      });
-      await Drive.upsertJsonFile('friends.json', data, _folders.contactsFolderId);
-    } else if (existing.status !== 'accepted') {
-      existing.status      = 'accepted';
-      existing.displayName = fromName || existing.displayName;
-      if (fromPicture) existing.picture = fromPicture;
-      await Drive.upsertJsonFile('friends.json', data, _folders.contactsFolderId);
-    }
+    return _withWriteLock(async () => {
+      const data = await _getFriendsFile();
+      // Deduplicate: remove any extra entries for this email, keep only the first
+      const dupes = data.friends.filter(f => f.email === fromEmail);
+      if (dupes.length > 1) {
+        data.friends = data.friends.filter(f => f.email !== fromEmail);
+        data.friends.push(dupes[0]);
+      }
+      const existing = data.friends.find(f => f.email === fromEmail);
+      if (!existing) {
+        data.friends.push({
+          email:       fromEmail,
+          displayName: fromName || fromEmail,
+          picture:     fromPicture || null,
+          addedAt:     new Date().toISOString(),
+          status:      'accepted'
+        });
+        await _saveFriendsFile(data);
+      } else if (existing.status !== 'accepted') {
+        existing.status      = 'accepted';
+        existing.displayName = fromName || existing.displayName;
+        if (fromPicture) existing.picture = fromPicture;
+        await _saveFriendsFile(data);
+      }
 
-    // Mark the request as handled so it won't reappear
-    if (requestFileId) await _markNotifHandled(requestFileId).catch(() => {});
+      // Mark the request as handled so it won't reappear (inline, already under lock)
+      if (requestFileId) {
+        const ids = await _getHandledNotifIds();
+        if (!ids.includes(requestFileId)) {
+          ids.push(requestFileId);
+          _cacheSet('handledNotifs', ids);
+          await Drive.upsertJsonFile('handled-notifs.json', { ids }, _folders.rootId);
+        }
+      }
 
-    // Create acceptance notification so the requester knows we accepted
-    const user = Auth.getCurrentUser();
-    const payload = {
-      type:        'mc_friend_accepted',
-      fromEmail:   user.email,
-      fromName:    user.name    || user.email,
-      fromPicture: user.picture || null,
-      toEmail:     fromEmail,
-      acceptedAt:  new Date().toISOString()
-    };
-    try {
-      const key    = `mc-freqacc-${fromEmail.replace(/[^a-zA-Z0-9]/g, '_')}.json`;
-      const fileId = await Drive.upsertJsonFile(key, payload, _folders.rootId);
-      await Drive.shareWithEmail(fileId, fromEmail, 'reader').catch(() => {});
-    } catch {}
+      // Create acceptance notification so the requester knows we accepted
+      const user = Auth.getCurrentUser();
+      const payload = {
+        type:        'mc_friend_accepted',
+        fromEmail:   user.email,
+        fromName:    user.name    || user.email,
+        fromPicture: user.picture || null,
+        toEmail:     fromEmail,
+        acceptedAt:  new Date().toISOString()
+      };
+      try {
+        const key    = `mc-freqacc-${fromEmail.replace(/[^a-zA-Z0-9]/g, '_')}.json`;
+        const fileId = await Drive.upsertJsonFile(key, payload, _folders.rootId);
+        await Drive.shareWithEmail(fileId, fromEmail, 'reader').catch(() => {});
+      } catch {}
+    });
   }
 
   async function declineFriendRequest(fileId) {
@@ -742,76 +843,90 @@ const Data = (() => {
 
   // Check sharedWithMe for mc-freqacc-* files and promote pending_sent entries to accepted.
   async function syncFriendAcceptances() {
-    try {
-      const files = await Drive.listSharedFilesWithName('mc-freqacc-');
-      const me    = Auth.getCurrentUser();
-      const handled = await _getHandledNotifIds();
-      const data  = await _getFriendsFile();
-      let changed = false;
-      const handledIds = [];
+    return _withWriteLock(async () => {
+      try {
+        const files = await Drive.listSharedFilesWithName('mc-freqacc-');
+        if (!files.length) return;
+        const me    = Auth.getCurrentUser();
+        const handled = await _getHandledNotifIds();
+        const data  = await _getFriendsFile();
+        let changed = false;
+        const newHandled = [...handled];
 
-      for (const f of files) {
-        if (handled.includes(f.id)) continue;
-        try {
-          const d = await Drive.readJsonFile(f.id);
-          if (d.type !== 'mc_friend_accepted' || d.toEmail !== me.email) continue;
-          const friend = data.friends.find(fr => fr.email === d.fromEmail);
-          if (friend) {
-            if (friend.status === 'pending_sent' || !friend.displayName || friend.displayName === friend.email) {
-              friend.status      = 'accepted';
-              friend.displayName = d.fromName || d.fromEmail;
-              if (d.fromPicture) friend.picture = d.fromPicture;
+        for (const f of files) {
+          if (handled.includes(f.id)) continue;
+          try {
+            const d = await Drive.readJsonFile(f.id);
+            if (d.type !== 'mc_friend_accepted' || d.toEmail !== me.email) continue;
+            const friend = data.friends.find(fr => fr.email === d.fromEmail);
+            if (friend) {
+              if (friend.status === 'pending_sent' || !friend.displayName || friend.displayName === friend.email) {
+                friend.status      = 'accepted';
+                friend.displayName = d.fromName || d.fromEmail;
+                if (d.fromPicture) friend.picture = d.fromPicture;
+                changed = true;
+              }
+            } else if (!data.friends.some(fr => fr.email === d.fromEmail)) {
+              data.friends.push({
+                email:       d.fromEmail,
+                displayName: d.fromName || d.fromEmail,
+                picture:     d.fromPicture || null,
+                addedAt:     new Date().toISOString(),
+                status:      'accepted'
+              });
               changed = true;
             }
-          } else if (!data.friends.some(fr => fr.email === d.fromEmail)) {
-            // They accepted but we don't have them in our list yet — add them
-            data.friends.push({
-              email:       d.fromEmail,
-              displayName: d.fromName || d.fromEmail,
-              picture:     d.fromPicture || null,
-              addedAt:     new Date().toISOString(),
-              status:      'accepted'
-            });
-            changed = true;
-          }
-          handledIds.push(f.id);
-        } catch {}
-      }
+            newHandled.push(f.id);
+          } catch {}
+        }
 
-      // Persist friends BEFORE marking notifications as handled
-      if (changed) await Drive.upsertJsonFile('friends.json', data, _folders.contactsFolderId);
-      // Now safe to mark as handled
-      for (const id of handledIds) {
-        await _markNotifHandled(id).catch(() => {});
-      }
-    } catch {}
+        // Persist friends BEFORE marking notifications as handled
+        if (changed) await _saveFriendsFile(data);
+        // Batch-save all new handled IDs in one write
+        if (newHandled.length > handled.length) {
+          _cacheSet('handledNotifs', newHandled);
+          await Drive.upsertJsonFile('handled-notifs.json', { ids: newHandled }, _folders.rootId);
+        }
+      } catch {}
+    });
   }
 
   /* ── PIN ────────────────────────────────────── */
 
-  async function _hashPin(pin) {
-    const buf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(pin + 'mc_pin_v1'));
+  async function _hashPin(pin, salt) {
+    const buf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(salt + ':' + pin));
     return Array.from(new Uint8Array(buf)).map(b => b.toString(16).padStart(2, '0')).join('');
+  }
+
+  function _generateSalt() {
+    const arr = new Uint8Array(16);
+    crypto.getRandomValues(arr);
+    return Array.from(arr, b => b.toString(16).padStart(2, '0')).join('');
   }
 
   async function getPin() {
     try {
       const f = await Drive.findFile('pin.json', _folders.rootId);
       if (!f) return null;
-      const data = await Drive.readJsonFile(f.id);
-      return data.hash || null;
+      return await Drive.readJsonFile(f.id);
     } catch { return null; }
   }
 
   async function setPin(pin) {
-    const hash = await _hashPin(pin);
-    await Drive.upsertJsonFile('pin.json', { hash }, _folders.rootId);
+    const salt = _generateSalt();
+    const hash = await _hashPin(pin, salt);
+    await Drive.upsertJsonFile('pin.json', { hash, salt }, _folders.rootId);
   }
 
   async function verifyPin(pin) {
     const stored = await getPin();
     if (!stored) return true;
-    return (await _hashPin(pin)) === stored;
+    // Backward-compat: old pin.json may lack salt (used static 'mc_pin_v1')
+    const salt = stored.salt || 'mc_pin_v1';
+    const input = stored.salt ? pin : (pin + salt);
+    const hash = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(stored.salt ? (salt + ':' + pin) : (pin + 'mc_pin_v1')));
+    const hex = Array.from(new Uint8Array(hash)).map(b => b.toString(16).padStart(2, '0')).join('');
+    return hex === (stored.hash || stored);
   }
 
   async function clearPin() {
@@ -824,32 +939,43 @@ const Data = (() => {
   /* ── Hidden posts (feed/circle hide) ───────── */
 
   async function getHiddenPostIds() {
+    const cached = _cacheGet('hiddenPostIds');
+    if (cached) return [...cached];
     try {
       const f = await Drive.findFile('hidden_posts.json', _folders.rootId);
       if (!f) return [];
       const data = await Drive.readJsonFile(f.id);
-      return data.ids || [];
+      const ids = data.ids || [];
+      _cacheSet('hiddenPostIds', ids);
+      return [...ids];
     } catch { return []; }
   }
 
   async function hidePost(id) {
-    const ids = await getHiddenPostIds();
-    if (!ids.includes(id)) {
-      ids.push(id);
-      await Drive.upsertJsonFile('hidden_posts.json', { ids }, _folders.rootId);
-    }
+    return _withWriteLock(async () => {
+      const ids = await getHiddenPostIds();
+      if (!ids.includes(id)) {
+        ids.push(id);
+        _cacheSet('hiddenPostIds', ids);
+        await Drive.upsertJsonFile('hidden_posts.json', { ids }, _folders.rootId);
+      }
+    });
   }
 
   async function unhidePost(id) {
-    const ids = await getHiddenPostIds();
-    const filtered = ids.filter(x => x !== id);
-    await Drive.upsertJsonFile('hidden_posts.json', { ids: filtered }, _folders.rootId);
+    return _withWriteLock(async () => {
+      const ids = await getHiddenPostIds();
+      const filtered = ids.filter(x => x !== id);
+      _cacheSet('hiddenPostIds', filtered);
+      await Drive.upsertJsonFile('hidden_posts.json', { ids: filtered }, _folders.rootId);
+    });
   }
 
   /* ── Circle post edit ───────────────────────── */
 
   async function updateCirclePostCaption(postFolderId, caption) {
     const f = await Drive.findFile('_post.json', postFolderId);
+    if (!f) throw new Error('Circle post not found');
     const meta = await Drive.readJsonFile(f.id);
     const updated = { ...meta, caption };
     await Drive.updateJsonFile(f.id, updated);
@@ -859,11 +985,17 @@ const Data = (() => {
   /* ── Hidden users ───────────────────────────── */
 
   async function _getHiddenUsersFile() {
-    try {
-      const f = await Drive.findFile('hidden_users.json', _folders.contactsFolderId);
-      if (!f) return { users: [] };
-      return await Drive.readJsonFile(f.id);
-    } catch { return { users: [] }; }
+    const cached = _cacheGet('hiddenUsers');
+    if (cached) return JSON.parse(JSON.stringify(cached));
+    return _dedup('hiddenUsersFile', async () => {
+      try {
+        const f = await Drive.findFile('hidden_users.json', _folders.contactsFolderId);
+        if (!f) return { users: [] };
+        const data = await Drive.readJsonFile(f.id);
+        _cacheSet('hiddenUsers', data);
+        return JSON.parse(JSON.stringify(data));
+      } catch { return { users: [] }; }
+    });
   }
 
   async function getHiddenUsers() {
@@ -871,16 +1003,22 @@ const Data = (() => {
   }
 
   async function hideUser(email) {
-    const data = await _getHiddenUsersFile();
-    if (data.users.find(u => u.email === email)) return;
-    data.users.push({ email, hiddenAt: new Date().toISOString() });
-    await Drive.upsertJsonFile('hidden_users.json', data, _folders.contactsFolderId);
+    return _withWriteLock(async () => {
+      const data = await _getHiddenUsersFile();
+      if (data.users.find(u => u.email === email)) return;
+      data.users.push({ email, hiddenAt: new Date().toISOString() });
+      _cacheDel('hiddenUsers');
+      await Drive.upsertJsonFile('hidden_users.json', data, _folders.contactsFolderId);
+    });
   }
 
   async function unhideUser(email) {
-    const data = await _getHiddenUsersFile();
-    data.users = data.users.filter(u => u.email !== email);
-    await Drive.upsertJsonFile('hidden_users.json', data, _folders.contactsFolderId);
+    return _withWriteLock(async () => {
+      const data = await _getHiddenUsersFile();
+      data.users = data.users.filter(u => u.email !== email);
+      _cacheDel('hiddenUsers');
+      await Drive.upsertJsonFile('hidden_users.json', data, _folders.contactsFolderId);
+    });
   }
 
   /* ── Exports ───────────────────────────────── */

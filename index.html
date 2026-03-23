@@ -33,11 +33,14 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;600&family=Playfair+Display:wght@700&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="css/styles.css" />
+  <meta name="referrer" content="strict-origin-when-cross-origin" />
+  <meta http-equiv="Permissions-Policy" content="camera=(), microphone=(), geolocation=()" />
   <script>
     // Apply cached theme immediately to prevent flash of wrong theme
-    try{var t=localStorage.getItem('mc_theme'),c=localStorage.getItem('mc_color');
-    if(t)document.documentElement.setAttribute('data-theme',t);
-    if(c)document.documentElement.setAttribute('data-color',c);}catch(e){}
+    try{var _v=['minimal','brutalist','soft','editorial'],_c=['paper','midnight','forest','coral','slate'];
+    var t=localStorage.getItem('mc_theme'),c=localStorage.getItem('mc_color');
+    if(t&&_v.indexOf(t)!==-1)document.documentElement.setAttribute('data-theme',t);
+    if(c&&_c.indexOf(c)!==-1)document.documentElement.setAttribute('data-color',c);}catch(e){}
   </script>
 </head>
 <body>
@@ -500,7 +503,7 @@
           <h3>Add a Friend</h3>
           <div style="display:flex;flex-direction:column;gap:.4rem;max-width:480px">
             <div class="input-row">
-              <input id="add-friend-email" type="email" class="input" placeholder="Their email address" />
+              <input id="add-friend-email" type="email" class="input" placeholder="Their email address" required autocomplete="email" aria-label="Friend's email address" />
             </div>
             <div style="display:flex;justify-content:flex-end">
               <button id="add-friend-btn" class="btn btn-primary btn-sm">Add Friend</button>
@@ -726,16 +729,16 @@
     <div class="spinner"></div>
   </div>
 
-  <script src="config.example.js"></script>
-  <script src="config.js" onerror="/* demo mode */"></script>
+  <script src="config.example.js" defer></script>
+  <script src="config.js" defer onerror="/* demo mode */"></script>
   <script src="https://apis.google.com/js/api.js" async defer></script>
   <script src="https://accounts.google.com/gsi/client" async defer></script>
-  <script src="js/utils.js"></script>
-  <script src="js/auth.js"></script>
-  <script src="js/drive.js"></script>
-  <script src="js/data.js"></script>
-  <script src="js/theme.js"></script>
-  <script src="js/ui.js"></script>
+  <script src="js/utils.js" defer></script>
+  <script src="js/auth.js" defer></script>
+  <script src="js/drive.js" defer></script>
+  <script src="js/data.js" defer></script>
+  <script src="js/theme.js" defer></script>
+  <script src="js/ui.js" defer></script>
   <script>
     if ('serviceWorker' in navigator) {
       navigator.serviceWorker.register('sw.js').catch(() => {});

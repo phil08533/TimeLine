@@ -2,9 +2,26 @@
 <html lang="en" data-theme="soft" data-color="slate">
 <head>
   <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
   <title>My Circle — Private social sharing, owned by you</title>
   <meta name="description" content="My Circle is a private photo &amp; file sharing app. No servers, no ads — everything lives in your Google Drive." />
+  <meta name="referrer" content="strict-origin-when-cross-origin" />
+  <meta http-equiv="Permissions-Policy" content="camera=(), microphone=(), geolocation=()" />
+  <meta http-equiv="Content-Security-Policy"
+    content="default-src 'self';
+             script-src 'self';
+             style-src  'self' https://fonts.googleapis.com 'unsafe-inline';
+             font-src   'self' https://fonts.gstatic.com;
+             img-src    'self' data:;">
+  <!-- Open Graph -->
+  <meta property="og:type" content="website" />
+  <meta property="og:title" content="My Circle — Private social sharing, owned by you" />
+  <meta property="og:description" content="A private photo & file sharing app. No servers, no ads — everything lives in your Google Drive." />
+  <meta property="og:url" content="https://phil08533.github.io/TimeLine/landing.html" />
+  <!-- Twitter Card -->
+  <meta name="twitter:card" content="summary_large_image" />
+  <meta name="twitter:title" content="My Circle — Private social sharing, owned by you" />
+  <meta name="twitter:description" content="A private photo & file sharing app. No servers, no ads — everything lives in your Google Drive." />
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>◎</text></svg>" />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
@@ -12,6 +29,7 @@
   <link rel="stylesheet" href="css/styles.css" />
   <style>
     /* ── Landing-specific overrides ── */
+    html { scroll-behavior: smooth; }
     body { background: var(--bg); color: var(--text); }
 
     .landing { max-width: 960px; margin: 0 auto; padding: 0 1.5rem; }
@@ -239,6 +257,10 @@
       -webkit-background-clip: text; background-clip: text;
       -webkit-text-fill-color: transparent;
       animation: vs-icon-flow 3s ease-in-out infinite;
+    }
+    @keyframes vs-icon-flow {
+      0%, 100% { background-position: 0% 50%; }
+      50% { background-position: 100% 50%; }
     }
     .voidscroll-promo h3 { font-size: 1.1rem; font-weight: 600; margin-bottom: .4rem; }
     .voidscroll-promo p { font-size: .875rem; color: var(--muted); margin-bottom: 1rem; }
@@ -598,7 +620,7 @@
   <footer class="landing-footer">
     <div class="landing">
       <p>
-        © 2025 My Circle — <a href="https://github.com/phil08533/TimeLine" target="_blank" rel="noopener">Open source on GitHub</a> ·
+        © 2026 My Circle — <a href="https://github.com/phil08533/TimeLine" target="_blank" rel="noopener">Open source on GitHub</a> ·
         <a href="privacy.html">Privacy Policy</a> ·
         <a href="index.html">Open App</a> ·
         <a href="https://voidscroll.org" target="_blank" rel="noopener">VoidScroll</a>
