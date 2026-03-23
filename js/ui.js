@@ -1020,7 +1020,7 @@ const UI = (() => {
       bar.appendChild(circle);
     });
 
-    bar.hidden = bar.children.length <= 1; // hide if only "Add Story" button
+    bar.hidden = false; // always show — at minimum the "Add Story" button is visible
   }
 
   function _openAddStoryModal() {
@@ -1140,6 +1140,11 @@ const UI = (() => {
 
   function _openStoryViewerMedia(mediaFiles, index, authorName, authorPic, onDelete = null) {
     if (!mediaFiles.length) return;
+
+    // Prevent stacking multiple viewers
+    const existing = document.getElementById('story-viewer-overlay');
+    if (existing) existing.remove();
+
     const overlay = _el(`
       <div class="story-viewer-overlay" id="story-viewer-overlay">
         <div class="story-viewer-inner">
@@ -1162,6 +1167,7 @@ const UI = (() => {
 
     let cur = index;
     let autoTimer = null;
+    const blobUrls = []; // track blob URLs for cleanup
 
     function showSlide(i) {
       cur = i;
@@ -1172,20 +1178,19 @@ const UI = (() => {
         s.className = 'story-progress-seg' + (idx < cur ? ' done' : (idx === cur ? ' active' : ''));
       });
       const f = mediaFiles[cur];
+      clearTimeout(autoTimer);
       if (f.mimeType?.startsWith('video/')) {
         const vid = document.createElement('video');
         vid.autoplay = true; vid.muted = false; vid.loop = false; vid.playsInline = true;
         vid.style.cssText = 'width:100%;height:100%;object-fit:contain';
-        Drive.getFileAsBlob(f.id).then(url => { vid.src = url; }).catch(() => {});
+        Drive.getFileAsBlob(f.id).then(url => { blobUrls.push(url); vid.src = url; }).catch(() => {});
         mediaEl.appendChild(vid);
         vid.addEventListener('ended', () => advance(1));
-        clearTimeout(autoTimer);
       } else {
         const img = document.createElement('img');
         img.alt = ''; img.style.cssText = 'width:100%;height:100%;object-fit:contain';
         _loadThumbnail(img, f.id, f.thumbnailLink);
         mediaEl.appendChild(img);
-        clearTimeout(autoTimer);
         autoTimer = setTimeout(() => advance(1), 5000);
       }
     }
@@ -1198,18 +1203,22 @@ const UI = (() => {
 
     function closeViewer() {
       clearTimeout(autoTimer);
+      document.removeEventListener('keydown', onKey);
+      blobUrls.forEach(u => URL.revokeObjectURL(u));
       overlay.remove();
+    }
+
+    function onKey(e) {
+      if (e.key === 'Escape') closeViewer();
+      if (e.key === 'ArrowRight') advance(1);
+      if (e.key === 'ArrowLeft')  advance(-1);
     }
 
     overlay.querySelector('.story-viewer-close').addEventListener('click', closeViewer);
     overlay.querySelector('.story-viewer-prev').addEventListener('click', e => { e.stopPropagation(); advance(-1); });
     overlay.querySelector('.story-viewer-next').addEventListener('click', e => { e.stopPropagation(); advance(1); });
     overlay.addEventListener('click', e => { if (e.target === overlay) closeViewer(); });
-    document.addEventListener('keydown', function onKey(e) {
-      if (e.key === 'Escape') { closeViewer(); document.removeEventListener('keydown', onKey); }
-      if (e.key === 'ArrowRight') advance(1);
-      if (e.key === 'ArrowLeft')  advance(-1);
-    });
+    document.addEventListener('keydown', onKey);
 
     if (onDelete) {
       overlay.querySelector('.story-viewer-delete').addEventListener('click', async e => {
@@ -5015,8 +5024,7 @@ const UI = (() => {
         case 'Escape': {
           if (!document.getElementById('modal-overlay').hidden) { closeModal(); break; }
           if (!document.getElementById('lightbox').hidden) { closeLightbox(); break; }
-          const storyOverlay = document.getElementById('story-viewer-overlay');
-          if (storyOverlay) { storyOverlay.remove(); break; }
+          // Story viewer handles its own Escape key via document keydown listener
           break;
         }
         case 'ArrowLeft': {
