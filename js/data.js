@@ -105,9 +105,20 @@ const Data = (() => {
     return { theme: 'soft', colorTheme: 'slate', defaultSharing: 'friends', allowCopying: 'friends' };
   }
 
+  const _VALID_THEMES   = new Set(['minimal', 'brutalist', 'soft', 'editorial']);
+  const _VALID_COLORS   = new Set(['paper', 'midnight', 'forest', 'coral', 'slate']);
+  const _VALID_SHARING  = new Set(['everyone', 'friends', 'circles', 'select']);
+
   async function saveSettings(data) {
+    // Whitelist known fields to prevent injection of arbitrary keys
+    const safe = {
+      theme:          _VALID_THEMES.has(data.theme) ? data.theme : 'soft',
+      colorTheme:     _VALID_COLORS.has(data.colorTheme) ? data.colorTheme : 'slate',
+      defaultSharing: _VALID_SHARING.has(data.defaultSharing) ? data.defaultSharing : 'friends',
+      allowCopying:   data.allowCopying || 'friends'
+    };
     _cacheDel('settings');
-    return Drive.upsertJsonFile('settings.json', data, _folders.rootId);
+    return Drive.upsertJsonFile('settings.json', safe, _folders.rootId);
   }
 
   /* ── Friends ───────────────────────────────── */
@@ -179,18 +190,22 @@ const Data = (() => {
   }
 
   async function blockUser(email) {
-    const data = await _getBlockedFile();
-    if (data.blocked.find(b => b.email === email)) return;
-    data.blocked.push({ email, blockedAt: new Date().toISOString() });
-    _cacheDel('blocked');
-    await Drive.upsertJsonFile('blocked.json', data, _folders.contactsFolderId);
+    return _withWriteLock(async () => {
+      const data = await _getBlockedFile();
+      if (data.blocked.find(b => b.email === email)) return;
+      data.blocked.push({ email, blockedAt: new Date().toISOString() });
+      _cacheDel('blocked');
+      await Drive.upsertJsonFile('blocked.json', data, _folders.contactsFolderId);
+    });
   }
 
   async function unblockUser(email) {
-    const data = await _getBlockedFile();
-    data.blocked = data.blocked.filter(b => b.email !== email);
-    _cacheDel('blocked');
-    await Drive.upsertJsonFile('blocked.json', data, _folders.contactsFolderId);
+    return _withWriteLock(async () => {
+      const data = await _getBlockedFile();
+      data.blocked = data.blocked.filter(b => b.email !== email);
+      _cacheDel('blocked');
+      await Drive.upsertJsonFile('blocked.json', data, _folders.contactsFolderId);
+    });
   }
 
   /* ── Circles ───────────────────────────────── */
@@ -265,22 +280,37 @@ const Data = (() => {
     return { ...meta, folderId };
   }
 
+  function _assertCircleOwner(meta) {
+    const user = Auth.getCurrentUser();
+    if (!user || meta.ownerEmail !== user.email) throw new Error('Not the circle owner');
+  }
+
   async function updateCircleMeta(folderId, patch) {
     const f = await Drive.findFile('_meta.json', folderId);
     if (!f) throw new Error('Circle not found');
     const meta = await Drive.readJsonFile(f.id);
+    _assertCircleOwner(meta);
     const updated = { ...meta, ...patch };
     await Drive.updateJsonFile(f.id, updated);
     return updated;
   }
 
   async function deleteCircle(folderId) {
+    const f = await Drive.findFile('_meta.json', folderId);
+    if (f) {
+      const meta = await Drive.readJsonFile(f.id);
+      _assertCircleOwner(meta);
+    }
     await Drive.deleteFile(folderId);
   }
 
   async function addMemberToCircle(folderId, email, displayName = '') {
     const f = await Drive.findFile('_meta.json', folderId);
+    if (!f) throw new Error('Circle not found');
     const meta = await Drive.readJsonFile(f.id);
+    const user = Auth.getCurrentUser();
+    // Only owner or any_member policy can add
+    if (meta.addPolicy !== 'any_member') _assertCircleOwner(meta);
     if (meta.members.find(m => m.email === email)) return meta;
     meta.members.push({ email, displayName, role: 'member', addedAt: new Date().toISOString() });
     await Drive.updateJsonFile(f.id, meta);
@@ -291,7 +321,9 @@ const Data = (() => {
 
   async function removeMemberFromCircle(folderId, email) {
     const f = await Drive.findFile('_meta.json', folderId);
+    if (!f) throw new Error('Circle not found');
     const meta = await Drive.readJsonFile(f.id);
+    _assertCircleOwner(meta);
     meta.members = meta.members.filter(m => m.email !== email);
     await Drive.updateJsonFile(f.id, meta);
     // Revoke Drive permission
@@ -320,6 +352,7 @@ const Data = (() => {
   }
 
   async function createCollection(name, description = '', sharing = 'friends', allowCopying = true) {
+    sharing = _VALID_SHARING.has(sharing) ? sharing : 'friends';
     const id = Utils.generateId('coll');
     const folderId = await Drive.getOrCreateFolder(id, _folders.collectionsFolderId);
     const meta = {
@@ -343,6 +376,7 @@ const Data = (() => {
 
   async function updateCollectionMeta(folderId, patch) {
     const f = await Drive.findFile('_meta.json', folderId);
+    if (!f) throw new Error('Collection not found');
     const meta = await Drive.readJsonFile(f.id);
     const updated = { ...meta, ...patch };
     await Drive.updateJsonFile(f.id, updated);
@@ -471,7 +505,7 @@ const Data = (() => {
   async function createPost(opts = {}) {
     const caption   = opts.caption   || '';
     const name      = opts.name      || `Post ${new Date().toLocaleDateString()}`;
-    const sharing   = opts.sharing   || 'friends';
+    const sharing   = _VALID_SHARING.has(opts.sharing) ? opts.sharing : 'friends';
     const circleIds = opts.circleIds || [];
 
     const id = Utils.generateId('post');
@@ -498,7 +532,7 @@ const Data = (() => {
   // opts: { caption, sharing, circleIds }
   async function createStory(opts = {}) {
     const caption   = opts.caption   || '';
-    const sharing   = opts.sharing   || 'friends';
+    const sharing   = _VALID_SHARING.has(opts.sharing) ? opts.sharing : 'friends';
     const circleIds = opts.circleIds || [];
     const expiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString();
 
@@ -547,19 +581,23 @@ const Data = (() => {
   }
 
   async function hideFile(fileId) {
-    const ids = await getHiddenIds();
-    if (!ids.includes(fileId)) {
-      ids.push(fileId);
-      _cacheSet('hiddenIds', ids);
-      await Drive.upsertJsonFile('hidden.json', { ids }, _folders.rootId);
-    }
+    return _withWriteLock(async () => {
+      const ids = await getHiddenIds();
+      if (!ids.includes(fileId)) {
+        ids.push(fileId);
+        _cacheSet('hiddenIds', ids);
+        await Drive.upsertJsonFile('hidden.json', { ids }, _folders.rootId);
+      }
+    });
   }
 
   async function unhideFile(fileId) {
-    const ids = await getHiddenIds();
-    const filtered = ids.filter(id => id !== fileId);
-    _cacheSet('hiddenIds', filtered);
-    await Drive.upsertJsonFile('hidden.json', { ids: filtered }, _folders.rootId);
+    return _withWriteLock(async () => {
+      const ids = await getHiddenIds();
+      const filtered = ids.filter(id => id !== fileId);
+      _cacheSet('hiddenIds', filtered);
+      await Drive.upsertJsonFile('hidden.json', { ids: filtered }, _folders.rootId);
+    });
   }
 
   /* ── Circle Posts ──────────────────────────── */
@@ -855,29 +893,40 @@ const Data = (() => {
 
   /* ── PIN ────────────────────────────────────── */
 
-  async function _hashPin(pin) {
-    const buf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(pin + 'mc_pin_v1'));
+  async function _hashPin(pin, salt) {
+    const buf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(salt + ':' + pin));
     return Array.from(new Uint8Array(buf)).map(b => b.toString(16).padStart(2, '0')).join('');
+  }
+
+  function _generateSalt() {
+    const arr = new Uint8Array(16);
+    crypto.getRandomValues(arr);
+    return Array.from(arr, b => b.toString(16).padStart(2, '0')).join('');
   }
 
   async function getPin() {
     try {
       const f = await Drive.findFile('pin.json', _folders.rootId);
       if (!f) return null;
-      const data = await Drive.readJsonFile(f.id);
-      return data.hash || null;
+      return await Drive.readJsonFile(f.id);
     } catch { return null; }
   }
 
   async function setPin(pin) {
-    const hash = await _hashPin(pin);
-    await Drive.upsertJsonFile('pin.json', { hash }, _folders.rootId);
+    const salt = _generateSalt();
+    const hash = await _hashPin(pin, salt);
+    await Drive.upsertJsonFile('pin.json', { hash, salt }, _folders.rootId);
   }
 
   async function verifyPin(pin) {
     const stored = await getPin();
     if (!stored) return true;
-    return (await _hashPin(pin)) === stored;
+    // Backward-compat: old pin.json may lack salt (used static 'mc_pin_v1')
+    const salt = stored.salt || 'mc_pin_v1';
+    const input = stored.salt ? pin : (pin + salt);
+    const hash = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(stored.salt ? (salt + ':' + pin) : (pin + 'mc_pin_v1')));
+    const hex = Array.from(new Uint8Array(hash)).map(b => b.toString(16).padStart(2, '0')).join('');
+    return hex === (stored.hash || stored);
   }
 
   async function clearPin() {
@@ -903,25 +952,30 @@ const Data = (() => {
   }
 
   async function hidePost(id) {
-    const ids = await getHiddenPostIds();
-    if (!ids.includes(id)) {
-      ids.push(id);
-      _cacheSet('hiddenPostIds', ids);
-      await Drive.upsertJsonFile('hidden_posts.json', { ids }, _folders.rootId);
-    }
+    return _withWriteLock(async () => {
+      const ids = await getHiddenPostIds();
+      if (!ids.includes(id)) {
+        ids.push(id);
+        _cacheSet('hiddenPostIds', ids);
+        await Drive.upsertJsonFile('hidden_posts.json', { ids }, _folders.rootId);
+      }
+    });
   }
 
   async function unhidePost(id) {
-    const ids = await getHiddenPostIds();
-    const filtered = ids.filter(x => x !== id);
-    _cacheSet('hiddenPostIds', filtered);
-    await Drive.upsertJsonFile('hidden_posts.json', { ids: filtered }, _folders.rootId);
+    return _withWriteLock(async () => {
+      const ids = await getHiddenPostIds();
+      const filtered = ids.filter(x => x !== id);
+      _cacheSet('hiddenPostIds', filtered);
+      await Drive.upsertJsonFile('hidden_posts.json', { ids: filtered }, _folders.rootId);
+    });
   }
 
   /* ── Circle post edit ───────────────────────── */
 
   async function updateCirclePostCaption(postFolderId, caption) {
     const f = await Drive.findFile('_post.json', postFolderId);
+    if (!f) throw new Error('Circle post not found');
     const meta = await Drive.readJsonFile(f.id);
     const updated = { ...meta, caption };
     await Drive.updateJsonFile(f.id, updated);
@@ -949,18 +1003,22 @@ const Data = (() => {
   }
 
   async function hideUser(email) {
-    const data = await _getHiddenUsersFile();
-    if (data.users.find(u => u.email === email)) return;
-    data.users.push({ email, hiddenAt: new Date().toISOString() });
-    _cacheDel('hiddenUsers');
-    await Drive.upsertJsonFile('hidden_users.json', data, _folders.contactsFolderId);
+    return _withWriteLock(async () => {
+      const data = await _getHiddenUsersFile();
+      if (data.users.find(u => u.email === email)) return;
+      data.users.push({ email, hiddenAt: new Date().toISOString() });
+      _cacheDel('hiddenUsers');
+      await Drive.upsertJsonFile('hidden_users.json', data, _folders.contactsFolderId);
+    });
   }
 
   async function unhideUser(email) {
-    const data = await _getHiddenUsersFile();
-    data.users = data.users.filter(u => u.email !== email);
-    _cacheDel('hiddenUsers');
-    await Drive.upsertJsonFile('hidden_users.json', data, _folders.contactsFolderId);
+    return _withWriteLock(async () => {
+      const data = await _getHiddenUsersFile();
+      data.users = data.users.filter(u => u.email !== email);
+      _cacheDel('hiddenUsers');
+      await Drive.upsertJsonFile('hidden_users.json', data, _folders.contactsFolderId);
+    });
   }
 
   /* ── Exports ───────────────────────────────── */

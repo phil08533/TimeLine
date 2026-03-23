@@ -1,7 +1,7 @@
 // sw.js — My Circle Service Worker (PWA offline support)
 'use strict';
 
-const CACHE_NAME = 'mycircle-v5';
+const CACHE_NAME = 'mycircle-v6';
 
 // Offline fallback page served when navigating without network or cache
 const OFFLINE_HTML = `<!DOCTYPE html>

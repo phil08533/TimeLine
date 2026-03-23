@@ -384,6 +384,19 @@ const UI = (() => {
   // We try thumbnailLink first (cheap, zero bytes from our quota) and fall back
   // to getFileAsBlob if the browser cookie session doesn't match the OAuth user.
 
+  /* ── URL Sanitisation ────────────────────────── */
+
+  // Only allow safe URL protocols for media src attributes.
+  // Blocks javascript:, data: (except blob:), and other injection vectors.
+  function _sanitizeMediaUrl(url) {
+    if (!url || typeof url !== 'string') return '';
+    try {
+      const u = new URL(url, location.origin);
+      if (u.protocol === 'https:' || u.protocol === 'http:' || u.protocol === 'blob:') return url;
+    } catch { /* malformed URL */ }
+    return '';
+  }
+
   let _thumbBlobUrls = [];
   let _modalBlobUrls = [];
 
@@ -1282,7 +1295,7 @@ const UI = (() => {
     // VoidScroll embed
     const vsEmbed = album.voidscroll ? `
       <div class="vs-embed">
-        <video class="vs-embed-video" src="${Utils.escapeHtml(album.voidscroll.videoUrl)}" playsinline muted loop preload="metadata"></video>
+        <video class="vs-embed-video" src="${Utils.escapeHtml(_sanitizeMediaUrl(album.voidscroll.videoUrl))}" playsinline muted loop preload="metadata"></video>
         <div class="vs-embed-overlay">
           <button class="vs-embed-play-btn" aria-label="Play">▶</button>
         </div>
@@ -4153,7 +4166,7 @@ const UI = (() => {
     slide.addEventListener('contextmenu', e => e.preventDefault());
 
     const vid = document.createElement('video');
-    vid.src     = item.url;
+    vid.src     = _sanitizeMediaUrl(item.url);
     vid.setAttribute('playsinline', '');
     vid.setAttribute('controlsList', 'nodownload');
     vid.setAttribute('disablepictureinpicture', '');
@@ -4525,7 +4538,7 @@ const UI = (() => {
     }
 
     // Metadata embedded in the post
-    const vsData = { type: 'voidscroll', videoUrl: item.url, videoTitle: item.title, videoCategory: item.category, videoId: item.id || '' };
+    const vsData = { type: 'voidscroll', videoUrl: _sanitizeMediaUrl(item.url), videoTitle: item.title, videoCategory: item.category, videoId: item.id || '' };
 
     // --- Post to Feed ---
     document.getElementById('vs-share-opt-feed').addEventListener('click', () => {

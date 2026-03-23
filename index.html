@@ -33,11 +33,14 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;600&family=Playfair+Display:wght@700&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="css/styles.css" />
+  <meta name="referrer" content="strict-origin-when-cross-origin" />
+  <meta http-equiv="Permissions-Policy" content="camera=(), microphone=(), geolocation=()" />
   <script>
     // Apply cached theme immediately to prevent flash of wrong theme
-    try{var t=localStorage.getItem('mc_theme'),c=localStorage.getItem('mc_color');
-    if(t)document.documentElement.setAttribute('data-theme',t);
-    if(c)document.documentElement.setAttribute('data-color',c);}catch(e){}
+    try{var _v=['minimal','brutalist','soft','editorial'],_c=['paper','midnight','forest','coral','slate'];
+    var t=localStorage.getItem('mc_theme'),c=localStorage.getItem('mc_color');
+    if(t&&_v.indexOf(t)!==-1)document.documentElement.setAttribute('data-theme',t);
+    if(c&&_c.indexOf(c)!==-1)document.documentElement.setAttribute('data-color',c);}catch(e){}
   </script>
 </head>
 <body>
