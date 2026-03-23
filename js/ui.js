@@ -4180,6 +4180,62 @@ const UI = (() => {
       el.parentNode.replaceChild(fresh, el);
       fresh.addEventListener('change', _saveSettingsFromUI);
     });
+
+    _on('report-bug-btn', 'click', () => _openBugReportModal());
+  }
+
+  function _openBugReportModal(prefill) {
+    const catOptions = ['General', 'Feed', 'Circles', 'Friends', 'Collections', 'VoidScroll', 'Themes', 'Other'];
+    openModal(`
+      <h3>Report a Bug</h3>
+      <div class="form-block">
+        <div class="form-field">
+          <label>Category</label>
+          <select id="bug-category" class="select-sm" style="width:100%">
+            ${catOptions.map(c => `<option${prefill?.category === c ? ' selected' : ''}>${c}</option>`).join('')}
+          </select>
+        </div>
+        <div class="form-field">
+          <label>What happened?</label>
+          <textarea id="bug-description" class="input" rows="4" placeholder="Describe the issue or suggestion…">${Utils.escapeHtml(prefill?.description || '')}</textarea>
+        </div>
+        <div class="modal-actions">
+          <button type="button" class="btn btn-ghost btn-sm modal-cancel-btn">Cancel</button>
+          <button type="button" class="btn btn-primary btn-sm" id="submit-bug-btn">Send Report</button>
+        </div>
+      </div>
+    `);
+    document.querySelector('.modal-cancel-btn').addEventListener('click', closeModal);
+    document.getElementById('submit-bug-btn').addEventListener('click', async () => {
+      const cat  = document.getElementById('bug-category').value;
+      const desc = document.getElementById('bug-description').value.trim();
+      if (!desc) { Utils.showToast('Please describe the issue', 'error'); return; }
+      const btn = document.getElementById('submit-bug-btn');
+      btn.disabled = true; btn.textContent = 'Sending…';
+      try {
+        const user = Auth.getCurrentUser();
+        const body = [
+          'Bug Report \u2014 My Circle',
+          '',
+          'Category: ' + cat,
+          'From: ' + (user?.email || 'unknown'),
+          'Date: ' + new Date().toISOString(),
+          'Theme: ' + Theme.getVisual() + ' / ' + Theme.getColor(),
+          'UA: ' + navigator.userAgent,
+          '',
+          desc
+        ].join('\n');
+        const mailto = 'mailto:creatitproductions@gmail.com'
+          + '?subject=' + encodeURIComponent('Bug Report: ' + cat + ' \u2014 My Circle')
+          + '&body=' + encodeURIComponent(body);
+        window.open(mailto, '_blank');
+        closeModal();
+        Utils.showToast('Opening email client…');
+      } catch {
+        btn.disabled = false; btn.textContent = 'Send Report';
+        Utils.showToast('Could not open email', 'error');
+      }
+    });
   }
 
   function _syncSettingsUI(settings) {
@@ -4610,6 +4666,11 @@ const UI = (() => {
           <span class="share-option-label">Save to Album</span>
           <span class="share-option-desc">Bookmark in an album</span>
         </button>
+        <button type="button" class="share-option-btn" id="vs-share-opt-report" style="border-color:var(--danger)">
+          <span class="share-option-icon">⚑</span>
+          <span class="share-option-label">Report Video</span>
+          <span class="share-option-desc">Flag inappropriate content</span>
+        </button>
       </div>
       <div id="vs-share-step" class="share-step"></div>
       <div class="modal-actions" style="margin-top:.75rem">
@@ -4713,6 +4774,15 @@ const UI = (() => {
           closeModal(); Utils.showToast('Saved to album!');
         } catch { Utils.showToast('Failed to save', 'error'); }
         finally { Utils.hideLoading(); }
+      });
+    });
+
+    // --- Report Video ---
+    document.getElementById('vs-share-opt-report').addEventListener('click', () => {
+      closeModal();
+      _openBugReportModal({
+        category: 'VoidScroll',
+        description: 'Reporting video: ' + item.title + '\nURL: ' + (item.url || '') + '\nID: ' + (item.id || '') + '\n\nReason: '
       });
     });
   }
@@ -5075,6 +5145,14 @@ const UI = (() => {
           </ul>
           <p class="muted-text">You can change these anytime from the Settings page.</p>
         `
+      },
+      {
+        title: 'VoidScroll',
+        body: `
+          <p>Need a break? <strong>VoidScroll</strong> is a curated endless scroll of videos pulled from the Internet Archive.</p>
+          <p class="muted-text" style="margin-top:.5rem">No algorithms, no tracking — just interesting content from nature, space, history, science, and more. Browse by category and share favorites with friends.</p>
+          <p class="muted-text" style="margin-top:.5rem">Find it in the bottom navigation bar.</p>
+        `
       }
     ];
 
@@ -5091,7 +5169,7 @@ const UI = (() => {
       openModal(`
         <div class="welcome-tutorial">
           <div style="text-align:center;margin-bottom:.25rem">
-            <span style="font-size:2rem">${isFirst ? '&#9678;' : ['&#127968;', '&#128101;', '&#128247;', '&#127912;'][current - 1]}</span>
+            <span style="font-size:2rem">${isFirst ? '&#9678;' : ['&#127968;', '&#128101;', '&#128247;', '&#127912;', '&#8734;'][current - 1]}</span>
           </div>
           <h3 style="text-align:center;margin-bottom:.75rem">${step.title}</h3>
           <div style="margin-bottom:1rem">${step.body}</div>
