@@ -126,6 +126,8 @@ const UI = (() => {
     _navigate(window.location.hash.slice(1) || 'feed');
     // Poll notifications once after sign-in (no need to hammer the API)
     _refreshNotificationCount().catch(() => {});
+    // Show welcome tutorial for first-time users
+    if (_shouldShowWelcome()) _showWelcomeTutorial();
   }
 
   function _onSignOut() {
@@ -5023,6 +5025,105 @@ const UI = (() => {
       </div>
     `);
     document.querySelector('.modal-cancel-btn').addEventListener('click', closeModal);
+  }
+
+  /* ── Welcome Tutorial ────────────────────────── */
+
+  function _shouldShowWelcome() {
+    return !localStorage.getItem('mc_welcome_done');
+  }
+
+  function _showWelcomeTutorial() {
+    const steps = [
+      {
+        title: 'Welcome to My Circle',
+        body: `
+          <p style="font-size:1.1rem;margin-bottom:.75rem">Your private social space, powered by Google Drive.</p>
+          <p class="muted-text">Everything you share lives in <strong>your</strong> Google Drive — we never store or see your photos and posts. Let's take a quick look around.</p>
+        `
+      },
+      {
+        title: 'Your Feed',
+        body: `
+          <p>The <strong>Feed</strong> is your home screen — it shows posts from friends and circles you belong to.</p>
+          <p class="muted-text" style="margin-top:.5rem">You can like posts, leave comments, and scroll through photos shared by people you care about.</p>
+        `
+      },
+      {
+        title: 'Circles & Friends',
+        body: `
+          <p><strong>Circles</strong> are private groups where you share photos and updates with select people.</p>
+          <p class="muted-text" style="margin-top:.5rem">Head to the <strong>Friends</strong> tab to add people by email. They'll get an invite, and once they accept, you'll see each other's posts.</p>
+        `
+      },
+      {
+        title: 'Collections & Stories',
+        body: `
+          <p><strong>Collections</strong> are photo albums you can organize and share. <strong>Stories</strong> are quick, casual moments.</p>
+          <p class="muted-text" style="margin-top:.5rem">Tap the <strong>+</strong> button at the bottom to create a new post, story, or collection anytime.</p>
+        `
+      },
+      {
+        title: 'Make It Yours',
+        body: `
+          <p>Head to <strong>Settings</strong> to personalize your experience:</p>
+          <ul style="margin:.5rem 0 .5rem 1.25rem;color:var(--muted);font-size:.9rem">
+            <li><strong>5 visual themes</strong> — Minimal, Brutalist, Soft, Editorial, and Glass</li>
+            <li><strong>20 color palettes</strong> — from Paper to Neon, Ocean to Wine</li>
+            <li><strong>Sharing defaults</strong> — control who sees your content</li>
+            <li><strong>Profile</strong> — set your display name and avatar</li>
+          </ul>
+          <p class="muted-text">You can change these anytime from the Settings page.</p>
+        `
+      }
+    ];
+
+    let current = 0;
+
+    function render() {
+      const step = steps[current];
+      const isFirst = current === 0;
+      const isLast  = current === steps.length - 1;
+      const dots = steps.map((_, i) =>
+        `<span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:${i === current ? 'var(--accent)' : 'var(--border)'};transition:background .2s"></span>`
+      ).join('');
+
+      openModal(`
+        <div class="welcome-tutorial">
+          <div style="text-align:center;margin-bottom:.25rem">
+            <span style="font-size:2rem">${isFirst ? '&#9678;' : ['&#127968;', '&#128101;', '&#128247;', '&#127912;'][current - 1]}</span>
+          </div>
+          <h3 style="text-align:center;margin-bottom:.75rem">${step.title}</h3>
+          <div style="margin-bottom:1rem">${step.body}</div>
+          <div style="display:flex;justify-content:center;gap:6px;margin-bottom:1rem">${dots}</div>
+          <div class="modal-actions" style="justify-content:${isFirst ? 'center' : 'space-between'}">
+            ${isFirst ? '' : '<button class="btn btn-ghost btn-sm" id="welcome-back">Back</button>'}
+            <button class="btn btn-primary btn-sm" id="welcome-next">${isLast ? 'Get Started' : 'Next'}</button>
+          </div>
+        </div>
+      `);
+
+      document.getElementById('welcome-next').addEventListener('click', () => {
+        if (isLast) {
+          localStorage.setItem('mc_welcome_done', '1');
+          closeModal();
+        } else {
+          current++;
+          render();
+        }
+      });
+
+      const backBtn = document.getElementById('welcome-back');
+      if (backBtn) backBtn.addEventListener('click', () => { current--; render(); });
+
+      // Override the X button to also mark welcome as done
+      document.getElementById('modal-close').onclick = () => {
+        localStorage.setItem('mc_welcome_done', '1');
+        closeModal();
+      };
+    }
+
+    render();
   }
 
   /* ── Modal ───────────────────────────────────── */

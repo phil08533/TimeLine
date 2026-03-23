@@ -105,8 +105,13 @@ const Data = (() => {
     return { theme: 'soft', colorTheme: 'slate', defaultSharing: 'friends', allowCopying: 'friends' };
   }
 
-  const _VALID_THEMES   = new Set(['minimal', 'brutalist', 'soft', 'editorial']);
-  const _VALID_COLORS   = new Set(['paper', 'midnight', 'forest', 'coral', 'slate']);
+  const _VALID_THEMES   = new Set(['minimal', 'brutalist', 'soft', 'editorial', 'glass']);
+  const _VALID_COLORS   = new Set([
+    'paper', 'midnight', 'forest', 'coral', 'slate',
+    'ocean', 'lavender', 'ember', 'sand', 'rose',
+    'arctic', 'bronze', 'plum', 'neon', 'sage',
+    'charcoal', 'honey', 'dusk', 'mint', 'wine'
+  ]);
   const _VALID_SHARING  = new Set(['everyone', 'friends', 'circles', 'select']);
 
   async function saveSettings(data) {
