@@ -363,6 +363,15 @@ const Data = (() => {
 
   /* ── Reactions ─────────────────────────────── */
 
+  const _REACTION_DEFAULTS = { likes: [], laughs: [], claps: [], wows: [], sads: [], seenBy: [] };
+
+  function _ensureReactionArrays(obj) {
+    for (const k of Object.keys(_REACTION_DEFAULTS)) {
+      if (!Array.isArray(obj[k])) obj[k] = [];
+    }
+    return obj;
+  }
+
   // Reactions are stored in the user's own Drive root to avoid permission errors
   // on folders shared by friends (reader access can't write files).
   // File name: react-{sanitised folderId}.json
@@ -374,14 +383,10 @@ const Data = (() => {
     try {
       const key = _reactKey(collectionFolderId);
       const f = await Drive.findFile(key, _folders.rootId);
-      const _defaults = { likes: [], laughs: [], claps: [], wows: [], sads: [], seenBy: [] };
-      if (!f) return { ..._defaults };
-      const data = await Drive.readJsonFile(f.id);
-      // Ensure all arrays exist (backward compat)
-      Object.keys(_defaults).forEach(k => { if (!Array.isArray(data[k])) data[k] = []; });
-      return data;
+      if (!f) return { ..._REACTION_DEFAULTS };
+      return _ensureReactionArrays(await Drive.readJsonFile(f.id));
     } catch {
-      return { likes: [], laughs: [], claps: [], wows: [], sads: [], seenBy: [] };
+      return { ..._REACTION_DEFAULTS };
     }
   }
 
@@ -390,10 +395,7 @@ const Data = (() => {
     const user = Auth.getCurrentUser();
     const key  = _reactKey(collectionFolderId);
     const f    = await Drive.findFile(key, _folders.rootId);
-    const _defaults = { likes: [], laughs: [], claps: [], wows: [], sads: [] };
-    let reactions = f ? await Drive.readJsonFile(f.id) : { ..._defaults };
-    // Ensure all arrays exist (backward compat with old files that only have likes)
-    Object.keys(_defaults).forEach(k => { if (!Array.isArray(reactions[k])) reactions[k] = []; });
+    let reactions = f ? _ensureReactionArrays(await Drive.readJsonFile(f.id)) : { ..._REACTION_DEFAULTS };
 
     const arrayKey = { like: 'likes', laugh: 'laughs', clap: 'claps', wow: 'wows', sad: 'sads' }[type] || 'likes';
     const arr = reactions[arrayKey];
@@ -422,9 +424,7 @@ const Data = (() => {
     if (!user) return;
     const key  = _reactKey(collectionFolderId);
     const f    = await Drive.findFile(key, _folders.rootId);
-    const _defaults = { likes: [], laughs: [], claps: [], wows: [], sads: [], seenBy: [] };
-    let reactions = f ? await Drive.readJsonFile(f.id) : { ..._defaults };
-    Object.keys(_defaults).forEach(k => { if (!Array.isArray(reactions[k])) reactions[k] = []; });
+    let reactions = f ? _ensureReactionArrays(await Drive.readJsonFile(f.id)) : { ..._REACTION_DEFAULTS };
     if (!reactions.seenBy.some(s => s.userId === user.userId)) {
       reactions.seenBy.push({ userId: user.userId, email: user.email, at: new Date().toISOString() });
       await Drive.upsertJsonFile(key, reactions, _folders.rootId);
@@ -434,6 +434,30 @@ const Data = (() => {
   async function getSeenBy(collectionFolderId) {
     const r = await getReactions(collectionFolderId);
     return r.seenBy || [];
+  }
+
+  /* ── Sharing helper ──────────────────────── */
+
+  async function _shareByAudience(folderId, sharing, circleIds = []) {
+    if (sharing === 'everyone') {
+      await Drive.makePublic(folderId).catch(() => {});
+    } else if (sharing === 'friends') {
+      const friends = await getFriends();
+      await Promise.all(friends.map(f =>
+        Drive.shareWithEmail(folderId, f.email, 'commenter').catch(() => {})
+      ));
+    } else if (sharing === 'circles' && circleIds.length) {
+      const circles = await Promise.all(
+        circleIds.map(fid => getCircle(fid).catch(() => null))
+      );
+      const emails = new Set();
+      circles.filter(Boolean).forEach(c => {
+        c.members.filter(m => m.role !== 'owner').forEach(m => emails.add(m.email));
+      });
+      await Promise.all([...emails].map(email =>
+        Drive.shareWithEmail(folderId, email, 'commenter').catch(() => {})
+      ));
+    }
   }
 
   /* ── Posts ─────────────────────────────────── */
@@ -460,29 +484,7 @@ const Data = (() => {
     };
     if (opts.voidscroll) meta.voidscroll = opts.voidscroll;
     await Drive.createJsonFile('_meta.json', meta, folderId);
-
-    // Share based on audience
-    if (sharing === 'everyone') {
-      await Drive.makePublic(folderId).catch(() => {});
-    } else if (sharing === 'friends') {
-      const friends = await getFriends();
-      await Promise.all(friends.map(f =>
-        Drive.shareWithEmail(folderId, f.email, 'commenter').catch(() => {})
-      ));
-    } else if (sharing === 'circles' && circleIds.length) {
-      // Collect all unique member emails across selected circles
-      const circles = await Promise.all(
-        circleIds.map(fid => getCircle(fid).catch(() => null))
-      );
-      const emails = new Set();
-      circles.filter(Boolean).forEach(c => {
-        c.members.filter(m => m.role !== 'owner').forEach(m => emails.add(m.email));
-      });
-      await Promise.all([...emails].map(email =>
-        Drive.shareWithEmail(folderId, email, 'commenter').catch(() => {})
-      ));
-    }
-
+    await _shareByAudience(folderId, sharing, circleIds);
     return { ...meta, folderId };
   }
 
@@ -511,24 +513,7 @@ const Data = (() => {
       createdAt: new Date().toISOString()
     };
     await Drive.createJsonFile('_meta.json', meta, folderId);
-
-    if (sharing === 'everyone') {
-      await Drive.makePublic(folderId).catch(() => {});
-    } else if (sharing === 'friends') {
-      const friends = await getFriends();
-      await Promise.all(friends.map(f =>
-        Drive.shareWithEmail(folderId, f.email, 'commenter').catch(() => {})
-      ));
-    } else if (sharing === 'circles' && circleIds.length) {
-      const circles = await Promise.all(circleIds.map(fid => getCircle(fid).catch(() => null)));
-      const emails = new Set();
-      circles.filter(Boolean).forEach(c => {
-        c.members.filter(m => m.role !== 'owner').forEach(m => emails.add(m.email));
-      });
-      await Promise.all([...emails].map(email =>
-        Drive.shareWithEmail(folderId, email, 'commenter').catch(() => {})
-      ));
-    }
+    await _shareByAudience(folderId, sharing, circleIds);
 
     return { ...meta, folderId };
   }

@@ -327,6 +327,7 @@ const UI = (() => {
 
     document.querySelectorAll('.page').forEach(p => { p.style.display = 'none'; });
     _currentPage = page;
+    _clearModalBlobs();
     // Pause VoidScroll video and reset zoom when navigating away
     if (page !== 'voidscroll') {
       document.querySelectorAll('#vs-feed video').forEach(v => { v.pause(); v.style.objectFit = ''; });
@@ -384,10 +385,22 @@ const UI = (() => {
   // to getFileAsBlob if the browser cookie session doesn't match the OAuth user.
 
   let _thumbBlobUrls = [];
+  let _modalBlobUrls = [];
 
   function _clearThumbBlobs() {
     _thumbBlobUrls.forEach(u => URL.revokeObjectURL(u));
     _thumbBlobUrls = [];
+  }
+
+  function _clearModalBlobs() {
+    _modalBlobUrls.forEach(u => URL.revokeObjectURL(u));
+    _modalBlobUrls = [];
+  }
+
+  function _trackModalBlob(file) {
+    const url = URL.createObjectURL(file);
+    _modalBlobUrls.push(url);
+    return url;
   }
 
   function _loadThumbnail(imgEl, fileId, thumbnailLink) {
@@ -705,7 +718,7 @@ const UI = (() => {
       previewBox.hidden = !files.length;
       albumRow.hidden    = files.length <= 1;
       files.forEach(f => {
-        const url  = URL.createObjectURL(f);
+        const url  = _trackModalBlob(f);
         const item = _el(`<div class="post-preview-item"><img src="${url}" alt="${Utils.escapeHtml(f.name)}" /></div>`);
         previewBox.appendChild(item);
       });
@@ -1020,7 +1033,7 @@ const UI = (() => {
     fileInput.addEventListener('change', () => {
       selectedFile = fileInput.files[0] || null;
       if (selectedFile) {
-        const url = URL.createObjectURL(selectedFile);
+        const url = _trackModalBlob(selectedFile);
         preview.innerHTML = `<div class="post-preview-item"><img src="${url}" alt="" /></div>`;
         preview.hidden = false;
       }
@@ -2129,7 +2142,7 @@ const UI = (() => {
       previews.hidden = !files.length;
       files.forEach(f => {
         if (f.type.startsWith('image/') || f.type.startsWith('video/')) {
-          const url = URL.createObjectURL(f);
+          const url = _trackModalBlob(f);
           previews.appendChild(_el(`<div class="post-preview-item"><img src="${url}" alt="${Utils.escapeHtml(f.name)}" /></div>`));
         } else {
           previews.appendChild(_el(`<div class="post-preview-item post-preview-doc"><span>${_fileTypeIcon(f.type)}</span><span class="post-preview-name">${Utils.escapeHtml(f.name)}</span></div>`));
@@ -2623,7 +2636,7 @@ const UI = (() => {
       previewBox.hidden = !files.length;
       files.forEach(f => {
         if (f.type.startsWith('image/') || f.type.startsWith('video/')) {
-          const url = URL.createObjectURL(f);
+          const url = _trackModalBlob(f);
           previewBox.appendChild(_el(`<div class="post-preview-item"><img src="${url}" alt="${Utils.escapeHtml(f.name)}" /></div>`));
         } else {
           previewBox.appendChild(_el(`<div class="post-preview-item post-preview-doc"><span>${_fileTypeIcon(f.type)}</span><span class="post-preview-name">${Utils.escapeHtml(f.name)}</span></div>`));
@@ -2692,7 +2705,7 @@ const UI = (() => {
     fileInput.addEventListener('change', () => {
       const file = fileInput.files[0];
       if (!file) return;
-      const url = URL.createObjectURL(file);
+      const url = _trackModalBlob(file);
       preview.innerHTML = `<img src="${url}" alt="" style="width:100%;height:100%;object-fit:cover;border-radius:50%" />`;
     });
 
@@ -2796,7 +2809,7 @@ const UI = (() => {
     fileInput.addEventListener('change', () => {
       const file = fileInput.files[0];
       if (!file) return;
-      preview.innerHTML = `<img src="${URL.createObjectURL(file)}" alt="" style="width:100%;height:100%;object-fit:cover;border-radius:50%" />`;
+      preview.innerHTML = `<img src="${_trackModalBlob(file)}" alt="" style="width:100%;height:100%;object-fit:cover;border-radius:50%" />`;
     });
 
     document.getElementById('mf').addEventListener('submit', async e => {
@@ -3988,7 +4001,7 @@ const UI = (() => {
           // Update preview
           const previewEl = form.querySelector('#avatar-edit-preview');
           const img = document.createElement('img');
-          img.alt = ''; img.src = URL.createObjectURL(file);
+          img.alt = ''; img.src = _trackModalBlob(file);
           previewEl.innerHTML = '';
           previewEl.appendChild(img);
           statusEl.textContent = 'Photo updated!';
@@ -4926,6 +4939,7 @@ const UI = (() => {
   function closeModal() {
     document.getElementById('modal-overlay').hidden = true;
     document.getElementById('modal-content').innerHTML = '';
+    _clearModalBlobs();
   }
 
   /* ── DOM helpers ─────────────────────────────── */

@@ -44,7 +44,9 @@ const Utils = (() => {
   /* ── ID Generation ───────────────────────────────── */
 
   function generateId(prefix = 'id') {
-    const rand = Math.random().toString(36).slice(2, 9);
+    const arr = new Uint8Array(8);
+    crypto.getRandomValues(arr);
+    const rand = Array.from(arr, b => b.toString(36).padStart(2, '0')).join('').slice(0, 12);
     return `${prefix}-${Date.now()}-${rand}`;
   }
 

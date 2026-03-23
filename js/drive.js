@@ -75,15 +75,20 @@ const Drive = (() => {
 
   const _fc = {};
 
+  // Escape a value for use inside a Drive API query string (q parameter).
+  function _qEsc(val) {
+    return String(val).replace(/\\/g, '\\\\').replace(/'/g, "\\'");
+  }
+
   async function getOrCreateFolder(name, parentId = null) {
     const key = `${parentId || 'root'}/${name}`;
     if (_fc[key]) return _fc[key];
 
     const q = [
-      `name='${name.replace(/'/g, "\\'")}'`,
+      `name='${_qEsc(name)}'`,
       `mimeType='application/vnd.google-apps.folder'`,
       `trashed=false`,
-      parentId ? `'${parentId}' in parents` : `'root' in parents`
+      parentId ? `'${_qEsc(parentId)}' in parents` : `'root' in parents`
     ].join(' and ');
 
     const data = await _json(`${BASE}/files?${new URLSearchParams({ q, fields: 'files(id)', spaces: 'drive' })}`, { headers: _headers() });
@@ -117,7 +122,7 @@ const Drive = (() => {
   /* ── File operations ──────────────────────── */
 
   async function listFiles(folderId, extraQ = '') {
-    let q = `'${folderId}' in parents and trashed=false`;
+    let q = `'${_qEsc(folderId)}' in parents and trashed=false`;
     if (extraQ) q += ` and ${extraQ}`;
     const params = new URLSearchParams({ q, fields: 'files(id,name,createdTime,modifiedTime,mimeType,size,thumbnailLink)', orderBy: 'createdTime desc', spaces: 'drive', pageSize: '100' });
     const data = await _json(`${BASE}/files?${params}`, { headers: _headers() });
@@ -152,7 +157,7 @@ const Drive = (() => {
     const ck = `${folderId}/${name}`;
     const ce = _findCache[ck];
     if (ce && Date.now() - ce.ts < _FIND_TTL) return ce.val;
-    const q = `name='${name.replace(/'/g, "\\'")}' and '${folderId}' in parents and trashed=false`;
+    const q = `name='${_qEsc(name)}' and '${_qEsc(folderId)}' in parents and trashed=false`;
     const data = await _json(`${BASE}/files?${new URLSearchParams({ q, fields: 'files(id,name)', spaces: 'drive' })}`, { headers: _headers() });
     const result = data.files?.[0] || null;
     _findCache[ck] = { val: result, ts: Date.now() };
@@ -225,7 +230,7 @@ const Drive = (() => {
 
   // Query sharedWithMe files (not folders) whose name contains a given string.
   async function listSharedFilesWithName(namePart) {
-    const q = `sharedWithMe=true and trashed=false and mimeType!='application/vnd.google-apps.folder' and name contains '${namePart.replace(/'/g, "\\'")}'`;
+    const q = `sharedWithMe=true and trashed=false and mimeType!='application/vnd.google-apps.folder' and name contains '${_qEsc(namePart)}'`;
     const params = new URLSearchParams({ q, fields: 'files(id,name,createdTime,owners)', spaces: 'drive', pageSize: '50' });
     const data = await _json(`${BASE}/files?${params}`, { headers: _headers() });
     return data.files || [];
@@ -298,10 +303,6 @@ const Drive = (() => {
     return `https://drive.google.com/thumbnail?id=${encodeURIComponent(fileId)}&sz=${size}`;
   }
 
-  // Alias kept for backward-compat callsites
-  function getMediaUrl(fileId) {
-    return getThumbnailUrl(fileId);
-  }
 
   // Fetches the full-resolution file via the Drive API (needs access token) and
   // returns an object URL suitable for a high-res <img src> or download.
@@ -377,7 +378,6 @@ const Drive = (() => {
     getComments:       _dw(getComments,    _demoGetComments),
     addComment:        _dw(addComment,     _demoAddComment),
     getThumbnailUrl,
-    getMediaUrl,
     getFileAsBlob:     _dw(getFileAsBlob, getFileAsBlob)
   };
 })();
