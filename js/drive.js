@@ -145,16 +145,26 @@ const Drive = (() => {
     });
   }
 
+  const _findCache = {};
+  const _FIND_TTL = 60_000; // 60s
+
   async function findFile(name, folderId) {
+    const ck = `${folderId}/${name}`;
+    const ce = _findCache[ck];
+    if (ce && Date.now() - ce.ts < _FIND_TTL) return ce.val;
     const q = `name='${name.replace(/'/g, "\\'")}' and '${folderId}' in parents and trashed=false`;
     const data = await _json(`${BASE}/files?${new URLSearchParams({ q, fields: 'files(id,name)', spaces: 'drive' })}`, { headers: _headers() });
-    return data.files?.[0] || null;
+    const result = data.files?.[0] || null;
+    _findCache[ck] = { val: result, ts: Date.now() };
+    return result;
   }
 
   async function upsertJsonFile(name, content, folderId) {
     const ex = await findFile(name, folderId);
     if (ex) { await updateJsonFile(ex.id, content); return ex.id; }
     const cr = await createJsonFile(name, content, folderId);
+    // Cache the newly created file so subsequent finds hit cache
+    _findCache[`${folderId}/${name}`] = { val: { id: cr.id, name }, ts: Date.now() };
     return cr.id;
   }
 

@@ -726,16 +726,16 @@
     <div class="spinner"></div>
   </div>
 
-  <script src="config.example.js"></script>
-  <script src="config.js" onerror="/* demo mode */"></script>
+  <script src="config.example.js" defer></script>
+  <script src="config.js" defer onerror="/* demo mode */"></script>
   <script src="https://apis.google.com/js/api.js" async defer></script>
   <script src="https://accounts.google.com/gsi/client" async defer></script>
-  <script src="js/utils.js"></script>
-  <script src="js/auth.js"></script>
-  <script src="js/drive.js"></script>
-  <script src="js/data.js"></script>
-  <script src="js/theme.js"></script>
-  <script src="js/ui.js"></script>
+  <script src="js/utils.js" defer></script>
+  <script src="js/auth.js" defer></script>
+  <script src="js/drive.js" defer></script>
+  <script src="js/data.js" defer></script>
+  <script src="js/theme.js" defer></script>
+  <script src="js/ui.js" defer></script>
   <script>
     if ('serviceWorker' in navigator) {
       navigator.serviceWorker.register('sw.js').catch(() => {});
