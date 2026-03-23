@@ -4964,6 +4964,17 @@ const UI = (() => {
   return { boot, navigate, openModal, closeModal, openLightbox, closeLightbox };
 })();
 
+// Global error handlers — surface silent failures to the user
+window.addEventListener('unhandledrejection', e => {
+  console.error('[Unhandled]', e.reason);
+  if (e.reason?.status === 401) return; // auth expiry handled elsewhere
+  Utils.showToast('Something went wrong. Try refreshing.', 'error');
+});
+
+window.addEventListener('error', e => {
+  console.error('[Error]', e.message, e.filename, e.lineno);
+});
+
 if (document.readyState === 'loading') {
   document.addEventListener('DOMContentLoaded', () => UI.boot());
 } else {
