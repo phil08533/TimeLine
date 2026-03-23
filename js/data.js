@@ -521,7 +521,8 @@ const Data = (() => {
       sharedWith: [], allowCopying: false,
       createdAt: new Date().toISOString()
     };
-    if (opts.voidscroll) meta.voidscroll = opts.voidscroll;
+    if (opts.voidscroll)     meta.voidscroll     = opts.voidscroll;
+    if (opts.sourceAlbumId)  meta.sourceAlbumId  = opts.sourceAlbumId;
     await Drive.createJsonFile('_meta.json', meta, folderId);
     await _shareByAudience(folderId, sharing, circleIds);
     return { ...meta, folderId };
@@ -620,7 +621,8 @@ const Data = (() => {
       authorName:  user.name || user.email,
       createdAt:   new Date().toISOString()
     };
-    if (voidscroll) meta.voidscroll = voidscroll;
+    if (voidscroll)           meta.voidscroll    = voidscroll;
+    if (opts.sourceAlbumId)   meta.sourceAlbumId = opts.sourceAlbumId;
     await Drive.createJsonFile('_post.json', meta, postFolderId);
 
     // Notify other circle members about the new post
@@ -651,7 +653,15 @@ const Data = (() => {
         const postFile = await Drive.findFile('_post.json', sf.id);
         if (!postFile) return null; // not a post subfolder (e.g. old structure)
         const meta  = await Drive.readJsonFile(postFile.id);
-        const files = await Drive.listFiles(sf.id);
+        let files = await Drive.listFiles(sf.id);
+        // If this post references a source album, pull media from there
+        const isMedia = f => f.mimeType?.startsWith('image/') || f.mimeType?.startsWith('video/');
+        if (meta.sourceAlbumId && !files.some(isMedia)) {
+          try {
+            const srcFiles = await Drive.listFiles(meta.sourceAlbumId);
+            files = [...files, ...srcFiles.filter(isMedia)];
+          } catch {}
+        }
         return { ...meta, postFolderId: sf.id, files };
       } catch { return null; }
     }));

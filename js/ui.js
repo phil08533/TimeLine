@@ -487,39 +487,58 @@ const UI = (() => {
 
     const wrap = _el(`<div class="post-menu-wrap"></div>`);
     const btn  = _el(`<button class="post-menu-btn" title="More options" aria-label="Post options">⋯</button>`);
-    const menu = _el(`<div class="post-menu" hidden role="menu"></div>`);
+    wrap.appendChild(btn);
 
-    if (isOwn && onEdit) {
-      const item = _el(`<button class="post-menu-item" role="menuitem">Edit caption</button>`);
-      item.addEventListener('click', e => { e.stopPropagation(); menu.hidden = true; onEdit(); });
-      menu.appendChild(item);
+    let menuEl = null;
+
+    function _closeMenu() {
+      if (menuEl) { menuEl.remove(); menuEl = null; }
     }
-    if (canDelete && onDelete) {
-      const item = _el(`<button class="post-menu-item post-menu-item--danger" role="menuitem">Delete post</button>`);
-      item.addEventListener('click', e => { e.stopPropagation(); menu.hidden = true; onDelete(); });
-      menu.appendChild(item);
-    }
-    if (canHide && onHide) {
-      const item = _el(`<button class="post-menu-item" role="menuitem">Hide post</button>`);
-      item.addEventListener('click', e => { e.stopPropagation(); menu.hidden = true; onHide(); });
-      menu.appendChild(item);
-    }
-    if (canHideUser && onHideUser) {
-      const label = sharerName ? `Hide all from ${Utils.escapeHtml(sharerName)}` : 'Hide this user';
-      const item = _el(`<button class="post-menu-item" role="menuitem">${label}</button>`);
-      item.addEventListener('click', e => { e.stopPropagation(); menu.hidden = true; onHideUser(); });
-      menu.appendChild(item);
+
+    function _addItem(label, action, danger) {
+      const item = _el(`<button class="post-menu-item${danger ? ' post-menu-item--danger' : ''}" role="menuitem">${label}</button>`);
+      item.addEventListener('click', e => { e.stopPropagation(); _closeMenu(); action(); });
+      menuEl.appendChild(item);
     }
 
     btn.addEventListener('click', e => {
       e.stopPropagation();
-      // Close all other open menus first
-      document.querySelectorAll('.post-menu:not([hidden])').forEach(m => { if (m !== menu) m.hidden = true; });
-      menu.hidden = !menu.hidden;
+      if (menuEl) { _closeMenu(); return; }
+
+      // Close any other open menus
+      document.querySelectorAll('.post-menu-fixed').forEach(m => m.remove());
+
+      menuEl = document.createElement('div');
+      menuEl.className = 'post-menu post-menu-fixed';
+      menuEl.setAttribute('role', 'menu');
+
+      if (isOwn && onEdit)          _addItem('Edit caption', onEdit);
+      if (canDelete && onDelete)    _addItem('Delete post', onDelete, true);
+      if (canHide && onHide)        _addItem('Hide post', onHide);
+      if (canHideUser && onHideUser) {
+        const label = sharerName ? `Hide all from ${Utils.escapeHtml(sharerName)}` : 'Hide this user';
+        _addItem(label, onHideUser);
+      }
+
+      document.body.appendChild(menuEl);
+
+      // Position fixed below button
+      const rect = btn.getBoundingClientRect();
+      menuEl.style.top  = (rect.bottom + 5) + 'px';
+      menuEl.style.left = Math.max(8, rect.right - menuEl.offsetWidth || rect.right - 168) + 'px';
+
+      // Close on outside click
+      setTimeout(() => {
+        const onOutside = ev => {
+          if (!menuEl?.contains(ev.target) && ev.target !== btn) {
+            _closeMenu();
+            document.removeEventListener('click', onOutside, true);
+          }
+        };
+        document.addEventListener('click', onOutside, true);
+      }, 0);
     });
 
-    wrap.appendChild(btn);
-    wrap.appendChild(menu);
     return wrap;
   }
 
@@ -891,10 +910,19 @@ const UI = (() => {
         try {
           const allFiles = await Drive.listFiles(album.id);
           const metaFile = allFiles.find(f => f.name === '_meta.json');
-          const files    = allFiles.filter(f => f.mimeType?.startsWith('image/') || f.mimeType?.startsWith('video/'));
+          let files      = allFiles.filter(f => f.mimeType?.startsWith('image/') || f.mimeType?.startsWith('video/'));
           let voidscroll = album.voidscroll || null;
-          if (!voidscroll && metaFile) {
-            try { const m = await Drive.readJsonFile(metaFile.id); voidscroll = m.voidscroll || null; } catch {}
+          if (metaFile) {
+            try {
+              const m = await Drive.readJsonFile(metaFile.id);
+              voidscroll = m.voidscroll || null;
+              if (m.sourceAlbumId && !files.length) {
+                try {
+                  const srcFiles = await Drive.listFiles(m.sourceAlbumId);
+                  files = srcFiles.filter(f => f.mimeType?.startsWith('image/') || f.mimeType?.startsWith('video/'));
+                } catch {}
+              }
+            } catch {}
           }
           return { ...album, files, metaFileId: metaFile?.id || null, voidscroll };
         } catch {
@@ -931,10 +959,19 @@ const UI = (() => {
         try {
           const allFiles = await Drive.listFiles(album.id);
           const metaFile = allFiles.find(f => f.name === '_meta.json');
-          const files    = allFiles.filter(f => f.mimeType?.startsWith('image/') || f.mimeType?.startsWith('video/'));
+          let files      = allFiles.filter(f => f.mimeType?.startsWith('image/') || f.mimeType?.startsWith('video/'));
           let voidscroll = album.voidscroll || null;
-          if (!voidscroll && metaFile) {
-            try { const m = await Drive.readJsonFile(metaFile.id); voidscroll = m.voidscroll || null; } catch {}
+          if (metaFile) {
+            try {
+              const m = await Drive.readJsonFile(metaFile.id);
+              voidscroll = m.voidscroll || null;
+              if (m.sourceAlbumId && !files.length) {
+                try {
+                  const srcFiles = await Drive.listFiles(m.sourceAlbumId);
+                  files = srcFiles.filter(f => f.mimeType?.startsWith('image/') || f.mimeType?.startsWith('video/'));
+                } catch {}
+              }
+            } catch {}
           }
           return { ...album, files, metaFileId: metaFile?.id || null, voidscroll };
         } catch { return { ...album, files: [], metaFileId: null }; }
@@ -2469,41 +2506,153 @@ const UI = (() => {
         const mediaFiles = post.files.filter(isMedia);
         const docFiles   = post.files.filter(f => !isMedia(f) && f.name !== '_post.json');
         const canDelete  = isOwner || post.authorEmail === user.email;
+        const isMyPost   = post.authorEmail === user.email;
+        const count      = mediaFiles.length;
 
-        const coverHtml = mediaFiles.length > 0 ? `
-          <div class="feed-album-cover">
-            <img src="" alt="" loading="lazy" />
-            ${mediaFiles.length > 1 ? `<span class="feed-album-count">${mediaFiles.length}</span>` : ''}
-          </div>` : '';
+        const initials = (post.authorName || post.authorEmail || '?')[0].toUpperCase();
+        const carouselHtml = count > 0 ? `
+          <div class="post-carousel post-carousel--sm">
+            <div class="post-carousel-track"></div>
+            ${count > 1 ? `
+              <button class="post-carousel-arrow post-carousel-arrow--prev" aria-label="Previous">‹</button>
+              <button class="post-carousel-arrow post-carousel-arrow--next" aria-label="Next">›</button>
+              <div class="post-carousel-counter"><span class="post-carousel-cur">1</span>/<span class="post-carousel-total">${count}</span></div>
+              <div class="post-carousel-dots">${mediaFiles.map((_,i) => `<span class="post-carousel-dot${i===0?' active':''}"></span>`).join('')}</div>
+            ` : ''}
+          </div>
+          ${count > 1 ? `<button class="post-view-all-btn" style="font-size:.75rem;padding:.35rem .75rem">View all ${count} items</button>` : ''}
+        ` : '';
 
         const docsHtml = docFiles.map(f =>
           `<div class="circle-doc-chip">${_fileTypeIcon(f.mimeType)} <span>${Utils.escapeHtml(f.name)}</span></div>`
         ).join('');
 
-        const isMyPost = post.authorEmail === user.email;
         const card = _el(`
-          <div class="feed-album-card">
-            ${coverHtml}
-            <div class="feed-album-meta">
-              <div class="feed-album-byline">
-                <span class="feed-album-sharer${!isMyPost ? ' feed-album-sharer--clickable' : ''}">${Utils.escapeHtml(post.authorName || post.authorEmail)}</span>
-                <span class="feed-album-dot">·</span>
-                <span class="feed-album-time">${timeStr}</span>
-                <div class="post-menu-slot" style="margin-left:auto"></div>
+          <div class="post-card post-card--sm">
+            <div class="post-card-header">
+              <div class="post-avatar${!isMyPost ? ' post-avatar--clickable' : ''}">
+                <span class="post-avatar-initials">${initials}</span>
               </div>
-              <div class="feed-album-caption-wrap">${post.caption ? `<div class="feed-album-caption">${Utils.escapeHtml(post.caption)}</div>` : ''}</div>
-              ${docsHtml ? `<div class="circle-docs-row">${docsHtml}</div>` : ''}
+              <div class="post-author-meta">
+                <span class="post-author-name${!isMyPost ? ' post-author-name--clickable' : ''}">${Utils.escapeHtml(post.authorName || post.authorEmail)}</span>
+                <span class="post-author-time">${timeStr}</span>
+              </div>
+              <div class="post-menu-slot"></div>
+            </div>
+            ${post.caption ? `<div class="post-caption">${Utils.escapeHtml(post.caption)}</div>` : ''}
+            ${docsHtml ? `<div class="circle-docs-row" style="padding:.25rem .75rem .5rem">${docsHtml}</div>` : ''}
+            ${carouselHtml}
+            <div class="post-actions post-actions--sm">
+              <div class="post-reactions" id="creactions-${Utils.escapeHtml(post.postFolderId)}">
+                <button class="post-react-btn" data-type="like" title="Like">❤️ <span>0</span></button>
+                <button class="post-react-btn" data-type="laugh" title="Haha">😂 <span>0</span></button>
+                <button class="post-react-btn" data-type="clap" title="Clap">👏 <span>0</span></button>
+                <button class="post-react-btn" data-type="wow" title="Wow">😮 <span>0</span></button>
+                <button class="post-react-btn" data-type="sad" title="Sad">😢 <span>0</span></button>
+              </div>
             </div>
           </div>
         `);
 
-        if (mediaFiles.length > 0) {
-          _loadThumbnail(card.querySelector('img'), mediaFiles[0].id, mediaFiles[0].thumbnailLink);
+        // Build carousel slides
+        const track = card.querySelector('.post-carousel-track');
+        if (track && count > 0) {
+          let _curIdx = 0;
+          const dots     = card.querySelectorAll('.post-carousel-dot');
+          const curLabel = card.querySelector('.post-carousel-cur');
+
+          function _goTo(idx) {
+            _curIdx = Math.max(0, Math.min(mediaFiles.length - 1, idx));
+            track.style.transform = `translateX(-${_curIdx * 100}%)`;
+            dots.forEach((d, i) => d.classList.toggle('active', i === _curIdx));
+            if (curLabel) curLabel.textContent = _curIdx + 1;
+          }
+          card.querySelector('.post-carousel-arrow--prev')?.addEventListener('click', e => { e.stopPropagation(); _goTo(_curIdx - 1); });
+          card.querySelector('.post-carousel-arrow--next')?.addEventListener('click', e => { e.stopPropagation(); _goTo(_curIdx + 1); });
+
+          let _touchStartX = 0;
+          track.addEventListener('touchstart', e => { _touchStartX = e.touches[0].clientX; }, { passive: true });
+          track.addEventListener('touchend', e => {
+            const dx = e.changedTouches[0].clientX - _touchStartX;
+            if (Math.abs(dx) > 40) _goTo(dx < 0 ? _curIdx + 1 : _curIdx - 1);
+          });
+
+          mediaFiles.forEach((f, idx) => {
+            let slide;
+            if (f.mimeType?.startsWith('video/')) {
+              slide = _el(`
+                <div class="post-carousel-slide post-media-item--video">
+                  <video src="" loop muted playsinline preload="none"></video>
+                  <div class="video-play-overlay">
+                    <button class="video-play-btn" aria-label="Play video">▶</button>
+                  </div>
+                  <button class="video-fullscreen-btn" aria-label="Fullscreen" hidden>⛶</button>
+                </div>
+              `);
+              const vid    = slide.querySelector('video');
+              const playEl = slide.querySelector('.video-play-overlay');
+              const fsBtn  = slide.querySelector('.video-fullscreen-btn');
+              slide.querySelector('.video-play-btn').addEventListener('click', async e => {
+                e.stopPropagation();
+                playEl.hidden = true;
+                try {
+                  const url = await Drive.getFileAsBlob(f.id);
+                  vid.src = url; vid.muted = false; vid.play().catch(() => {});
+                  fsBtn.hidden = false;
+                } catch { Utils.showToast('Could not load video', 'error'); playEl.hidden = false; }
+              });
+              vid.addEventListener('click', e => { e.stopPropagation(); if (!vid.src) return; vid.paused ? vid.play().catch(()=>{}) : vid.pause(); });
+              fsBtn.addEventListener('click', e => { e.stopPropagation(); if (vid.requestFullscreen) vid.requestFullscreen(); else if (vid.webkitRequestFullscreen) vid.webkitRequestFullscreen(); });
+              slide.addEventListener('click', e => {
+                if (e.target.closest('.video-play-btn') || e.target.closest('.video-fullscreen-btn') || e.target === vid) return;
+                e.stopPropagation();
+                if (vid.src) { vid.paused ? vid.play().catch(()=>{}) : vid.pause(); } else { slide.querySelector('.video-play-btn')?.click(); }
+              });
+            } else {
+              slide = _el(`<div class="post-carousel-slide"><img src="" alt="" loading="${idx===0?'eager':'lazy'}" /></div>`);
+              _loadThumbnail(slide.querySelector('img'), f.id, f.thumbnailLink);
+              slide.addEventListener('click', e => {
+                e.stopPropagation();
+                openLightbox(f.id, post.postFolderId, { canDelete, thumbnailLink: f.thumbnailLink });
+              });
+            }
+            track.appendChild(slide);
+          });
         }
 
-        // Circle post ⋯ menu
-        const circlePostMenuSlot = card.querySelector('.post-menu-slot');
-        const circlePostCaptionWrap = card.querySelector('.feed-album-caption-wrap');
+        // View All button
+        card.querySelector('.post-view-all-btn')?.addEventListener('click', e => {
+          e.stopPropagation();
+          navigate('collection-detail', { folderId: post.postFolderId });
+        });
+
+        // Reactions
+        const reactBar = card.querySelector('.post-reactions');
+        Data.getReactions(post.postFolderId).then(r => {
+          const me = Auth.getCurrentUser();
+          const map = { like: r.likes, laugh: r.laughs, clap: r.claps, wow: r.wows, sad: r.sads };
+          reactBar.querySelectorAll('.post-react-btn').forEach(btn => {
+            const type = btn.dataset.type;
+            const arr  = map[type] || [];
+            btn.querySelector('span').textContent = arr.length;
+            btn.classList.toggle('reacted', arr.some(l => l.userId === me?.userId));
+          });
+        }).catch(() => {});
+
+        reactBar.querySelectorAll('.post-react-btn').forEach(btn => {
+          btn.addEventListener('click', async e => {
+            e.stopPropagation();
+            try {
+              const result = await Data.toggleReaction(post.postFolderId, btn.dataset.type);
+              btn.querySelector('span').textContent = result.count;
+              btn.classList.toggle('reacted', result.reacted);
+            } catch { Utils.showToast('Could not react', 'error'); }
+          });
+        });
+
+        // ⋯ menu
+        const captionEl = card.querySelector('.post-caption');
+        const menuSlot  = card.querySelector('.post-menu-slot');
         const circleMenu = _buildPostMenu({
           isOwn:     isMyPost,
           canDelete: canDelete,
@@ -2512,9 +2661,7 @@ const UI = (() => {
             _openEditCaptionModal(post.caption, async newCaption => {
               await Data.updateCirclePostCaption(post.postFolderId, newCaption);
               post.caption = newCaption;
-              circlePostCaptionWrap.innerHTML = newCaption
-                ? `<div class="feed-album-caption">${Utils.escapeHtml(newCaption)}</div>`
-                : '';
+              if (captionEl) captionEl.textContent = newCaption;
             });
           },
           onDelete: async () => {
@@ -2528,12 +2675,9 @@ const UI = (() => {
           onHide: async () => {
             try {
               await Data.hidePost(post.postFolderId);
-              const wrapper = card.closest('.feed-album-wrapper');
-              if (wrapper) {
-                wrapper.style.transition = 'opacity .2s';
-                wrapper.style.opacity = '0';
-                setTimeout(() => wrapper.remove(), 220);
-              }
+              wrapper.style.transition = 'opacity .2s';
+              wrapper.style.opacity = '0';
+              setTimeout(() => wrapper.remove(), 220);
               Utils.showToast('Post hidden', 'info', null, {
                 label: 'Undo',
                 action: async () => {
@@ -2544,52 +2688,18 @@ const UI = (() => {
             } catch { Utils.showToast('Could not hide post', 'error'); }
           }
         });
-        if (circleMenu) circlePostMenuSlot.appendChild(circleMenu);
+        if (circleMenu) menuSlot.appendChild(circleMenu);
 
-        // Clicking the author name opens their profile
+        // Author click
         if (!isMyPost && post.authorEmail) {
-          card.querySelector('.feed-album-sharer--clickable')?.addEventListener('click', e => {
-            e.stopPropagation();
-            navigate('user-profile', { person: { email: post.authorEmail, displayName: post.authorName } });
-          });
+          const openProfile = e => { e.stopPropagation(); navigate('user-profile', { person: { email: post.authorEmail, displayName: post.authorName } }); };
+          card.querySelector('.post-avatar--clickable')?.addEventListener('click', openProfile);
+          card.querySelector('.post-author-name--clickable')?.addEventListener('click', openProfile);
         }
 
-        const expandGrid = document.createElement('div');
-        expandGrid.className = 'feed-album-grid';
-        expandGrid.hidden = true;
-        let expanded = false;
-
-        const setupCoverClick = coverEl => {
-          if (!coverEl) return;
-          coverEl.style.cursor = 'pointer';
-          coverEl.addEventListener('click', e => {
-            e.stopPropagation();
-            if (mediaFiles.length === 1) {
-              openLightbox(mediaFiles[0].id, post.postFolderId, { canDelete, thumbnailLink: mediaFiles[0].thumbnailLink });
-            } else {
-              expanded = !expanded;
-              expandGrid.hidden = !expanded;
-              if (expanded && !expandGrid.dataset.loaded) {
-                expandGrid.dataset.loaded = '1';
-                mediaFiles.forEach(f => {
-                  const thumb = _el(`<div class="media-item"><img src="" alt="" loading="lazy" /></div>`);
-                  _loadThumbnail(thumb.querySelector('img'), f.id, f.thumbnailLink);
-                  thumb.addEventListener('click', ev => {
-                    ev.stopPropagation();
-                    openLightbox(f.id, post.postFolderId, { canDelete, thumbnailLink: f.thumbnailLink });
-                  });
-                  expandGrid.appendChild(thumb);
-                });
-              }
-            }
-          });
-        };
-        setupCoverClick(card.querySelector('.feed-album-cover'));
-
         const wrapper = document.createElement('div');
-        wrapper.className = 'feed-album-wrapper';
+        wrapper.className = 'post-card-wrapper';
         wrapper.appendChild(card);
-        wrapper.appendChild(expandGrid);
         feedEl.appendChild(wrapper);
       });
 
@@ -3201,20 +3311,20 @@ const UI = (() => {
       <h3>Share "${Utils.escapeHtml(coll.name)}"</h3>
       <p class="muted-text small">Choose how to share — nothing is downloaded or copied to anyone's Drive.</p>
       <div class="share-options-grid">
-        <button type="button" class="share-option-btn" id="share-opt-person">
-          <span class="share-option-icon">👤</span>
-          <span class="share-option-label">Send to People</span>
-          <span class="share-option-desc">Share with friends or circles</span>
+        <button type="button" class="share-option-btn" id="share-opt-feed">
+          <span class="share-option-icon">📣</span>
+          <span class="share-option-label">Post to Feed</span>
+          <span class="share-option-desc">Share on your timeline</span>
+        </button>
+        <button type="button" class="share-option-btn" id="share-opt-circle">
+          <span class="share-option-icon">⭕</span>
+          <span class="share-option-label">Post to Circle</span>
+          <span class="share-option-desc">Share with a circle</span>
         </button>
         <button type="button" class="share-option-btn" id="share-opt-album">
           <span class="share-option-icon">🗂</span>
           <span class="share-option-label">Add to Album</span>
           <span class="share-option-desc">Reference in another album</span>
-        </button>
-        <button type="button" class="share-option-btn" id="share-opt-feed">
-          <span class="share-option-icon">📣</span>
-          <span class="share-option-label">Post to Feed</span>
-          <span class="share-option-desc">Share on your timeline</span>
         </button>
       </div>
       <div id="share-step-content" class="share-step"></div>
@@ -3230,46 +3340,42 @@ const UI = (() => {
       document.querySelectorAll('.share-option-btn').forEach(b => b.classList.toggle('active', b.id === id));
     }
 
-    // --- Path 1: Send to People ---
-    document.getElementById('share-opt-person').addEventListener('click', () => {
-      setActive('share-opt-person');
+    // --- Path 1: Post to Circle ---
+    document.getElementById('share-opt-circle').addEventListener('click', () => {
+      setActive('share-opt-circle');
+      if (!circles.length) {
+        stepContent.innerHTML = `<p class="muted-text small" style="margin-top:.75rem">You don't have any circles yet. Create one first.</p>`;
+        return;
+      }
       stepContent.innerHTML = `
         <div class="form-block" style="margin-top:0">
           <div class="form-field">
-            <label>Search friends or enter email</label>
-            <div style="position:relative">
-              <input id="share-person-email" class="input" type="email" placeholder="Type a name or email…" autocomplete="off" />
-            </div>
-          </div>
-          ${circles.length ? `
-          <div class="form-field">
-            <label>Or share with a Circle</label>
-            <select id="share-circle-select" class="select-sm" style="width:100%">
-              <option value="">— pick a circle —</option>
+            <label>Choose a circle</label>
+            <select id="share-circle-post-select" class="select-sm" style="width:100%">
               ${circles.map(c => `<option value="${Utils.escapeHtml(c.id)}">${Utils.escapeHtml(c.name)}</option>`).join('')}
             </select>
-          </div>` : ''}
-          <button id="share-person-btn" class="btn btn-primary btn-sm">Share Access</button>
+          </div>
+          <div class="form-field">
+            <label>Caption <span class="muted-text small">(optional)</span></label>
+            <textarea id="share-circle-post-caption" class="input" rows="2" placeholder="Add a note…"></textarea>
+          </div>
+          <button id="share-circle-post-btn" class="btn btn-primary btn-sm">Post to Circle</button>
         </div>`;
 
-      const emailInput = document.getElementById('share-person-email');
-      _buildFriendPicker(emailInput, friends, [], null);
-
-      document.getElementById('share-person-btn').addEventListener('click', async () => {
-        const email  = emailInput.value.trim();
-        const circle = document.getElementById('share-circle-select')?.value;
-        if (!email && !circle) { Utils.showToast('Enter an email or pick a circle', 'error'); return; }
+      document.getElementById('share-circle-post-btn').addEventListener('click', async () => {
+        const circleId = document.getElementById('share-circle-post-select').value;
+        const caption  = document.getElementById('share-circle-post-caption').value.trim();
+        if (!circleId) return;
         Utils.showLoading();
         try {
-          const emails = [];
-          if (email) emails.push(email);
-          if (circle) {
-            const circ = await Data.getCircle(circle);
-            circ.members.filter(m => m.role !== 'owner').forEach(m => emails.push(m.email));
-          }
-          await Data.shareCollection(folderId, emails);
-          closeModal(); Utils.showToast('Shared! They now have view access.');
-        } catch { Utils.showToast('Failed to share', 'error'); }
+          const circ = await Data.getCircle(circleId);
+          await Data.createCirclePost(circleId, {
+            caption: caption || coll.name,
+            members: circ.members || [],
+            sourceAlbumId: folderId
+          });
+          closeModal(); Utils.showToast('Posted to circle!');
+        } catch { Utils.showToast('Failed to post to circle', 'error'); }
         finally { Utils.hideLoading(); }
       });
     });
