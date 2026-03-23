@@ -1298,7 +1298,9 @@ const UI = (() => {
           <div class="post-carousel-counter"><span class="post-carousel-cur">1</span>/<span class="post-carousel-total">${count}</span></div>
           <div class="post-carousel-dots">${mediaFiles.map((_, i) => `<span class="post-carousel-dot${i === 0 ? ' active' : ''}"></span>`).join('')}</div>
         ` : ''}
-      </div>` : '';
+      </div>
+      ${count > 1 ? `<button class="post-view-all-btn" data-album-id="${Utils.escapeHtml(album.id)}">View all ${count} items</button>` : ''}
+      ` : '';
 
     // Text-only detection
     const isTextOnly = count === 0 && !!album.caption && !album.voidscroll;
@@ -1385,30 +1387,64 @@ const UI = (() => {
               <div class="video-play-overlay">
                 <button class="video-play-btn" aria-label="Play video">▶</button>
               </div>
+              <button class="video-fullscreen-btn" aria-label="Fullscreen" hidden>⛶</button>
             </div>
           `);
           const vid    = slide.querySelector('video');
           const playEl = slide.querySelector('.video-play-overlay');
+          const fsBtn  = slide.querySelector('.video-fullscreen-btn');
+
           slide.querySelector('.video-play-btn').addEventListener('click', async e => {
             e.stopPropagation();
             playEl.hidden = true;
             try {
               const url = await Drive.getFileAsBlob(f.id);
               vid.src = url; vid.muted = false; vid.play().catch(() => {});
+              fsBtn.hidden = false;
             } catch { Utils.showToast('Could not load video', 'error'); playEl.hidden = false; }
+          });
+
+          // Click on video toggles play/pause once loaded
+          vid.addEventListener('click', e => {
+            e.stopPropagation();
+            if (!vid.src) return;
+            vid.paused ? vid.play().catch(() => {}) : vid.pause();
+          });
+
+          // Fullscreen button
+          fsBtn.addEventListener('click', e => {
+            e.stopPropagation();
+            if (vid.requestFullscreen) vid.requestFullscreen();
+            else if (vid.webkitRequestFullscreen) vid.webkitRequestFullscreen();
+          });
+
+          // Clicking slide area (not on specific controls) also toggles play/pause if loaded
+          slide.addEventListener('click', e => {
+            if (e.target.closest('.video-play-btn') || e.target.closest('.video-fullscreen-btn') || e.target === vid) return;
+            e.stopPropagation();
+            if (vid.src) {
+              vid.paused ? vid.play().catch(() => {}) : vid.pause();
+            } else {
+              slide.querySelector('.video-play-btn')?.click();
+            }
           });
         } else {
           slide = _el(`<div class="post-carousel-slide"><img src="" alt="" loading="${idx === 0 ? 'eager' : 'lazy'}" /></div>`);
           _loadThumbnail(slide.querySelector('img'), f.id, f.thumbnailLink);
+          slide.addEventListener('click', e => {
+            e.stopPropagation();
+            openLightbox(f.id, album.id, { canCopy: !album._isOwn, canDelete: album._isOwn, thumbnailLink: f.thumbnailLink });
+          });
         }
-        slide.addEventListener('click', e => {
-          if (e.target.closest('.video-play-btn')) return;
-          e.stopPropagation();
-          openLightbox(f.id, album.id, { canCopy: !album._isOwn, canDelete: album._isOwn, thumbnailLink: f.thumbnailLink });
-        });
         track.appendChild(slide);
       });
     }
+
+    // View All button for multi-item albums
+    card.querySelector('.post-view-all-btn')?.addEventListener('click', e => {
+      e.stopPropagation();
+      navigate('collection-detail', { folderId: album.id });
+    });
 
     // Multi-reaction buttons — load reactions once
     const reactBar = card.querySelector('.post-reactions');
