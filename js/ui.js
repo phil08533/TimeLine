@@ -183,18 +183,25 @@ const UI = (() => {
         </div>
       `);
       item.querySelector('.notif-accept').addEventListener('click', async () => {
-        item.querySelector('.notif-accept').disabled = true;
-        item.querySelector('.notif-decline').disabled = true;
-        try {
-          await Data.acceptFriendRequest(req.fromEmail, req.fromName, req.fromPicture, req.fileId);
-          item.innerHTML = `<div class="notif-done">✓ Added ${Utils.escapeHtml(label)} as a friend</div>`;
-          setTimeout(() => { item.remove(); _clearIfEmpty(); }, 1800);
-          Utils.showToast(`Added ${label} as friend`);
-          _refreshNotificationCount().catch(() => {});
-        } catch {
-          Utils.showToast('Could not accept', 'error');
-          item.querySelector('.notif-accept').disabled = false;
-          item.querySelector('.notif-decline').disabled = false;
+        const doAccept = async () => {
+          item.querySelector('.notif-accept').disabled = true;
+          item.querySelector('.notif-decline').disabled = true;
+          try {
+            await Data.acceptFriendRequest(req.fromEmail, req.fromName, req.fromPicture, req.fileId);
+            item.innerHTML = `<div class="notif-done">✓ Added ${Utils.escapeHtml(label)} as a friend</div>`;
+            setTimeout(() => { item.remove(); _clearIfEmpty(); }, 1800);
+            Utils.showToast(`Added ${label} as friend`);
+            _refreshNotificationCount().catch(() => {});
+          } catch {
+            Utils.showToast('Could not accept', 'error');
+            item.querySelector('.notif-accept').disabled = false;
+            item.querySelector('.notif-decline').disabled = false;
+          }
+        };
+        if (!localStorage.getItem('mc_profile_public')) {
+          _showPublicProfilePromptThen(doAccept);
+        } else {
+          await doAccept();
         }
       });
       item.querySelector('.notif-decline').addEventListener('click', async () => {

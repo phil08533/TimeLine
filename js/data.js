@@ -786,6 +786,10 @@ const Data = (() => {
 
   async function acceptFriendRequest(fromEmail, fromName, fromPicture, requestFileId) {
     return _withWriteLock(async () => {
+      // Ensure profile is public so the requester can see our posts
+      await makeProfilePublic().catch(() => {});
+      try { localStorage.setItem('mc_profile_public', '1'); } catch {}
+
       const data = await _getFriendsFile();
       // Deduplicate: remove any extra entries for this email, keep only the first
       const dupes = data.friends.filter(f => f.email === fromEmail);
