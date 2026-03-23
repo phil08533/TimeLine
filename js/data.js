@@ -696,6 +696,7 @@ const Data = (() => {
       // Auto-make profile public on first friend request so others can see your posts
       if (!data.friends.length) {
         await makeProfilePublic().catch(() => {});
+        try { localStorage.setItem('mc_profile_public', '1'); } catch {}
       }
 
       const user = Auth.getCurrentUser();

@@ -3402,6 +3402,10 @@ const UI = (() => {
       const [friends, blocked, hiddenUsers] = await Promise.all([
         Data.getFriends(), Data.getBlocked(), Data.getHiddenUsers().catch(() => [])
       ]);
+      // If user already has friends, profile was made public before
+      if (friends.length && !localStorage.getItem('mc_profile_public')) {
+        localStorage.setItem('mc_profile_public', '1');
+      }
       document.getElementById('friends-count').textContent = friends.length;
       _renderFriendsList(friends);
       _renderHiddenUsersList(hiddenUsers);
@@ -3554,9 +3558,58 @@ const UI = (() => {
     const emailInput = document.getElementById('add-friend-email');
     const email = emailInput.value.trim();
     if (!email || !email.includes('@')) { Utils.showToast('Enter a valid email', 'error'); return; }
+
+    // If profile hasn't been made public yet, prompt the user first
+    if (!localStorage.getItem('mc_profile_public')) {
+      _showPublicProfilePrompt(email);
+      return;
+    }
+
+    await _sendFriendRequestAndUpdate(email);
+  }
+
+  function _showPublicProfilePrompt(email) {
+    _showPublicProfilePromptThen(() => _sendFriendRequestAndUpdate(email));
+  }
+
+  function _showPublicProfilePromptThen(onConfirm) {
+    openModal(`
+      <h3>Make your profile visible</h3>
+      <p class="muted-text" style="margin:.5rem 0">To add friends, your profile needs to be public so they can see your posts.</p>
+      <details class="profile-public-help" style="margin:.75rem 0">
+        <summary style="cursor:pointer;font-size:.85rem;color:var(--muted);display:inline-flex;align-items:center;gap:.3rem">
+          <span style="display:inline-flex;align-items:center;justify-content:center;width:1.2rem;height:1.2rem;border-radius:50%;border:1px solid var(--muted);font-size:.75rem;font-weight:600">?</span>
+          What does this mean?
+        </summary>
+        <p style="margin:.5rem 0 0 1.5rem;font-size:.85rem;color:var(--muted)">
+          Making your profile public creates a shareable link to your collections folder in Google Drive.
+          Only people you add as friends will show up in your circles — your Google Drive files stay in your account, and you control what you share.
+        </p>
+      </details>
+      <div class="modal-actions">
+        <button type="button" class="btn btn-primary btn-sm" id="confirm-public-btn">Make Public &amp; Send Request</button>
+      </div>
+    `);
+    document.getElementById('confirm-public-btn').addEventListener('click', async () => {
+      const btn = document.getElementById('confirm-public-btn');
+      btn.disabled = true; btn.textContent = 'Working…';
+      try {
+        await Data.makeProfilePublic();
+        localStorage.setItem('mc_profile_public', '1');
+        closeModal();
+        await onConfirm();
+      } catch {
+        btn.disabled = false; btn.textContent = 'Make Public & Send Request';
+        Utils.showToast('Could not make profile public', 'error');
+      }
+    });
+  }
+
+  async function _sendFriendRequestAndUpdate(email) {
+    const emailInput = document.getElementById('add-friend-email');
     try {
       await Data.sendFriendRequest(email);
-      emailInput.value = '';
+      if (emailInput) emailInput.value = '';
       _renderFriends();
       Utils.showToast(`Friend request sent to ${email}!`);
     } catch { Utils.showToast('Failed to send friend request', 'error'); }
@@ -3644,14 +3697,21 @@ const UI = (() => {
       row.querySelector('.suggest-add-btn').addEventListener('click', async e => {
         e.stopPropagation();
         const btn = e.target;
-        btn.disabled = true; btn.textContent = 'Sending...';
-        try {
-          await Data.sendFriendRequest(s.email);
-          btn.textContent = 'Sent!';
-          Utils.showToast(`Friend request sent to ${s.email}!`);
-        } catch {
-          Utils.showToast('Could not send request', 'error');
-          btn.disabled = false; btn.textContent = 'Add';
+        const doSend = async () => {
+          btn.disabled = true; btn.textContent = 'Sending...';
+          try {
+            await Data.sendFriendRequest(s.email);
+            btn.textContent = 'Sent!';
+            Utils.showToast(`Friend request sent to ${s.email}!`);
+          } catch {
+            Utils.showToast('Could not send request', 'error');
+            btn.disabled = false; btn.textContent = 'Add';
+          }
+        };
+        if (!localStorage.getItem('mc_profile_public')) {
+          _showPublicProfilePromptThen(doSend);
+        } else {
+          await doSend();
         }
       });
       list.appendChild(row);
@@ -3736,6 +3796,20 @@ const UI = (() => {
       } else {
         const addBtn = _el(`<button class="btn btn-primary btn-sm">+ Add Friend</button>`);
         addBtn.addEventListener('click', async () => {
+          if (!localStorage.getItem('mc_profile_public')) {
+            _showPublicProfilePromptThen(async () => {
+              addBtn.disabled = true; addBtn.textContent = 'Sending…';
+              try {
+                await Data.sendFriendRequest(email);
+                addBtn.textContent = 'Request sent';
+                Utils.showToast('Friend request sent!');
+              } catch {
+                Utils.showToast('Could not send request', 'error');
+                addBtn.disabled = false; addBtn.textContent = '+ Add Friend';
+              }
+            });
+            return;
+          }
           addBtn.disabled = true; addBtn.textContent = 'Sending…';
           try {
             await Data.sendFriendRequest(email);
@@ -3866,6 +3940,7 @@ const UI = (() => {
       btn.disabled = true; btn.textContent = 'Working…';
       try {
         const url = await Data.makeProfilePublic();
+        localStorage.setItem('mc_profile_public', '1');
         urlBox.textContent = url;
         urlBox.hidden = false;
         status.textContent = 'Anyone with this link can view your public collections.';
