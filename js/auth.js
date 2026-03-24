@@ -42,7 +42,7 @@ const Auth = (() => {
 
     _tokenClient = google.accounts.oauth2.initTokenClient({
       client_id: cfg.GOOGLE_CLIENT_ID,
-      scope: 'https://www.googleapis.com/auth/drive openid email profile',
+      scope: 'https://www.googleapis.com/auth/drive.file openid email profile',
       callback: _handleTokenResponse
     });
   }
