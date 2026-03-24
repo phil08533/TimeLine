@@ -3483,7 +3483,6 @@ const UI = (() => {
             <label>Audience</label>
             <select id="share-feed-sharing" class="select-sm" style="width:100%">
               <option value="friends">Friends</option>
-              ${circles.length ? `<option value="circles">My Circles</option>` : ''}
               <option value="everyone">Anyone with link</option>
             </select>
           </div>
