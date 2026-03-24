@@ -3363,7 +3363,7 @@ const UI = (() => {
       Data.listCircles().catch(() => []),
       Data.listCollections().catch(() => [])
     ]); } catch {}
-    albums = albums.filter(a => a.id !== folderId && !a.isPost);
+    albums = albums.filter(a => a.folderId !== folderId && !a.isPost);
 
     openModal(`
       <h3>Share "${Utils.escapeHtml(coll.name)}"</h3>
@@ -3410,7 +3410,7 @@ const UI = (() => {
           <div class="form-field">
             <label>Choose a circle</label>
             <select id="share-circle-post-select" class="select-sm" style="width:100%">
-              ${circles.map(c => `<option value="${Utils.escapeHtml(c.id)}">${Utils.escapeHtml(c.name)}</option>`).join('')}
+              ${circles.map(c => `<option value="${Utils.escapeHtml(c.folderId)}">${Utils.escapeHtml(c.name)}</option>`).join('')}
             </select>
           </div>
           <div class="form-field">
@@ -3450,7 +3450,7 @@ const UI = (() => {
           <div class="form-field">
             <label>Choose an album</label>
             <select id="share-album-select" class="select-sm" style="width:100%">
-              ${albums.map(a => `<option value="${Utils.escapeHtml(a.id)}">${Utils.escapeHtml(a.name)}</option>`).join('')}
+              ${albums.map(a => `<option value="${Utils.escapeHtml(a.folderId)}">${Utils.escapeHtml(a.name)}</option>`).join('')}
             </select>
           </div>
           <button id="share-album-btn" class="btn btn-primary btn-sm">Add Reference</button>
@@ -4927,7 +4927,7 @@ const UI = (() => {
           <div class="form-field">
             <label>Choose a circle</label>
             <select id="vs-share-circle-sel" class="select-sm" style="width:100%">
-              ${circles.map(c => `<option value="${Utils.escapeHtml(c.id)}">${Utils.escapeHtml(c.name)}</option>`).join('')}
+              ${circles.map(c => `<option value="${Utils.escapeHtml(c.folderId)}">${Utils.escapeHtml(c.name)}</option>`).join('')}
             </select>
           </div>
           <div class="form-field">
@@ -4960,7 +4960,7 @@ const UI = (() => {
           <div class="form-field">
             <label>Choose an album</label>
             <select id="vs-share-album-sel" class="select-sm" style="width:100%">
-              ${albums.map(a => `<option value="${Utils.escapeHtml(a.id)}">${Utils.escapeHtml(a.name)}</option>`).join('')}
+              ${albums.map(a => `<option value="${Utils.escapeHtml(a.folderId)}">${Utils.escapeHtml(a.name)}</option>`).join('')}
             </select>
           </div>
           <button id="vs-share-album-btn" class="btn btn-primary btn-sm">Save</button>
