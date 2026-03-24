@@ -2542,6 +2542,10 @@ const UI = (() => {
         const count      = mediaFiles.length;
 
         const initials = (post.authorName || post.authorEmail || '?')[0].toUpperCase();
+        const pic = post.authorPicture || (isMyPost ? user.picture : null);
+        const avatarHtml = pic
+          ? `<img src="${Utils.escapeHtml(pic)}" alt="" class="post-avatar-img" />`
+          : `<span class="post-avatar-initials">${initials}</span>`;
         const carouselHtml = count > 0 ? `
           <div class="post-carousel post-carousel--sm">
             <div class="post-carousel-track"></div>
@@ -2572,9 +2576,7 @@ const UI = (() => {
         const card = _el(`
           <div class="post-card post-card--sm">
             <div class="post-card-header">
-              <div class="post-avatar${!isMyPost ? ' post-avatar--clickable' : ''}">
-                <span class="post-avatar-initials">${initials}</span>
-              </div>
+              <div class="post-avatar${!isMyPost ? ' post-avatar--clickable' : ''}">${avatarHtml}</div>
               <div class="post-author-meta">
                 <span class="post-author-name${!isMyPost ? ' post-author-name--clickable' : ''}">${Utils.escapeHtml(post.authorName || post.authorEmail)}</span>
                 <span class="post-author-time">${timeStr}</span>

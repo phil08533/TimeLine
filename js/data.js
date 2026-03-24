@@ -617,9 +617,10 @@ const Data = (() => {
     const user = Auth.getCurrentUser();
     const meta = {
       id, caption,
-      authorEmail: user.email,
-      authorName:  user.name || user.email,
-      createdAt:   new Date().toISOString()
+      authorEmail:   user.email,
+      authorName:    user.name || user.email,
+      authorPicture: user.picture || null,
+      createdAt:     new Date().toISOString()
     };
     if (voidscroll)     meta.voidscroll    = voidscroll;
     if (sourceAlbumId)  meta.sourceAlbumId = sourceAlbumId;
