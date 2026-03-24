@@ -837,6 +837,17 @@ details[open] .auth-setup-toggle::before { content: '▾ '; }
 .media-item:hover .media-overlay { opacity: 1; }
 .media-time { opacity: .75; font-size: .7rem; }
 
+/* ── Referenced media (from linked albums) ── */
+.media-item--ref::after {
+  content: '↗';
+  position: absolute; top: .3rem; right: .3rem;
+  background: rgba(0,0,0,.5); color: #fff;
+  font-size: .65rem; width: 16px; height: 16px;
+  border-radius: 50%;
+  display: flex; align-items: center; justify-content: center;
+  pointer-events: none;
+}
+
 /* ── My Data managed items (action buttons on hover) ── */
 .media-item--managed { cursor: default; }
 .media-item--managed img { cursor: pointer; }
