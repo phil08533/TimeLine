@@ -437,7 +437,7 @@ const UI = (() => {
       Drive.getFileAsBlob(fileId).then(u => {
         _thumbBlobUrls.push(u);
         imgEl.src = u;
-      }).catch(() => {});
+      }).catch(() => { imgEl.alt = '⚠'; });
     }
     if (thumbnailLink) {
       imgEl.src = thumbnailLink;
@@ -912,21 +912,37 @@ const UI = (() => {
           const metaFile = allFiles.find(f => f.name === '_meta.json');
           let files      = allFiles.filter(f => f.mimeType?.startsWith('image/') || f.mimeType?.startsWith('video/'));
           let voidscroll = album.voidscroll || null;
+          let resolvedSourceId = null;
           if (metaFile) {
             try {
               const m = await Drive.readJsonFile(metaFile.id);
               voidscroll = m.voidscroll || null;
-              if (m.sourceAlbumId && !files.length) {
-                try {
-                  const srcFiles = await Drive.listFiles(m.sourceAlbumId);
-                  files = srcFiles.filter(f => f.mimeType?.startsWith('image/') || f.mimeType?.startsWith('video/'));
-                } catch {}
+              if (m.sourceAlbumId) {
+                resolvedSourceId = m.sourceAlbumId;
+                if (!files.length) {
+                  try {
+                    const srcFiles = await Drive.listFiles(m.sourceAlbumId);
+                    files = srcFiles.filter(f => f.mimeType?.startsWith('image/') || f.mimeType?.startsWith('video/'));
+                    // If source is itself a post shell (no media), read its meta for the real album
+                    if (!files.length) {
+                      const srcMeta = srcFiles.find(f => f.name === '_meta.json');
+                      if (srcMeta) {
+                        const sm = await Drive.readJsonFile(srcMeta.id).catch(() => null);
+                        if (sm?.sourceAlbumId) {
+                          resolvedSourceId = sm.sourceAlbumId;
+                          const deepFiles = await Drive.listFiles(sm.sourceAlbumId).catch(() => []);
+                          files = deepFiles.filter(f => f.mimeType?.startsWith('image/') || f.mimeType?.startsWith('video/'));
+                        }
+                      }
+                    }
+                  } catch {}
+                }
               }
             } catch {}
           }
-          return { ...album, files, metaFileId: metaFile?.id || null, voidscroll };
+          return { ...album, files, metaFileId: metaFile?.id || null, voidscroll, sourceAlbumId: resolvedSourceId };
         } catch {
-          return { ...album, files: [], metaFileId: null };
+          return { ...album, files: [], metaFileId: null, sourceAlbumId: null };
         }
       }));
 
@@ -961,20 +977,35 @@ const UI = (() => {
           const metaFile = allFiles.find(f => f.name === '_meta.json');
           let files      = allFiles.filter(f => f.mimeType?.startsWith('image/') || f.mimeType?.startsWith('video/'));
           let voidscroll = album.voidscroll || null;
+          let resolvedSourceId = null;
           if (metaFile) {
             try {
               const m = await Drive.readJsonFile(metaFile.id);
               voidscroll = m.voidscroll || null;
-              if (m.sourceAlbumId && !files.length) {
-                try {
-                  const srcFiles = await Drive.listFiles(m.sourceAlbumId);
-                  files = srcFiles.filter(f => f.mimeType?.startsWith('image/') || f.mimeType?.startsWith('video/'));
-                } catch {}
+              if (m.sourceAlbumId) {
+                resolvedSourceId = m.sourceAlbumId;
+                if (!files.length) {
+                  try {
+                    const srcFiles = await Drive.listFiles(m.sourceAlbumId);
+                    files = srcFiles.filter(f => f.mimeType?.startsWith('image/') || f.mimeType?.startsWith('video/'));
+                    if (!files.length) {
+                      const srcMeta = srcFiles.find(f => f.name === '_meta.json');
+                      if (srcMeta) {
+                        const sm = await Drive.readJsonFile(srcMeta.id).catch(() => null);
+                        if (sm?.sourceAlbumId) {
+                          resolvedSourceId = sm.sourceAlbumId;
+                          const deepFiles = await Drive.listFiles(sm.sourceAlbumId).catch(() => []);
+                          files = deepFiles.filter(f => f.mimeType?.startsWith('image/') || f.mimeType?.startsWith('video/'));
+                        }
+                      }
+                    }
+                  } catch {}
+                }
               }
             } catch {}
           }
-          return { ...album, files, metaFileId: metaFile?.id || null, voidscroll };
-        } catch { return { ...album, files: [], metaFileId: null }; }
+          return { ...album, files, metaFileId: metaFile?.id || null, voidscroll, sourceAlbumId: resolvedSourceId };
+        } catch { return { ...album, files: [], metaFileId: null, sourceAlbumId: null }; }
       }));
       _feedAlbums = _feedAlbums.concat(loaded);
       _appendFeedAlbums(loaded);
@@ -1586,11 +1617,12 @@ const UI = (() => {
     });
     if (menu) menuSlot.appendChild(menu);
 
-    // Share button
+    // Share button — use the resolved source folder (the one with actual media files)
     card.querySelector('.post-share-btn')?.addEventListener('click', e => {
       e.stopPropagation();
-      const fakeColl = { id: album.id, name: album.caption || album.name || 'Post', isPost: true };
-      _openShareModal(album.id, fakeColl);
+      const shareId = album.sourceAlbumId || album.id;
+      const fakeColl = { id: shareId, name: album.caption || album.name || 'Post', isPost: true };
+      _openShareModal(shareId, fakeColl);
     });
 
     // VoidScroll embed — play and open-in-vs buttons
@@ -3195,18 +3227,32 @@ const UI = (() => {
         actions.appendChild(delBtn);
       }
 
+      // Load media from any referenced albums (_ref_*.json files added via "Add to Album")
+      const refFiles = files.filter(f => f.name?.startsWith('_ref_') && f.mimeType === 'application/json');
+      const refMediaFiles = [];
+      await Promise.all(refFiles.map(async rf => {
+        try {
+          const ref = await Drive.readJsonFile(rf.id);
+          if (ref?.sourceId) {
+            const srcFiles = await Drive.listFiles(ref.sourceId);
+            srcFiles.filter(f => f.mimeType?.startsWith('image/') || f.mimeType?.startsWith('video/'))
+              .forEach(f => refMediaFiles.push({ ...f, _refSourceName: ref.sourceName || 'Linked album' }));
+          }
+        } catch {}
+      }));
+
       // Media grid
       const allFiles = files.filter(f => f.mimeType !== 'application/json');
       const grid  = document.getElementById('collection-detail-grid');
       grid.innerHTML = '';
 
-      if (!allFiles.length) {
+      if (!allFiles.length && !refMediaFiles.length) {
         grid.innerHTML = '<div class="empty-state"><p>No files yet. Add something!</p></div>';
         return;
       }
 
       const isMedia = f => f.mimeType?.startsWith('image/') || f.mimeType?.startsWith('video/');
-      const mediaFiles2 = allFiles.filter(isMedia);
+      const mediaFiles2 = [...allFiles.filter(isMedia), ...refMediaFiles];
       allFiles.forEach((f, globalIdx) => {
         if (isMedia(f)) {
           const mediaIdx = mediaFiles2.indexOf(f);
@@ -3237,6 +3283,18 @@ const UI = (() => {
           wrapper.appendChild(el); wrapper.appendChild(label);
           grid.appendChild(wrapper);
         }
+      });
+
+      // Render media from referenced albums
+      refMediaFiles.forEach(f => {
+        const mediaIdx = mediaFiles2.indexOf(f);
+        const el = _el(`<div class="media-item media-item--ref" title="From: ${Utils.escapeHtml(f._refSourceName)}"><img src="" alt="" loading="lazy" /></div>`);
+        _loadThumbnail(el.querySelector('img'), f.id, f.thumbnailLink);
+        el.addEventListener('click', () => openLightbox(f.id, folderId, {
+          canDelete: false, thumbnailLink: f.thumbnailLink,
+          files: mediaFiles2, currentIndex: mediaIdx
+        }));
+        grid.appendChild(el);
       });
     } catch (err) {
       Utils.showToast('Failed to load album', 'error');
@@ -5352,12 +5410,14 @@ const UI = (() => {
     document.getElementById('modal-content').innerHTML = html;
     document.getElementById('modal-overlay').hidden = false;
     document.getElementById('modal-close').onclick = closeModal;
+    document.body.style.overflow = 'hidden';
   }
 
   function closeModal() {
     document.getElementById('modal-overlay').hidden = true;
     document.getElementById('modal-content').innerHTML = '';
     _clearModalBlobs();
+    document.body.style.overflow = '';
   }
 
   /* ── DOM helpers ─────────────────────────────── */
