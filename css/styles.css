@@ -2505,6 +2505,13 @@ textarea.input { resize: vertical; min-height: 80px; }
   object-position: center;
   display: block;
 }
+/* Broken-image fallback: show a neutral placeholder */
+.post-carousel-slide img[src=""],
+.post-carousel-slide img:not([src]),
+.media-item img[src=""],
+.media-item img:not([src]) {
+  visibility: hidden;
+}
 .post-carousel-arrow {
   position: absolute;
   top: 50%; transform: translateY(-50%);

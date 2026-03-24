@@ -437,7 +437,7 @@ const UI = (() => {
       Drive.getFileAsBlob(fileId).then(u => {
         _thumbBlobUrls.push(u);
         imgEl.src = u;
-      }).catch(() => {});
+      }).catch(() => { imgEl.alt = '⚠'; });
     }
     if (thumbnailLink) {
       imgEl.src = thumbnailLink;
@@ -5410,12 +5410,14 @@ const UI = (() => {
     document.getElementById('modal-content').innerHTML = html;
     document.getElementById('modal-overlay').hidden = false;
     document.getElementById('modal-close').onclick = closeModal;
+    document.body.style.overflow = 'hidden';
   }
 
   function closeModal() {
     document.getElementById('modal-overlay').hidden = true;
     document.getElementById('modal-content').innerHTML = '';
     _clearModalBlobs();
+    document.body.style.overflow = '';
   }
 
   /* ── DOM helpers ─────────────────────────────── */
