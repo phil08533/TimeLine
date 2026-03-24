@@ -2554,6 +2554,16 @@ const UI = (() => {
           </div>
           ${count > 1 ? `<button class="post-view-all-btn" style="font-size:.75rem;padding:.35rem .75rem">View all ${count} items</button>` : ''}
         ` : '';
+        const vsEmbedHtml = (!count && post.voidscroll) ? `
+          <div class="vs-embed vs-embed--sm">
+            <video class="vs-embed-video" src="${Utils.escapeHtml(_sanitizeMediaUrl(post.voidscroll.videoUrl))}" playsinline muted loop preload="metadata"></video>
+            <div class="vs-embed-overlay">
+              <button class="vs-embed-play-btn" aria-label="Play">▶</button>
+            </div>
+            <button class="vs-embed-open-btn">
+              <span class="voidscroll-icon" style="font-size:.85rem">∞</span> View in VoidScroll
+            </button>
+          </div>` : '';
 
         const docsHtml = docFiles.map(f =>
           `<div class="circle-doc-chip">${_fileTypeIcon(f.mimeType)} <span>${Utils.escapeHtml(f.name)}</span></div>`
@@ -2574,6 +2584,7 @@ const UI = (() => {
             ${post.caption ? `<div class="post-caption">${Utils.escapeHtml(post.caption)}</div>` : ''}
             ${docsHtml ? `<div class="circle-docs-row" style="padding:.25rem .75rem .5rem">${docsHtml}</div>` : ''}
             ${carouselHtml}
+            ${vsEmbedHtml}
             <div class="post-actions post-actions--sm">
               <div class="post-reactions" id="creactions-${Utils.escapeHtml(post.postFolderId)}">
                 <button class="post-react-btn" data-type="like" title="Like">❤️ <span>0</span></button>
@@ -2657,6 +2668,28 @@ const UI = (() => {
           e.stopPropagation();
           navigate('collection-detail', { folderId: post.postFolderId });
         });
+
+        // VoidScroll embed in circle post
+        const vsEl = card.querySelector('.vs-embed--sm');
+        if (vsEl && post.voidscroll) {
+          const vsVid     = vsEl.querySelector('.vs-embed-video');
+          const vsPlay    = vsEl.querySelector('.vs-embed-play-btn');
+          const vsOverlay = vsEl.querySelector('.vs-embed-overlay');
+          vsVid.addEventListener('loadedmetadata', () => {
+            const w = vsVid.videoWidth, h = vsVid.videoHeight;
+            if (w && h) vsEl.style.aspectRatio = w + '/' + h;
+          });
+          vsPlay.addEventListener('click', e => {
+            e.stopPropagation();
+            vsOverlay.hidden = true;
+            vsVid.muted = false; vsVid.play().catch(() => {});
+          });
+          vsVid.addEventListener('click', e => { e.stopPropagation(); vsVid.paused ? vsVid.play().catch(()=>{}) : vsVid.pause(); });
+          vsEl.querySelector('.vs-embed-open-btn')?.addEventListener('click', e => {
+            e.stopPropagation();
+            _openVoidScroll();
+          });
+        }
 
         // Reactions
         const reactBar = card.querySelector('.post-reactions');
@@ -3483,7 +3516,6 @@ const UI = (() => {
             <label>Audience</label>
             <select id="share-feed-sharing" class="select-sm" style="width:100%">
               <option value="friends">Friends</option>
-              ${circles.length ? `<option value="circles">My Circles</option>` : ''}
               <option value="everyone">Anyone with link</option>
             </select>
           </div>
@@ -3497,7 +3529,7 @@ const UI = (() => {
         try {
           // Create a post that references this album — no Drive.copyFile()
           await Data.createPost({
-            caption: caption || `Shared: ${coll.name}`,
+            caption: caption || coll.name,
             name:    coll.name,
             sharing,
             sourceAlbumId: folderId
