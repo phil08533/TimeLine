@@ -831,6 +831,51 @@ const UI = (() => {
     });
   }
 
+  // Loads Drive files and reads _meta.json for one album entry.
+  // Shared (friends') posts don't have caption pre-populated, so we always
+  // read it from meta here. Own posts carry caption from listOwnPosts() already
+  // but meta is still read for voidscroll/sourceAlbumId.
+  async function _resolveAlbumFiles(album) {
+    try {
+      const allFiles = await Drive.listFiles(album.id);
+      const metaFile = allFiles.find(f => f.name === '_meta.json');
+      let files     = allFiles.filter(f => f.mimeType?.startsWith('image/') || f.mimeType?.startsWith('video/'));
+      let caption   = album.caption || '';
+      let voidscroll = album.voidscroll || null;
+      let sourceId  = null;
+      if (metaFile) {
+        try {
+          const m = await Drive.readJsonFile(metaFile.id);
+          if (!caption) caption = m.caption || ''; // fill in for friends' posts
+          voidscroll = m.voidscroll || null;
+          if (m.sourceAlbumId) {
+            sourceId = m.sourceAlbumId;
+            if (!files.length) {
+              try {
+                const srcFiles = await Drive.listFiles(m.sourceAlbumId);
+                files = srcFiles.filter(f => f.mimeType?.startsWith('image/') || f.mimeType?.startsWith('video/'));
+                if (!files.length) {
+                  const srcMeta = srcFiles.find(f => f.name === '_meta.json');
+                  if (srcMeta) {
+                    const sm = await Drive.readJsonFile(srcMeta.id).catch(() => null);
+                    if (sm?.sourceAlbumId) {
+                      sourceId = sm.sourceAlbumId;
+                      const deep = await Drive.listFiles(sm.sourceAlbumId).catch(() => []);
+                      files = deep.filter(f => f.mimeType?.startsWith('image/') || f.mimeType?.startsWith('video/'));
+                    }
+                  }
+                }
+              } catch {}
+            }
+          }
+        } catch {}
+      }
+      return { ...album, files, metaFileId: metaFile?.id || null, caption, voidscroll, sourceAlbumId: sourceId };
+    } catch {
+      return { ...album, files: [], metaFileId: null, caption: album.caption || '', sourceAlbumId: null };
+    }
+  }
+
   async function _renderFeed() {
     const list  = document.getElementById('feed-list');
     const empty = document.getElementById('feed-empty');
@@ -871,17 +916,20 @@ const UI = (() => {
       // ── Render stories bar ─────────────────────
       _renderStoriesBar(sharedFolders, ownStories, me);
 
-      // Build a unified album list (exclude stories)
+      // Build a unified album list.
+      // Story folders (name starts with 'story-') are excluded — they belong in the stories bar.
       const allFolders = [
-        ...sharedFolders.map(f => ({
-          id: f.id,
-          name: f.name,
-          sharer: f.owners?.[0]?.displayName || 'Friend',
-          sharerEmail: f.owners?.[0]?.emailAddress || '',
-          sharerPicture: f.owners?.[0]?.photoLink || null,
-          sharedAt: f.sharedWithMeTime || f.createdTime,
-          _isOwn: false
-        })),
+        ...sharedFolders
+          .filter(f => !f.name?.startsWith('story-'))
+          .map(f => ({
+            id: f.id,
+            name: f.name,
+            sharer: f.owners?.[0]?.displayName || 'Friend',
+            sharerEmail: f.owners?.[0]?.emailAddress || '',
+            sharerPicture: f.owners?.[0]?.photoLink || null,
+            sharedAt: f.sharedWithMeTime || f.createdTime,
+            _isOwn: false
+          })),
         ...ownPosts.filter(p => !p.isStory).map(p => ({
           id: p.folderId,
           name: p.name,
@@ -903,45 +951,7 @@ const UI = (() => {
       const firstBatch  = allFolders.slice(0, BATCH);
       const restFolders = allFolders.slice(BATCH);
 
-      _feedAlbums = await Promise.all(firstBatch.map(async album => {
-        try {
-          const allFiles = await Drive.listFiles(album.id);
-          const metaFile = allFiles.find(f => f.name === '_meta.json');
-          let files      = allFiles.filter(f => f.mimeType?.startsWith('image/') || f.mimeType?.startsWith('video/'));
-          let voidscroll = album.voidscroll || null;
-          let resolvedSourceId = null;
-          if (metaFile) {
-            try {
-              const m = await Drive.readJsonFile(metaFile.id);
-              voidscroll = m.voidscroll || null;
-              if (m.sourceAlbumId) {
-                resolvedSourceId = m.sourceAlbumId;
-                if (!files.length) {
-                  try {
-                    const srcFiles = await Drive.listFiles(m.sourceAlbumId);
-                    files = srcFiles.filter(f => f.mimeType?.startsWith('image/') || f.mimeType?.startsWith('video/'));
-                    // If source is itself a post shell (no media), read its meta for the real album
-                    if (!files.length) {
-                      const srcMeta = srcFiles.find(f => f.name === '_meta.json');
-                      if (srcMeta) {
-                        const sm = await Drive.readJsonFile(srcMeta.id).catch(() => null);
-                        if (sm?.sourceAlbumId) {
-                          resolvedSourceId = sm.sourceAlbumId;
-                          const deepFiles = await Drive.listFiles(sm.sourceAlbumId).catch(() => []);
-                          files = deepFiles.filter(f => f.mimeType?.startsWith('image/') || f.mimeType?.startsWith('video/'));
-                        }
-                      }
-                    }
-                  } catch {}
-                }
-              }
-            } catch {}
-          }
-          return { ...album, files, metaFileId: metaFile?.id || null, voidscroll, sourceAlbumId: resolvedSourceId };
-        } catch {
-          return { ...album, files: [], metaFileId: null, sourceAlbumId: null };
-        }
-      }));
+      _feedAlbums = await Promise.all(firstBatch.map(_resolveAlbumFiles));
 
       // Store rest in queue for lazy loading
       _feedQueue = restFolders;
@@ -968,42 +978,7 @@ const UI = (() => {
       if (!entries[0].isIntersecting || !_feedQueue.length) return;
       const BATCH = 10;
       const nextBatch = _feedQueue.splice(0, BATCH);
-      const loaded = await Promise.all(nextBatch.map(async album => {
-        try {
-          const allFiles = await Drive.listFiles(album.id);
-          const metaFile = allFiles.find(f => f.name === '_meta.json');
-          let files      = allFiles.filter(f => f.mimeType?.startsWith('image/') || f.mimeType?.startsWith('video/'));
-          let voidscroll = album.voidscroll || null;
-          let resolvedSourceId = null;
-          if (metaFile) {
-            try {
-              const m = await Drive.readJsonFile(metaFile.id);
-              voidscroll = m.voidscroll || null;
-              if (m.sourceAlbumId) {
-                resolvedSourceId = m.sourceAlbumId;
-                if (!files.length) {
-                  try {
-                    const srcFiles = await Drive.listFiles(m.sourceAlbumId);
-                    files = srcFiles.filter(f => f.mimeType?.startsWith('image/') || f.mimeType?.startsWith('video/'));
-                    if (!files.length) {
-                      const srcMeta = srcFiles.find(f => f.name === '_meta.json');
-                      if (srcMeta) {
-                        const sm = await Drive.readJsonFile(srcMeta.id).catch(() => null);
-                        if (sm?.sourceAlbumId) {
-                          resolvedSourceId = sm.sourceAlbumId;
-                          const deepFiles = await Drive.listFiles(sm.sourceAlbumId).catch(() => []);
-                          files = deepFiles.filter(f => f.mimeType?.startsWith('image/') || f.mimeType?.startsWith('video/'));
-                        }
-                      }
-                    }
-                  } catch {}
-                }
-              }
-            } catch {}
-          }
-          return { ...album, files, metaFileId: metaFile?.id || null, voidscroll, sourceAlbumId: resolvedSourceId };
-        } catch { return { ...album, files: [], metaFileId: null, sourceAlbumId: null }; }
-      }));
+      const loaded = await Promise.all(nextBatch.map(_resolveAlbumFiles));
       _feedAlbums = _feedAlbums.concat(loaded);
       _appendFeedAlbums(loaded);
       if (!_feedQueue.length) { sentinel.hidden = true; _feedSentinelObs.disconnect(); }
@@ -1049,10 +1024,11 @@ const UI = (() => {
       bar.appendChild(circle);
     }
 
-    // Friend stories — group by owner email so one circle per person
+    // Friend stories — only include actual story folders (name starts with 'story-')
+    // and only those shared within the last 24 hours (story lifetime).
     const recentShared = sharedFolders.filter(f => {
       const t = new Date(f.sharedWithMeTime || f.createdTime || 0).getTime();
-      return Date.now() - t < 24 * 60 * 60 * 1000;
+      return f.name?.startsWith('story-') && Date.now() - t < 24 * 60 * 60 * 1000;
     });
 
     // Build a map: ownerEmail → { owner, folders[] }
@@ -1154,17 +1130,26 @@ const UI = (() => {
   async function _openOwnStoriesViewer(ownStories, user) {
     Utils.showLoading();
     const allMedia = [];
+    let captionOnly = '';
     try {
       for (const story of ownStories) {
         try {
           const files = await Drive.listFiles(story.folderId);
           const media = files.filter(f => f.mimeType?.startsWith('image/') || f.mimeType?.startsWith('video/'));
-          media.forEach(f => { f._storyFolderId = story.folderId; });
-          allMedia.push(...media);
-        } catch { /* skip failed story */ }
+          if (media.length) {
+            media.forEach(f => { f._storyFolderId = story.folderId; });
+            allMedia.push(...media);
+          } else if (story.caption) {
+            captionOnly = story.caption; // text-only story
+          }
+        } catch {}
       }
     } finally { Utils.hideLoading(); }
-    if (!allMedia.length) { Utils.showToast('No media in your stories', 'error'); return; }
+
+    if (!allMedia.length) {
+      Utils.showToast(captionOnly || 'Your stories have no photos or videos', captionOnly ? 'info' : 'info', captionOnly ? 6000 : 3500);
+      return;
+    }
 
     const onDelete = async (folderId) => {
       if (!folderId) return;
@@ -1181,16 +1166,30 @@ const UI = (() => {
   async function _openFriendStoriesViewer(folders, owner) {
     Utils.showLoading();
     const allMedia = [];
+    let captionOnly = '';
     try {
       for (const folder of folders) {
         try {
           const files = await Drive.listFiles(folder.id);
           const media = files.filter(f => f.mimeType?.startsWith('image/') || f.mimeType?.startsWith('video/'));
-          allMedia.push(...media);
-        } catch { /* skip failed folder */ }
+          if (media.length) {
+            allMedia.push(...media);
+          } else {
+            // Caption-only story: extract caption from meta
+            const metaFile = files.find(f => f.name === '_meta.json');
+            if (metaFile) {
+              const m = await Drive.readJsonFile(metaFile.id).catch(() => null);
+              if (m?.caption) captionOnly = m.caption;
+            }
+          }
+        } catch {}
       }
     } finally { Utils.hideLoading(); }
-    if (!allMedia.length) { Utils.showToast('No media in this story', 'error'); return; }
+
+    if (!allMedia.length) {
+      Utils.showToast(captionOnly || 'This story has no photos or videos', 'info', captionOnly ? 6000 : 3500);
+      return;
+    }
     _openStoryViewerMedia(allMedia, 0, owner?.displayName || 'Friend', owner?.photoLink || null);
   }
 
