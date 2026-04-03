@@ -3,3 +3,14 @@
 Thumbs.db
 .vscode/
 *.swp
+
+# Secrets / environment
+.env
+.env.*
+*.local
+*.secret
+*.pem
+*.key
+
+# Dependency directories
+node_modules/
