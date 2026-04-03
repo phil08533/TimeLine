@@ -800,8 +800,23 @@ const Data = (() => {
     });
   }
 
+  // Share all existing 'friends' posts/stories with a newly accepted friend.
+  // Called outside the write lock so it doesn't block other writes.
+  async function _shareExistingPostsWithFriend(email) {
+    try {
+      const colls = await listCollections();
+      const now   = new Date();
+      await Promise.all(
+        colls
+          .filter(c => c.isPost && c.sharing === 'friends' &&
+                       (!c.isStory || new Date(c.expiresAt) > now))
+          .map(c => Drive.shareWithEmail(c.folderId, email, 'commenter').catch(() => {}))
+      );
+    } catch {}
+  }
+
   async function acceptFriendRequest(fromEmail, fromName, fromPicture, requestFileId) {
-    return _withWriteLock(async () => {
+    await _withWriteLock(async () => {
       // Ensure profile is public so the requester can see our posts
       await makeProfilePublic().catch(() => {});
       try { localStorage.setItem('mc_profile_public', '1'); } catch {}
@@ -856,6 +871,9 @@ const Data = (() => {
         await Drive.shareWithEmail(fileId, fromEmail, 'reader').catch(() => {});
       } catch {}
     });
+
+    // Share all existing 'friends' posts/stories with the new friend (outside the lock)
+    _shareExistingPostsWithFriend(fromEmail).catch(() => {});
   }
 
   async function declineFriendRequest(fileId) {
@@ -864,7 +882,9 @@ const Data = (() => {
 
   // Check sharedWithMe for mc-freqacc-* files and promote pending_sent entries to accepted.
   async function syncFriendAcceptances() {
-    return _withWriteLock(async () => {
+    const newlyAcceptedEmails = [];
+
+    await _withWriteLock(async () => {
       try {
         const files = await Drive.listSharedFilesWithName('mc-freqacc-');
         if (!files.length) return;
@@ -886,6 +906,7 @@ const Data = (() => {
                 friend.displayName = d.fromName || d.fromEmail;
                 if (d.fromPicture) friend.picture = d.fromPicture;
                 changed = true;
+                newlyAcceptedEmails.push(d.fromEmail);
               }
             } else if (!data.friends.some(fr => fr.email === d.fromEmail)) {
               data.friends.push({
@@ -896,6 +917,7 @@ const Data = (() => {
                 status:      'accepted'
               });
               changed = true;
+              newlyAcceptedEmails.push(d.fromEmail);
             }
             newHandled.push(f.id);
           } catch {}
@@ -910,6 +932,11 @@ const Data = (() => {
         }
       } catch {}
     });
+
+    // Share existing 'friends' posts with each newly confirmed friend (outside the lock)
+    for (const email of newlyAcceptedEmails) {
+      _shareExistingPostsWithFriend(email).catch(() => {});
+    }
   }
 
   /* ── PIN ────────────────────────────────────── */
