@@ -43,6 +43,10 @@ const Data = (() => {
     return next;
   }
 
+  // Timestamp of the last completed acceptance-sync so we don't hammer Drive.
+  let _lastSyncAt = 0;
+  let _syncInFlight = null; // dedup concurrent sync calls
+
   /* ── Init ──────────────────────────────────── */
 
   async function init() {
@@ -150,7 +154,7 @@ const Data = (() => {
   }
 
   async function getFriends() {
-    // Sync any accepted requests first so pending_sent entries get promoted to accepted
+    // Run acceptance sync (throttled internally) then return current list.
     await syncFriendAcceptances().catch(() => {});
     return (await _getFriendsFile()).friends || [];
   }
@@ -881,24 +885,51 @@ const Data = (() => {
   }
 
   // Check sharedWithMe for mc-freqacc-* files and promote pending_sent entries to accepted.
+  // Throttled to once per 60 s. Drive reads happen OUTSIDE the write lock so the lock is
+  // held only for the fast in-memory mutations + two small Drive writes.
   async function syncFriendAcceptances() {
-    const newlyAcceptedEmails = [];
+    // Throttle: skip if run recently (dedup concurrent calls too)
+    const now = Date.now();
+    if (now - _lastSyncAt < 60_000) return;
+    if (_syncInFlight) return _syncInFlight;
 
-    await _withWriteLock(async () => {
+    _lastSyncAt = now; // claim the slot immediately so concurrent callers bail
+
+    _syncInFlight = (async () => {
+      const newlyAcceptedEmails = [];
       try {
+        // ── Phase 1: read from Drive OUTSIDE the write lock ─────────────
         const files = await Drive.listSharedFilesWithName('mc-freqacc-');
         if (!files.length) return;
-        const me    = Auth.getCurrentUser();
-        const handled = await _getHandledNotifIds();
-        const data  = await _getFriendsFile();
-        let changed = false;
-        const newHandled = [...handled];
 
-        for (const f of files) {
-          if (handled.includes(f.id)) continue;
-          try {
-            const d = await Drive.readJsonFile(f.id);
-            if (d.type !== 'mc_friend_accepted' || d.toEmail !== me.email) continue;
+        const me      = Auth.getCurrentUser();
+        const handled = await _getHandledNotifIds();
+
+        // Read all unhandled acceptance files in parallel
+        const toProcess = (await Promise.all(
+          files
+            .filter(f => !handled.includes(f.id))
+            .map(async f => {
+              try {
+                const d = await Drive.readJsonFile(f.id);
+                return (d.type === 'mc_friend_accepted' && d.toEmail === me.email)
+                  ? { fileId: f.id, ...d }
+                  : null;
+              } catch { return null; }
+            })
+        )).filter(Boolean);
+
+        if (!toProcess.length) return;
+
+        // ── Phase 2: mutate state inside the write lock (fast: cache hits + 2 writes) ─
+        await _withWriteLock(async () => {
+          const data          = await _getFriendsFile();
+          const currentHandled = await _getHandledNotifIds();
+          let changed = false;
+          const newHandled = [...currentHandled];
+
+          for (const d of toProcess) {
+            if (newHandled.includes(d.fileId)) continue; // already handled in parallel call
             const friend = data.friends.find(fr => fr.email === d.fromEmail);
             if (friend) {
               if (friend.status === 'pending_sent' || !friend.displayName || friend.displayName === friend.email) {
@@ -919,25 +950,28 @@ const Data = (() => {
               changed = true;
               newlyAcceptedEmails.push(d.fromEmail);
             }
-            newHandled.push(f.id);
-          } catch {}
-        }
+            newHandled.push(d.fileId);
+          }
 
-        // Persist friends BEFORE marking notifications as handled
-        if (changed) await _saveFriendsFile(data);
-        // Batch-save all new handled IDs in one write
-        if (newHandled.length > handled.length) {
-          _cacheSet('handledNotifs', newHandled);
-          await Drive.upsertJsonFile('handled-notifs.json', { ids: newHandled }, _folders.rootId);
-        }
+          if (changed) await _saveFriendsFile(data);
+          if (newHandled.length > currentHandled.length) {
+            _cacheSet('handledNotifs', newHandled);
+            await Drive.upsertJsonFile('handled-notifs.json', { ids: newHandled }, _folders.rootId);
+          }
+        });
       } catch {}
-    });
 
-    // Share existing 'friends' posts with each newly confirmed friend (outside the lock)
-    for (const email of newlyAcceptedEmails) {
-      _shareExistingPostsWithFriend(email).catch(() => {});
-    }
+      // Share existing 'friends' posts with newly confirmed friends (outside the lock)
+      for (const email of newlyAcceptedEmails) {
+        _shareExistingPostsWithFriend(email).catch(() => {});
+      }
+    })().finally(() => { _syncInFlight = null; });
+
+    return _syncInFlight;
   }
+
+  // Force the next syncFriendAcceptances call to run immediately (bypass throttle).
+  function _resetSyncThrottle() { _lastSyncAt = 0; }
 
   /* ── PIN ────────────────────────────────────── */
 
@@ -1069,6 +1103,21 @@ const Data = (() => {
     });
   }
 
+  /* ── Account deletion ─────────────────────── */
+
+  // Permanently deletes all app data from Drive and clears local state.
+  // Call Auth.signOut() after this returns.
+  async function deleteAccount() {
+    // Delete the mycircle root folder (all app data lives inside it)
+    await Drive.deleteFile(_folders.rootId);
+    // Wipe local caches
+    Object.keys(_cache).forEach(k => delete _cache[k]);
+    try {
+      localStorage.removeItem('mc_profile_public');
+    } catch {}
+    _folders = null;
+  }
+
   /* ── Exports ───────────────────────────────── */
 
   return {
@@ -1079,6 +1128,7 @@ const Data = (() => {
     getFriends,   addFriend,    removeFriend,
     sendFriendRequest, getIncomingFriendRequests, getIncomingCircleNotifications, getNotifications,
     acceptFriendRequest, declineFriendRequest, syncFriendAcceptances,
+    deleteAccount,
     getBlocked,   blockUser,    unblockUser,
     getHiddenUsers, hideUser,   unhideUser,
     listCircles,  createCircle, getCircle,  updateCircleMeta,  deleteCircle, uploadCircleCover,

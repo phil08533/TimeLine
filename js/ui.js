@@ -193,6 +193,10 @@ const UI = (() => {
           setTimeout(() => { item.remove(); _clearIfEmpty(); }, 1800);
           Utils.showToast(`Added ${label} as friend`);
           _refreshNotificationCount().catch(() => {});
+          // Refresh friends page immediately if it's the active page
+          if (document.getElementById('page-friends')?.classList.contains('active')) {
+            _renderFriends().catch(() => {});
+          }
         } catch {
           Utils.showToast('Could not accept — please try again', 'error');
           item.querySelector('.notif-accept').disabled = false;
@@ -3993,16 +3997,19 @@ const UI = (() => {
     grid.innerHTML = '<p class="muted-text small">Loading…</p>';
     empty.hidden = true;
 
-    // Load friendship status + posts in parallel
-    const [friends, sharedFolders] = await Promise.all([
+    // Load friendship status + posts + incoming requests in parallel
+    const [friends, sharedFolders, incomingReqs] = await Promise.all([
       Data.getFriends().catch(() => []),
-      Data.getFeedFolders().catch(() => [])
+      Data.getFeedFolders().catch(() => []),
+      Data.getIncomingFriendRequests().catch(() => [])
     ]);
 
-    const me     = Auth.getCurrentUser();
-    const friend = friends.find(f => f.email === email);
-    const isFriend   = !!friend && friend.status !== 'pending_sent';
-    const isPending  = friend?.status === 'pending_sent';
+    const me          = Auth.getCurrentUser();
+    const friend      = friends.find(f => f.email === email);
+    const isFriend    = !!friend && friend.status !== 'pending_sent';
+    const isPending   = friend?.status === 'pending_sent';
+    // Did this person send US a request that we haven't acted on yet?
+    const incomingReq = incomingReqs.find(r => r.fromEmail === email);
 
     // Action buttons
     actionsEl.innerHTML = '';
@@ -4026,6 +4033,45 @@ const UI = (() => {
           Utils.showToast(`${name} blocked`);
         });
         actionsEl.appendChild(blockBtn);
+
+      } else if (incomingReq) {
+        // This person sent US a friend request — show Accept / Decline instead of +Add Friend
+        const acceptBtn  = _el(`<button class="btn btn-primary btn-sm">Accept Request</button>`);
+        const declineBtn = _el(`<button class="btn btn-ghost btn-sm">Decline</button>`);
+        acceptBtn.addEventListener('click', async () => {
+          acceptBtn.disabled = true; declineBtn.disabled = true;
+          acceptBtn.textContent = 'Accepting…';
+          try {
+            await Data.acceptFriendRequest(incomingReq.fromEmail, incomingReq.fromName, incomingReq.fromPicture, incomingReq.fileId);
+            actionsEl.innerHTML = '';
+            actionsEl.appendChild(_el(`<span class="muted-text small">Friends ✓</span>`));
+            Utils.showToast(`Added ${name} as a friend`);
+            _refreshNotificationCount().catch(() => {});
+            if (document.getElementById('page-friends')?.classList.contains('active')) {
+              _renderFriends().catch(() => {});
+            }
+          } catch {
+            Utils.showToast('Could not accept — please try again', 'error');
+            acceptBtn.disabled = false; declineBtn.disabled = false;
+            acceptBtn.textContent = 'Accept Request';
+          }
+        });
+        declineBtn.addEventListener('click', async () => {
+          acceptBtn.disabled = true; declineBtn.disabled = true;
+          await Data.declineFriendRequest(incomingReq.fileId).catch(() => {});
+          actionsEl.innerHTML = '';
+          actionsEl.appendChild(_el(`<button class="btn btn-primary btn-sm">+ Add Friend</button>`));
+          actionsEl.querySelector('button').addEventListener('click', () => {
+            Utils.showToast('Sending friend request…');
+            Data.sendFriendRequest(email)
+              .then(() => { actionsEl.querySelector('button').textContent = 'Request sent'; actionsEl.querySelector('button').disabled = true; Utils.showToast('Friend request sent!'); })
+              .catch(() => Utils.showToast('Could not send request', 'error'));
+          });
+          _refreshNotificationCount().catch(() => {});
+        });
+        actionsEl.appendChild(acceptBtn);
+        actionsEl.appendChild(declineBtn);
+
       } else if (isPending) {
         const pendingBtn = _el(`<button class="btn btn-ghost btn-sm" disabled>Request sent</button>`);
         actionsEl.appendChild(pendingBtn);
@@ -4408,7 +4454,39 @@ const UI = (() => {
       fresh.addEventListener('change', _saveSettingsFromUI);
     });
 
-    _on('report-bug-btn', 'click', () => _openBugReportModal());
+    _on('report-bug-btn',     'click', () => _openBugReportModal());
+    _on('delete-account-btn', 'click', () => _openDeleteAccountModal());
+  }
+
+  function _openDeleteAccountModal() {
+    openModal(`
+      <h3>Delete Account</h3>
+      <p class="muted-text" style="margin:.5rem 0 1rem">This will permanently delete your <strong>mycircle</strong> folder from Google Drive — all posts, stories, circles, and settings will be gone. Shared content already copied by friends will remain in their accounts.</p>
+      <p style="margin-bottom:1rem">Type <strong>DELETE</strong> to confirm:</p>
+      <input type="text" id="delete-confirm-input" class="input" placeholder="DELETE" autocomplete="off" style="margin-bottom:1rem" />
+      <div class="modal-actions">
+        <button type="button" class="btn btn-ghost btn-sm modal-cancel-btn">Cancel</button>
+        <button type="button" class="btn btn-ghost btn-sm danger-btn" id="confirm-delete-btn" disabled>Delete Everything</button>
+      </div>
+    `);
+    document.querySelector('.modal-cancel-btn').addEventListener('click', closeModal);
+    const input  = document.getElementById('delete-confirm-input');
+    const delBtn = document.getElementById('confirm-delete-btn');
+    input.addEventListener('input', () => {
+      delBtn.disabled = input.value.trim() !== 'DELETE';
+    });
+    delBtn.addEventListener('click', async () => {
+      delBtn.disabled = true; delBtn.textContent = 'Deleting…';
+      try {
+        await Data.deleteAccount();
+        closeModal();
+        Utils.showToast('Account data deleted. Signing out…');
+        setTimeout(() => Auth.signOut(), 1500);
+      } catch {
+        delBtn.disabled = false; delBtn.textContent = 'Delete Everything';
+        Utils.showToast('Could not delete account data — try again', 'error');
+      }
+    });
   }
 
   function _openBugReportModal(prefill) {
