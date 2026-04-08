@@ -1140,14 +1140,20 @@ const UI = (() => {
         <div class="post-dropzone" id="story-dropzone" tabindex="0" role="button" aria-label="Add photo or video">
           <div class="post-dropzone-inner">
             <span class="post-dropzone-icon">📸</span>
-            <span>Add a photo or video</span>
+            <span>Add a photo or video, or just write a caption</span>
           </div>
           <input type="file" id="story-file" accept="image/*,video/*" hidden />
         </div>
         <div id="story-preview" class="post-previews" hidden></div>
         <div class="form-field">
-          <label>Caption (optional)</label>
+          <label>Caption <span class="muted-text small">(optional)</span></label>
           <input id="story-caption" class="input" type="text" placeholder="What's happening?" maxlength="200" />
+        </div>
+        <div class="upload-progress-wrap" id="story-progress-wrap" hidden>
+          <div class="upload-progress-track">
+            <div class="upload-progress-bar" id="story-progress-bar"></div>
+          </div>
+          <span class="upload-progress-label" id="story-progress-label">0%</span>
         </div>
         <p id="story-status" class="muted-text small" aria-live="polite"></p>
         <div class="modal-actions">
@@ -1157,40 +1163,77 @@ const UI = (() => {
       </form>
     `);
     document.querySelector('.modal-cancel-btn').addEventListener('click', closeModal);
-    const dropzone  = document.getElementById('story-dropzone');
-    const fileInput = document.getElementById('story-file');
-    const preview   = document.getElementById('story-preview');
+    const dropzone    = document.getElementById('story-dropzone');
+    const fileInput   = document.getElementById('story-file');
+    const preview     = document.getElementById('story-preview');
+    const progressWrap = document.getElementById('story-progress-wrap');
+    const progressBar  = document.getElementById('story-progress-bar');
+    const progressLbl  = document.getElementById('story-progress-label');
     let selectedFile = null;
+
     dropzone.addEventListener('click', () => fileInput.click());
     dropzone.addEventListener('keydown', e => { if (e.key === 'Enter' || e.key === ' ') fileInput.click(); });
     fileInput.addEventListener('change', () => {
       selectedFile = fileInput.files[0] || null;
-      if (selectedFile) {
-        const url = _trackModalBlob(selectedFile);
+      if (!selectedFile) return;
+      const url = _trackModalBlob(selectedFile);
+      if (selectedFile.type.startsWith('video/')) {
+        preview.innerHTML = `<div class="post-preview-item"><video src="${url}" muted playsinline style="width:100%;height:100%;object-fit:cover;border-radius:8px" /></div>`;
+      } else {
         preview.innerHTML = `<div class="post-preview-item"><img src="${url}" alt="" /></div>`;
-        preview.hidden = false;
       }
+      preview.hidden = false;
     });
+
     document.getElementById('story-form').addEventListener('submit', async e => {
       e.preventDefault();
       const caption = document.getElementById('story-caption').value.trim();
       const status  = document.getElementById('story-status');
       const btn     = e.target.querySelector('[type="submit"]');
+
+      if (!caption && !selectedFile) {
+        status.textContent = 'Add a photo, video, or caption first.';
+        return;
+      }
+
       btn.disabled = true; btn.textContent = 'Sharing…';
+      status.textContent = '';
       Utils.showLoading();
+
+      let story = null;
       try {
-        const story = await Data.createStory({ caption, sharing: 'friends' });
+        story = await Data.createStory({ caption, sharing: 'friends' });
+
         if (selectedFile) {
-          status.textContent = 'Uploading…';
-          await Drive.uploadMedia(selectedFile, story.folderId);
+          progressWrap.hidden = false;
+          progressBar.style.width = '0%';
+          progressLbl.textContent = '0%';
+
+          await Drive.uploadMediaWithProgress(selectedFile, story.folderId, pct => {
+            progressBar.style.width  = pct + '%';
+            progressLbl.textContent  = pct + '%';
+            status.textContent = pct < 100 ? `Uploading… ${pct}%` : 'Processing…';
+          });
         }
+
         closeModal();
         Utils.showToast('Story shared!');
         _renderFeed();
-      } catch {
+      } catch (err) {
+        // Clean up the empty story folder so it doesn't appear as a ghost story
+        if (story?.folderId) {
+          Data.deleteCollection(story.folderId).catch(() => {});
+        }
+        progressWrap.hidden = true;
+        const isLarge = selectedFile && selectedFile.size > 50 * 1024 * 1024;
+        status.textContent = isLarge
+          ? 'Upload failed — file may be too large. Try a shorter clip or lower-quality video.'
+          : 'Upload failed — check your connection and try again.';
         Utils.showToast('Failed to share story', 'error');
         btn.disabled = false; btn.textContent = 'Share Story';
-      } finally { Utils.hideLoading(); }
+      } finally {
+        Utils.hideLoading();
+      }
     });
   }
 

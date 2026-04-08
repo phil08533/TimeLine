@@ -703,6 +703,24 @@ details[open] .auth-setup-toggle::before { content: '▾ '; }
 .coll-card h4 { font-size: .95rem; font-weight: 600; margin-bottom: .2rem; }
 .card-meta { font-size: .78rem; color: var(--muted); display: flex; gap: .5rem; flex-wrap: wrap; }
 
+/* ── Upload progress bar ── */
+.upload-progress-wrap {
+  display: flex; align-items: center; gap: .6rem;
+  margin: .35rem 0;
+}
+.upload-progress-track {
+  flex: 1; height: 6px;
+  background: var(--border);
+  border-radius: 99px; overflow: hidden;
+}
+.upload-progress-bar {
+  height: 100%; width: 0%;
+  background: var(--accent);
+  border-radius: 99px;
+  transition: width .2s ease;
+}
+.upload-progress-label { font-size: .78rem; color: var(--muted); min-width: 2.8rem; text-align: right; }
+
 /* ── Post modal ── */
 .post-dropzone {
   border: 2px dashed var(--border);

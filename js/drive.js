@@ -174,6 +174,12 @@ const Drive = (() => {
   }
 
   async function uploadMedia(file, folderId) {
+    return uploadMediaWithProgress(file, folderId, null);
+  }
+
+  // Same as uploadMedia but calls onProgress(0‥100) during the upload.
+  // Uses XHR so the browser fires upload-progress events.
+  async function uploadMediaWithProgress(file, folderId, onProgress) {
     const meta = { name: `${Date.now()}-${file.name}`, mimeType: file.type, parents: [folderId] };
     const initRes = await _request(`${UPLOAD}/files?uploadType=resumable&fields=id,name`, {
       method: 'POST',
@@ -182,9 +188,29 @@ const Drive = (() => {
     });
     const uploadUrl = initRes.headers.get('Location');
     if (!uploadUrl) throw new Error('No upload URL');
-    const r = await fetch(uploadUrl, { method: 'PUT', headers: { 'Content-Type': file.type }, body: file });
-    if (!r.ok) throw Object.assign(new Error(`Upload failed ${r.status}`), { status: r.status });
-    return r.json();
+
+    return new Promise((resolve, reject) => {
+      const xhr = new XMLHttpRequest();
+      xhr.open('PUT', uploadUrl);
+      xhr.setRequestHeader('Content-Type', file.type);
+
+      if (onProgress) {
+        xhr.upload.addEventListener('progress', e => {
+          if (e.lengthComputable) onProgress(Math.round((e.loaded / e.total) * 100));
+        });
+      }
+
+      xhr.onload = () => {
+        if (xhr.status >= 200 && xhr.status < 300) {
+          try { resolve(JSON.parse(xhr.responseText)); } catch { resolve({ id: null, name: file.name }); }
+        } else {
+          reject(Object.assign(new Error(`Upload failed ${xhr.status}`), { status: xhr.status }));
+        }
+      };
+      xhr.onerror  = () => reject(new Error('Network error during upload'));
+      xhr.ontimeout = () => reject(new Error('Upload timed out'));
+      xhr.send(file);
+    });
   }
 
   async function deleteFile(fileId) {
@@ -360,7 +386,13 @@ const Drive = (() => {
     updateJsonFile:    _dw(updateJsonFile, async (k, c) => _demo.set(k, c)),
     upsertJsonFile:    _dw(upsertJsonFile, async (n, c, f) => { const k = `${f}/${n}`; _demo.set(k, c); return k; }),
     findFile:          _dw(findFile,       async () => null),
-    uploadMedia:       _dw(uploadMedia,    _demoUpload),
+    uploadMedia:            _dw(uploadMedia,            _demoUpload),
+    uploadMediaWithProgress: _dw(uploadMediaWithProgress, (f, _fid, cb) => {
+      // Demo: simulate progress then resolve
+      let p = 0;
+      const tick = setInterval(() => { p = Math.min(p + 20, 100); if (cb) cb(p); if (p >= 100) clearInterval(tick); }, 80);
+      return _demoUpload(f);
+    }),
     deleteFile:        _dw(deleteFile,     async (k) => _demo.del(k)),
     copyFile:          _dw(copyFile,       async () => ({ id: Utils.generateId('copy') })),
     shareWithEmail:    _dw(shareWithEmail, async () => {}),
