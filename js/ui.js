@@ -291,13 +291,20 @@ const UI = (() => {
 
   /* ── Router ─────────────────────────────────── */
 
-  function _setupRouter() {
-    window.addEventListener('hashchange', () => _navigate(window.location.hash.slice(1) || 'feed'));
+  let _routerInitialized = false;
 
-    window.addEventListener('mc:session-expired', () => {
-      Utils.showToast('Your session expired — please sign in again.', 'error', 6000);
-      Auth.signOut();
-    });
+  function _setupRouter() {
+    // Guard: only register window-level listeners once per page load.
+    // _onSignIn can be called again if the user signs out and back in,
+    // which would otherwise stack duplicate hashchange handlers.
+    if (!_routerInitialized) {
+      _routerInitialized = true;
+      window.addEventListener('hashchange', () => _navigate(window.location.hash.slice(1) || 'feed'));
+      window.addEventListener('mc:session-expired', () => {
+        Utils.showToast('Your session expired — please sign in again.', 'error', 6000);
+        Auth.signOut();
+      });
+    }
 
     _on('back-from-circle',    'click', () => navigate('circles'));
     _on('back-from-collection','click', () => navigate('collections'));
@@ -1502,6 +1509,7 @@ const UI = (() => {
             playEl.hidden = true;
             try {
               const url = await Drive.getFileAsBlob(f.id);
+              _thumbBlobUrls.push(url); // track for cleanup on page navigation
               vid.src = url; vid.muted = false; vid.play().catch(() => {});
               fsBtn.hidden = false;
             } catch { Utils.showToast('Could not load video', 'error'); playEl.hidden = false; }
@@ -2677,6 +2685,7 @@ const UI = (() => {
                 playEl.hidden = true;
                 try {
                   const url = await Drive.getFileAsBlob(f.id);
+                  _thumbBlobUrls.push(url); // track for cleanup on page navigation
                   vid.src = url; vid.muted = false; vid.play().catch(() => {});
                   fsBtn.hidden = false;
                 } catch { Utils.showToast('Could not load video', 'error'); playEl.hidden = false; }
@@ -4631,6 +4640,7 @@ const UI = (() => {
   let _vsBuilt       = false;
   let _vsMuted       = true;
   let _vsScrollTimer = null;
+  let _vsScrollAbort = null;
 
   function _vsShuffle(arr) {
     const a = [...arr];
@@ -4809,6 +4819,10 @@ const UI = (() => {
   function _vsPopulateFeed() {
     const feed = document.getElementById('vs-feed');
     if (!feed) return;
+    // Cancel any previous scroll listener before adding a new one
+    if (_vsScrollAbort) { _vsScrollAbort.abort(); }
+    _vsScrollAbort = new AbortController();
+
     feed.innerHTML = '';
     feed.scrollTop = 0;
     _vsLoaded = 0;
@@ -4826,7 +4840,7 @@ const UI = (() => {
         const slidesLeft = _vsLoaded - Math.round(feed.scrollTop / h);
         if (slidesLeft < 5 && _vsLoaded < _vsPlaylist.length) _vsLoadMore();
       }, 120);
-    }, { passive: true });
+    }, { passive: true, signal: _vsScrollAbort.signal });
 
     // Play first video immediately
     const firstVid = feed.querySelector('.vs-slide video');
