@@ -348,16 +348,22 @@ const Data = (() => {
   // with _meta.json and reactions.json inside.
 
   async function listCollections() {
-    const folders = await Drive.listFiles(_folders.collectionsFolderId, `mimeType='application/vnd.google-apps.folder'`);
-    const metas = await Promise.all(folders.map(async f => {
-      try {
-        const metaFile = await Drive.findFile('_meta.json', f.id);
-        if (!metaFile) return null;
-        const meta = await Drive.readJsonFile(metaFile.id);
-        return { ...meta, folderId: f.id };
-      } catch { return null; }
-    }));
-    return metas.filter(Boolean);
+    const cached = _cacheGet('collections');
+    if (cached) return cached;
+    return _dedup('collections', async () => {
+      const folders = await Drive.listFiles(_folders.collectionsFolderId, `mimeType='application/vnd.google-apps.folder'`);
+      const metas = await Promise.all(folders.map(async f => {
+        try {
+          const metaFile = await Drive.findFile('_meta.json', f.id);
+          if (!metaFile) return null;
+          const meta = await Drive.readJsonFile(metaFile.id);
+          return { ...meta, folderId: f.id };
+        } catch { return null; }
+      }));
+      const result = metas.filter(Boolean);
+      _cacheSet('collections', result);
+      return result;
+    });
   }
 
   async function createCollection(name, description = '', sharing = 'friends', allowCopying = true) {
@@ -394,6 +400,7 @@ const Data = (() => {
 
   async function deleteCollection(folderId) {
     await Drive.deleteFile(folderId);
+    _cacheDel('collections');
   }
 
   async function shareCollection(folderId, emails) {
@@ -529,6 +536,7 @@ const Data = (() => {
     if (opts.sourceAlbumId)  meta.sourceAlbumId  = opts.sourceAlbumId;
     await Drive.createJsonFile('_meta.json', meta, folderId);
     await _shareByAudience(folderId, sharing, circleIds);
+    _cacheDel('collections');
     return { ...meta, folderId };
   }
 
@@ -541,7 +549,7 @@ const Data = (() => {
 
   // opts: { caption, sharing, circleIds }
   async function createStory(opts = {}) {
-    const caption   = opts.caption   || '';
+    const caption   = (opts.caption || '').slice(0, 200); // enforce max length in data layer
     const sharing   = _VALID_SHARING.has(opts.sharing) ? opts.sharing : 'friends';
     const circleIds = opts.circleIds || [];
     const expiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString();
@@ -558,7 +566,7 @@ const Data = (() => {
     };
     await Drive.createJsonFile('_meta.json', meta, folderId);
     await _shareByAudience(folderId, sharing, circleIds);
-
+    _cacheDel('collections');
     return { ...meta, folderId };
   }
 
@@ -1003,11 +1011,14 @@ const Data = (() => {
   async function verifyPin(pin) {
     const stored = await getPin();
     if (!stored) return true;
-    // Backward-compat: old pin.json may lack salt (used static 'mc_pin_v1')
-    const salt = stored.salt || 'mc_pin_v1';
-    const input = stored.salt ? pin : (pin + salt);
-    const hash = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(stored.salt ? (salt + ':' + pin) : (pin + 'mc_pin_v1')));
-    const hex = Array.from(new Uint8Array(hash)).map(b => b.toString(16).padStart(2, '0')).join('');
+    // Backward-compat: old pin.json may lack a salt field (legacy used static 'mc_pin_v1').
+    // New format: hash = SHA-256(salt + ':' + pin)
+    // Legacy format: hash = SHA-256(pin + 'mc_pin_v1')
+    const hashInput = stored.salt
+      ? (stored.salt + ':' + pin)
+      : (pin + 'mc_pin_v1');
+    const buf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(hashInput));
+    const hex = Array.from(new Uint8Array(buf)).map(b => b.toString(16).padStart(2, '0')).join('');
     return hex === (stored.hash || stored);
   }
 
@@ -1110,11 +1121,11 @@ const Data = (() => {
   async function deleteAccount() {
     // Delete the mycircle root folder (all app data lives inside it)
     await Drive.deleteFile(_folders.rootId);
-    // Wipe local caches
+    // Wipe in-memory caches
     Object.keys(_cache).forEach(k => delete _cache[k]);
-    try {
-      localStorage.removeItem('mc_profile_public');
-    } catch {}
+    // Clear all app-owned localStorage keys so no stale state persists
+    const _LS_KEYS = ['mc_profile_public', 'mc_welcome_done', 'mc_theme', 'mc_color', 'mc_client_id', 'mc_demo'];
+    _LS_KEYS.forEach(k => { try { localStorage.removeItem(k); } catch {} });
     _folders = null;
   }
 

@@ -577,6 +577,19 @@ body { min-height: 100vh; }
   padding: .5rem 1rem;
 }
 
+/* ── Offline banner ── */
+.offline-banner {
+  background: #7c4a00;
+  color: #fff;
+  font-size: .8rem;
+  font-weight: 500;
+  text-align: center;
+  padding: .5rem 1rem;
+  position: sticky;
+  top: 0;
+  z-index: 400;
+}
+
 /* ── Auth setup panel ── */
 .auth-setup {
   width: 100%;
@@ -1913,6 +1926,23 @@ textarea.input { resize: vertical; min-height: 80px; }
 }
 .story-viewer-prev { left: .4rem; }
 .story-viewer-next { right: .4rem; }
+
+/* Text-only story slide */
+.story-caption-slide {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  padding: 2rem 2.5rem;
+  font-size: 1.35rem;
+  font-weight: 500;
+  line-height: 1.5;
+  color: #fff;
+  width: 100%;
+  height: 100%;
+  background: linear-gradient(145deg, #1a1a2e 0%, #16213e 55%, #0f3460 100%);
+  word-break: break-word;
+}
 
 /* ── Post reactions (multi-type) ── */
 .post-reactions {

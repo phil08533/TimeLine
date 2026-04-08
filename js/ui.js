@@ -36,6 +36,15 @@ const UI = (() => {
 
     _initSetupUI();
 
+    // Offline / online indicator
+    function _updateOfflineBanner() {
+      const banner = document.getElementById('offline-banner');
+      if (banner) banner.hidden = navigator.onLine;
+    }
+    window.addEventListener('online',  _updateOfflineBanner);
+    window.addEventListener('offline', _updateOfflineBanner);
+    _updateOfflineBanner(); // set initial state
+
     if (Auth.isSignedIn()) _onSignIn(Auth.getCurrentUser());
   }
 
@@ -282,13 +291,20 @@ const UI = (() => {
 
   /* ── Router ─────────────────────────────────── */
 
-  function _setupRouter() {
-    window.addEventListener('hashchange', () => _navigate(window.location.hash.slice(1) || 'feed'));
+  let _routerInitialized = false;
 
-    window.addEventListener('mc:session-expired', () => {
-      Utils.showToast('Your session expired — please sign in again.', 'error', 6000);
-      Auth.signOut();
-    });
+  function _setupRouter() {
+    // Guard: only register window-level listeners once per page load.
+    // _onSignIn can be called again if the user signs out and back in,
+    // which would otherwise stack duplicate hashchange handlers.
+    if (!_routerInitialized) {
+      _routerInitialized = true;
+      window.addEventListener('hashchange', () => _navigate(window.location.hash.slice(1) || 'feed'));
+      window.addEventListener('mc:session-expired', () => {
+        Utils.showToast('Your session expired — please sign in again.', 'error', 6000);
+        Auth.signOut();
+      });
+    }
 
     _on('back-from-circle',    'click', () => navigate('circles'));
     _on('back-from-collection','click', () => navigate('collections'));
@@ -674,7 +690,7 @@ const UI = (() => {
 
         <div class="form-field" id="post-album-row" hidden>
           <label>Album title <span class="muted-text small">(required when adding multiple photos)</span></label>
-          <input type="text" id="post-album-title" class="input" placeholder="Summer 2025, Road trip…" maxlength="80" />
+          <input type="text" id="post-album-title" class="input" placeholder="Summer 2026, Road trip…" maxlength="80" />
         </div>
 
         <div class="form-field">
@@ -1129,68 +1145,67 @@ const UI = (() => {
   // Load all own stories into one viewer session, supporting per-story deletion
   async function _openOwnStoriesViewer(ownStories, user) {
     Utils.showLoading();
-    const allMedia = [];
-    let captionOnly = '';
     try {
-      for (const story of ownStories) {
+      // Fetch all story folders in parallel instead of sequentially
+      const results = await Promise.all(ownStories.map(async story => {
         try {
           const files = await Drive.listFiles(story.folderId);
           const media = files.filter(f => f.mimeType?.startsWith('image/') || f.mimeType?.startsWith('video/'));
           if (media.length) {
             media.forEach(f => { f._storyFolderId = story.folderId; });
-            allMedia.push(...media);
-          } else if (story.caption) {
-            captionOnly = story.caption; // text-only story
+            return media;
           }
-        } catch {}
+          if (story.caption) {
+            // Caption-only: synthesise a text slide so it shows in the viewer
+            return [{ mimeType: 'text/caption', caption: story.caption, id: story.folderId, _storyFolderId: story.folderId }];
+          }
+          return [];
+        } catch { return []; }
+      }));
+      const allMedia = results.flat();
+      if (!allMedia.length) {
+        Utils.showToast('Your stories have no content', 'info');
+        return;
       }
+      const onDelete = async (folderId) => {
+        if (!folderId) return;
+        try {
+          await Drive.deleteFile(folderId);
+          _cacheDel && _cacheDel('collections'); // belt-and-suspenders; data layer also does this
+          Utils.showToast('Story deleted');
+          navigate('feed');
+        } catch { Utils.showToast('Could not delete story', 'error'); }
+      };
+      _openStoryViewerMedia(allMedia, 0, user?.name || 'You', user?.picture || null, onDelete);
     } finally { Utils.hideLoading(); }
-
-    if (!allMedia.length) {
-      Utils.showToast(captionOnly || 'Your stories have no photos or videos', captionOnly ? 'info' : 'info', captionOnly ? 6000 : 3500);
-      return;
-    }
-
-    const onDelete = async (folderId) => {
-      if (!folderId) return;
-      try {
-        await Drive.deleteFile(folderId);
-        Utils.showToast('Story deleted');
-        navigate('feed');
-      } catch { Utils.showToast('Could not delete story', 'error'); }
-    };
-    _openStoryViewerMedia(allMedia, 0, user?.name || 'You', user?.picture || null, onDelete);
   }
 
   // Load all folders belonging to one friend and play them in sequence
   async function _openFriendStoriesViewer(folders, owner) {
     Utils.showLoading();
-    const allMedia = [];
-    let captionOnly = '';
     try {
-      for (const folder of folders) {
+      // Fetch all story folders in parallel
+      const results = await Promise.all(folders.map(async folder => {
         try {
           const files = await Drive.listFiles(folder.id);
           const media = files.filter(f => f.mimeType?.startsWith('image/') || f.mimeType?.startsWith('video/'));
-          if (media.length) {
-            allMedia.push(...media);
-          } else {
-            // Caption-only story: extract caption from meta
-            const metaFile = files.find(f => f.name === '_meta.json');
-            if (metaFile) {
-              const m = await Drive.readJsonFile(metaFile.id).catch(() => null);
-              if (m?.caption) captionOnly = m.caption;
-            }
+          if (media.length) return media;
+          // Caption-only: read meta and synthesise a text slide
+          const metaFile = files.find(f => f.name === '_meta.json');
+          if (metaFile) {
+            const m = await Drive.readJsonFile(metaFile.id).catch(() => null);
+            if (m?.caption) return [{ mimeType: 'text/caption', caption: m.caption, id: folder.id }];
           }
-        } catch {}
+          return [];
+        } catch { return []; }
+      }));
+      const allMedia = results.flat();
+      if (!allMedia.length) {
+        Utils.showToast('This story has no content', 'info');
+        return;
       }
+      _openStoryViewerMedia(allMedia, 0, owner?.displayName || 'Friend', owner?.photoLink || null);
     } finally { Utils.hideLoading(); }
-
-    if (!allMedia.length) {
-      Utils.showToast(captionOnly || 'This story has no photos or videos', 'info', captionOnly ? 6000 : 3500);
-      return;
-    }
-    _openStoryViewerMedia(allMedia, 0, owner?.displayName || 'Friend', owner?.photoLink || null);
   }
 
   async function _openStoryViewerFromFolder(folder) {
@@ -1226,8 +1241,17 @@ const UI = (() => {
 
     let cur = index;
     let autoTimer = null;
+    // Track blob URLs so they can be revoked when the slide changes or viewer closes
+    const _viewerBlobs = [];
+
+    function _revokeViewerBlobs() {
+      _viewerBlobs.forEach(u => URL.revokeObjectURL(u));
+      _viewerBlobs.length = 0;
+    }
 
     function showSlide(i) {
+      _revokeViewerBlobs(); // free memory from previous slide's video blob
+      clearTimeout(autoTimer);
       cur = i;
       const mediaEl = overlay.querySelector('#story-viewer-media');
       mediaEl.innerHTML = '';
@@ -1236,21 +1260,38 @@ const UI = (() => {
         s.className = 'story-progress-seg' + (idx < cur ? ' done' : (idx === cur ? ' active' : ''));
       });
       const f = mediaFiles[cur];
-      if (f.mimeType?.startsWith('video/')) {
+
+      if (f.mimeType === 'text/caption') {
+        // Text-only story — render caption as a readable slide
+        const div = document.createElement('div');
+        div.className = 'story-caption-slide';
+        div.textContent = f.caption; // textContent is XSS-safe
+        mediaEl.appendChild(div);
+        autoTimer = setTimeout(() => advance(1), 5000);
+      } else if (f.mimeType?.startsWith('video/')) {
         const vid = document.createElement('video');
         vid.autoplay = true; vid.muted = false; vid.loop = false; vid.playsInline = true;
         vid.style.cssText = 'width:100%;height:100%;object-fit:contain';
-        Drive.getFileAsBlob(f.id).then(url => { vid.src = url; }).catch(() => {});
+        Drive.getFileAsBlob(f.id).then(url => {
+          _viewerBlobs.push(url); // track for revocation
+          vid.src = url;
+        }).catch(() => {});
         mediaEl.appendChild(vid);
         vid.addEventListener('ended', () => advance(1));
-        clearTimeout(autoTimer);
       } else {
         const img = document.createElement('img');
         img.alt = ''; img.style.cssText = 'width:100%;height:100%;object-fit:contain';
         _loadThumbnail(img, f.id, f.thumbnailLink);
         mediaEl.appendChild(img);
-        clearTimeout(autoTimer);
         autoTimer = setTimeout(() => advance(1), 5000);
+        // Preload the next image slide while the user views the current one
+        if (cur + 1 < mediaFiles.length) {
+          const next = mediaFiles[cur + 1];
+          if (next.mimeType?.startsWith('image/')) {
+            const preload = new Image();
+            _loadThumbnail(preload, next.id, next.thumbnailLink);
+          }
+        }
       }
     }
 
@@ -1260,8 +1301,17 @@ const UI = (() => {
       showSlide(next);
     }
 
+    // Define onKey before closeViewer so closeViewer can reference it for removal
+    function onKey(e) {
+      if (e.key === 'Escape') closeViewer();
+      if (e.key === 'ArrowRight') advance(1);
+      if (e.key === 'ArrowLeft')  advance(-1);
+    }
+
     function closeViewer() {
       clearTimeout(autoTimer);
+      _revokeViewerBlobs(); // release any outstanding video blob URLs
+      document.removeEventListener('keydown', onKey); // always clean up listener
       overlay.remove();
     }
 
@@ -1269,11 +1319,7 @@ const UI = (() => {
     overlay.querySelector('.story-viewer-prev').addEventListener('click', e => { e.stopPropagation(); advance(-1); });
     overlay.querySelector('.story-viewer-next').addEventListener('click', e => { e.stopPropagation(); advance(1); });
     overlay.addEventListener('click', e => { if (e.target === overlay) closeViewer(); });
-    document.addEventListener('keydown', function onKey(e) {
-      if (e.key === 'Escape') { closeViewer(); document.removeEventListener('keydown', onKey); }
-      if (e.key === 'ArrowRight') advance(1);
-      if (e.key === 'ArrowLeft')  advance(-1);
-    });
+    document.addEventListener('keydown', onKey);
 
     if (onDelete) {
       overlay.querySelector('.story-viewer-delete').addEventListener('click', async e => {
@@ -1463,6 +1509,7 @@ const UI = (() => {
             playEl.hidden = true;
             try {
               const url = await Drive.getFileAsBlob(f.id);
+              _thumbBlobUrls.push(url); // track for cleanup on page navigation
               vid.src = url; vid.muted = false; vid.play().catch(() => {});
               fsBtn.hidden = false;
             } catch { Utils.showToast('Could not load video', 'error'); playEl.hidden = false; }
@@ -2638,6 +2685,7 @@ const UI = (() => {
                 playEl.hidden = true;
                 try {
                   const url = await Drive.getFileAsBlob(f.id);
+                  _thumbBlobUrls.push(url); // track for cleanup on page navigation
                   vid.src = url; vid.muted = false; vid.play().catch(() => {});
                   fsBtn.hidden = false;
                 } catch { Utils.showToast('Could not load video', 'error'); playEl.hidden = false; }
@@ -4453,8 +4501,19 @@ const UI = (() => {
       fresh.addEventListener('change', _saveSettingsFromUI);
     });
 
-    _on('report-bug-btn',     'click', () => _openBugReportModal());
-    _on('delete-account-btn', 'click', () => _openDeleteAccountModal());
+    // Always re-sync settings UI to current values in case they changed since boot
+    Data.getSettings().then(s => _syncSettingsUI(s)).catch(() => {});
+
+    // Show the signed-in user's email in the Account section
+    const signedInLabel = document.getElementById('settings-signed-in-as');
+    if (signedInLabel) {
+      const user = Auth.getCurrentUser();
+      signedInLabel.textContent = user?.email ? `Signed in as ${user.email}` : '';
+    }
+
+    _on('report-bug-btn',        'click', () => _openBugReportModal());
+    _on('sign-out-settings-btn', 'click', () => Auth.signOut());
+    _on('delete-account-btn',    'click', () => _openDeleteAccountModal());
   }
 
   function _openDeleteAccountModal() {
@@ -4581,6 +4640,7 @@ const UI = (() => {
   let _vsBuilt       = false;
   let _vsMuted       = true;
   let _vsScrollTimer = null;
+  let _vsScrollAbort = null;
 
   function _vsShuffle(arr) {
     const a = [...arr];
@@ -4759,6 +4819,10 @@ const UI = (() => {
   function _vsPopulateFeed() {
     const feed = document.getElementById('vs-feed');
     if (!feed) return;
+    // Cancel any previous scroll listener before adding a new one
+    if (_vsScrollAbort) { _vsScrollAbort.abort(); }
+    _vsScrollAbort = new AbortController();
+
     feed.innerHTML = '';
     feed.scrollTop = 0;
     _vsLoaded = 0;
@@ -4776,7 +4840,7 @@ const UI = (() => {
         const slidesLeft = _vsLoaded - Math.round(feed.scrollTop / h);
         if (slidesLeft < 5 && _vsLoaded < _vsPlaylist.length) _vsLoadMore();
       }, 120);
-    }, { passive: true });
+    }, { passive: true, signal: _vsScrollAbort.signal });
 
     // Play first video immediately
     const firstVid = feed.querySelector('.vs-slide video');
