@@ -1137,6 +1137,16 @@ textarea.input { resize: vertical; min-height: 80px; }
   background: var(--circle-color, var(--border));
   font-weight: 700;
 }
+/* Album cover thumbnail — mirrors circle icon size but square */
+.album-cover-thumb {
+  width: 72px; height: 72px;
+  border-radius: var(--card-radius, 8px);
+  overflow: hidden;
+  flex-shrink: 0;
+  background: var(--border);
+  display: flex; align-items: center; justify-content: center;
+  font-size: 1.8rem;
+}
 .circle-hero-info { flex: 1; min-width: 0; }
 .circle-hero-info h2 { font-size: 1.35rem; font-weight: 700; margin-bottom: .25rem; font-family: var(--font-display, inherit); }
 .circle-detail-desc { font-size: .85rem; }
@@ -2161,6 +2171,9 @@ textarea.input { resize: vertical; min-height: 80px; }
   .circle-hero-top .page-header-actions .danger-btn { color: var(--danger) !important; }
   .circle-hero-body { gap: .75rem; }
   .circle-hero-icon { width: 48px; height: 48px; font-size: 1.2rem; }
+  .album-cover-thumb { width: 56px; height: 56px; font-size: 1.4rem; }
+  /* Reuse circle-hero-top responsive rules for album detail */
+  .circle-hero-top #back-from-collection { order: 0; }
   .circle-hero-info h2 { font-size: 1.1rem; }
   .circle-hero-stats { gap: .75rem; }
 

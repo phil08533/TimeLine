@@ -689,7 +689,7 @@ const UI = (() => {
         <div id="post-previews" class="post-previews" hidden></div>
 
         <div class="form-field" id="post-album-row" hidden>
-          <label>Album title <span class="muted-text small">(required when adding multiple photos)</span></label>
+          <label>Album title <span class="muted-text small">(required — saves to your Albums tab)</span></label>
           <input type="text" id="post-album-title" class="input" placeholder="Summer 2026, Road trip…" maxlength="80" />
         </div>
 
@@ -721,13 +721,6 @@ const UI = (() => {
               ${circlePillsHtml}
             </div>
 
-            <label class="audience-option">
-              <input type="radio" name="audience" value="everyone" />
-              <div>
-                <div class="audience-label">Public link</div>
-                <div class="muted-text small">Anyone who has the link can view — shared via Google Drive's link sharing</div>
-              </div>
-            </label>
 
           </div>
         </div>
@@ -794,12 +787,13 @@ const UI = (() => {
       const caption  = document.getElementById('post-caption').value.trim();
       const audience = document.querySelector('input[name="audience"]:checked').value;
       const title    = albumTitle.value.trim();
+      const isAlbum  = selectedFiles.length > 1;
 
       if (!caption && !selectedFiles.length) {
         status.textContent = 'Write something or add a photo first.';
         return;
       }
-      if (selectedFiles.length > 1 && !title) {
+      if (isAlbum && !title) {
         status.textContent = 'Give your album a title.';
         albumTitle.focus();
         return;
@@ -821,21 +815,51 @@ const UI = (() => {
       Utils.showLoading();
 
       try {
-        const post = await Data.createPost({
-          caption,
-          name: title || (selectedFiles.length === 1 ? selectedFiles[0].name.replace(/\.[^.]+$/, '') : `Post ${new Date().toLocaleDateString()}`),
-          sharing: audience,
-          circleIds
-        });
+        if (isAlbum) {
+          // Multiple photos → create a proper Album (shows in Albums tab)
+          const album = await Data.createCollection(title, caption, audience, true, circleIds);
+          if (selectedFiles.length) {
+            status.textContent = `Uploading ${selectedFiles.length} files…`;
+            await Promise.all(selectedFiles.map(f => Drive.uploadMedia(f, album.folderId)));
+          }
+          closeModal();
+          Utils.showToast('Album created!');
+          navigate('collections');
+        } else {
+          // Single photo or caption-only → regular feed post
+          const post = await Data.createPost({
+            caption,
+            name: selectedFiles.length === 1 ? selectedFiles[0].name.replace(/\.[^.]+$/, '') : `Post ${new Date().toLocaleDateString()}`,
+            sharing: audience,
+            circleIds
+          });
 
-        if (selectedFiles.length) {
-          status.textContent = `Uploading ${selectedFiles.length} file${selectedFiles.length > 1 ? 's' : ''}…`;
-          await Promise.all(selectedFiles.map(f => Drive.uploadMedia(f, post.folderId)));
+          if (selectedFiles.length) {
+            status.textContent = 'Uploading…';
+            await Promise.all(selectedFiles.map(f => Drive.uploadMedia(f, post.folderId)));
+          }
+
+          // When posting to specific circles, also register the post inside each
+          // circle folder so it appears on the circle's detail page.
+          if (audience === 'circles' && circleIds.length) {
+            try {
+              const circleData = await Promise.all(circleIds.map(fid => Data.getCircle(fid).catch(() => null)));
+              await Promise.all(
+                circleData.filter(Boolean).map(circle =>
+                  Data.createCirclePost(circle.folderId, {
+                    caption,
+                    members: circle.members || [],
+                    sourceAlbumId: post.folderId
+                  })
+                )
+              );
+            } catch { /* circle registration is non-fatal */ }
+          }
+
+          closeModal();
+          Utils.showToast('Posted!');
+          _renderFeed();
         }
-
-        closeModal();
-        Utils.showToast('Posted!');
-        _renderFeed();
       } catch {
         Utils.showToast('Failed to post', 'error');
         status.textContent = '';
@@ -3231,8 +3255,21 @@ const UI = (() => {
     document.getElementById('collection-detail-stats').innerHTML = '';
     document.getElementById('collection-tag-row').innerHTML = '';
     document.getElementById('collection-detail-desc').textContent = '';
-    document.getElementById('collection-hero-cover').innerHTML = '';
+    document.getElementById('collection-detail-cover').innerHTML = '📸';
     document.getElementById('collection-contributors-bar').hidden = true;
+
+    // Reset tabs to Photos
+    document.querySelectorAll('#collection-tabs .circle-tab').forEach(t => t.classList.toggle('active', t.dataset.tab === 'photos'));
+    document.getElementById('collection-tab-photos').hidden = false;
+    document.getElementById('collection-tab-info').hidden = true;
+    document.querySelectorAll('#collection-tabs .circle-tab').forEach(tab => {
+      tab.onclick = () => {
+        document.querySelectorAll('#collection-tabs .circle-tab').forEach(t => t.classList.remove('active'));
+        tab.classList.add('active');
+        document.getElementById('collection-tab-photos').hidden = tab.dataset.tab !== 'photos';
+        document.getElementById('collection-tab-info').hidden   = tab.dataset.tab !== 'info';
+      };
+    });
 
     try {
       const [coll, files] = await Promise.all([
@@ -3244,13 +3281,17 @@ const UI = (() => {
       const isOwner = coll.ownerEmail === me?.email;
       const mediaFiles = files.filter(f => f.mimeType?.startsWith('image/') || f.mimeType?.startsWith('video/'));
 
-      // Hero cover — use first media file as full-bleed background
+      // Cover thumbnail
+      const coverEl = document.getElementById('collection-detail-cover');
+      coverEl.innerHTML = '';
       if (mediaFiles[0]) {
-        const heroCover = document.getElementById('collection-hero-cover');
         const img = document.createElement('img');
         img.alt = '';
+        img.style.cssText = 'width:100%;height:100%;object-fit:cover;border-radius:var(--card-radius,8px)';
         _loadThumbnail(img, mediaFiles[0].id, mediaFiles[0].thumbnailLink);
-        heroCover.appendChild(img);
+        coverEl.appendChild(img);
+      } else {
+        coverEl.textContent = '📸';
       }
 
       // Tag
@@ -3264,17 +3305,23 @@ const UI = (() => {
       document.getElementById('collection-detail-name').textContent = coll.name;
       document.getElementById('collection-detail-desc').textContent = coll.description || '';
       document.getElementById('collection-detail-stats').innerHTML =
-        `<span>${mediaFiles.length} photo${mediaFiles.length !== 1 ? 's' : ''}</span>
-         <span>${_sharingLabel(coll.sharing)}</span>
-         ${coll.allowCopying ? '<span>Copying ok</span>' : ''}`;
+        `<span class="circle-stat"><strong>${mediaFiles.length}</strong> photo${mediaFiles.length !== 1 ? 's' : ''}</span>
+         <span class="circle-stat">${_sharingLabel(coll.sharing)}</span>
+         ${coll.allowCopying ? '<span class="circle-stat">Copying ok</span>' : ''}`;
 
-      // Contributors bar
+      // Contributors (shown in Info tab)
       const contribs = coll.contributors || [];
       if (contribs.length) {
         const bar = document.getElementById('collection-contributors-bar');
-        bar.innerHTML = `<span class="contrib-label">Contributors:</span>` +
+        bar.innerHTML = `<h3>Contributors</h3>` +
           contribs.map(email => `<span class="contrib-pill" title="${Utils.escapeHtml(email)}">${Utils.escapeHtml(email.split('@')[0])}</span>`).join('');
         bar.hidden = false;
+      }
+
+      // Info tab — sharing details
+      const infoEl = document.getElementById('collection-info-sharing');
+      if (infoEl) {
+        infoEl.innerHTML = `<p class="muted-text small">Shared with: <strong>${_sharingLabel(coll.sharing)}</strong>${coll.description ? '<br>' + Utils.escapeHtml(coll.description) : ''}</p>`;
       }
 
       // Action buttons
@@ -3283,20 +3330,20 @@ const UI = (() => {
       upBtn.addEventListener('click', () => _openUploadModal(folderId));
       actions.appendChild(upBtn);
 
-      const shareBtn = _el(`<button class="btn btn-ghost btn-sm album-action-btn">Share</button>`);
+      const shareBtn = _el(`<button class="btn btn-ghost btn-sm">Share</button>`);
       shareBtn.addEventListener('click', () => _openShareModal(folderId, coll));
       actions.appendChild(shareBtn);
 
-      const inviteBtn = _el(`<button class="btn btn-ghost btn-sm album-action-btn">+ Contributor</button>`);
+      const inviteBtn = _el(`<button class="btn btn-ghost btn-sm">+ Contributor</button>`);
       inviteBtn.addEventListener('click', () => _openInviteCollaboratorModal(folderId));
       actions.appendChild(inviteBtn);
 
       if (isOwner) {
-        const editBtn = _el(`<button class="btn btn-ghost btn-sm album-action-btn">Edit</button>`);
+        const editBtn = _el(`<button class="btn btn-ghost btn-sm">Edit</button>`);
         editBtn.addEventListener('click', () => _openEditCollectionModal(folderId, coll));
         actions.appendChild(editBtn);
 
-        const delBtn = _el(`<button class="btn btn-ghost btn-sm album-action-btn danger-btn">Delete</button>`);
+        const delBtn = _el(`<button class="btn btn-ghost btn-sm danger-btn">Delete</button>`);
         delBtn.addEventListener('click', async () => {
           if (!confirm(`Delete album "${coll.name}"?`)) return;
           await Data.deleteCollection(folderId);
