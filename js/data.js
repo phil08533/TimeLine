@@ -154,8 +154,9 @@ const Data = (() => {
   }
 
   async function getFriends() {
-    // Run acceptance sync (throttled internally) then return current list.
-    await syncFriendAcceptances().catch(() => {});
+    // Fire sync in the background — don't block on it so the UI feels instant.
+    // syncFriendAcceptances is internally throttled to at most once per 60s.
+    syncFriendAcceptances().catch(() => {});
     return (await _getFriendsFile()).friends || [];
   }
 
@@ -173,6 +174,19 @@ const Data = (() => {
       const data = await _getFriendsFile();
       data.friends = data.friends.filter(f => f.email !== email);
       await _saveFriendsFile(data);
+
+      // Notify the removed person so they can remove us from their list too.
+      // Fire-and-forget; failure is non-fatal.
+      const user = Auth.getCurrentUser();
+      const key  = `mc-fremov-${email.replace(/[^a-zA-Z0-9]/g, '_')}.json`;
+      Drive.upsertJsonFile(key, {
+        type:      'mc_friend_removed',
+        fromEmail: user.email,
+        toEmail:   email,
+        removedAt: new Date().toISOString()
+      }, _folders.rootId)
+        .then(fid => Drive.shareWithEmail(fid, email, 'reader').catch(() => {}))
+        .catch(() => {});
     });
   }
 
@@ -748,6 +762,9 @@ const Data = (() => {
   }
 
   async function getIncomingFriendRequests() {
+    // Short cache so rapid re-opens of the notification panel feel instant
+    const cached = _cacheGet('incomingReqs');
+    if (cached) return cached;
     try {
       const files   = await Drive.listSharedFilesWithName('mc-freq-');
       const me      = Auth.getCurrentUser();
@@ -761,7 +778,9 @@ const Data = (() => {
           return { ...d, fileId: f.id };
         } catch { return null; }
       }));
-      return reqs.filter(Boolean);
+      const result = reqs.filter(Boolean);
+      _cacheSet('incomingReqs', result);
+      return result;
     } catch { return []; }
   }
 
@@ -887,15 +906,18 @@ const Data = (() => {
       } catch {}
     });
 
+    _cacheDel('incomingReqs'); // bust cache so badge refreshes immediately
     // Share all existing 'friends' posts/stories with the new friend (outside the lock)
     _shareExistingPostsWithFriend(fromEmail).catch(() => {});
   }
 
   async function declineFriendRequest(fileId) {
     await _markNotifHandled(fileId);
+    _cacheDel('incomingReqs'); // bust cache so count refreshes immediately
   }
 
-  // Check sharedWithMe for mc-freqacc-* files and promote pending_sent entries to accepted.
+  // Check sharedWithMe for mc-freqacc-* and mc-fremov-* files.
+  // Promotes pending_sent entries to accepted and removes entries for removals.
   // Throttled to once per 60 s. Drive reads happen OUTSIDE the write lock so the lock is
   // held only for the fast in-memory mutations + two small Drive writes.
   async function syncFriendAcceptances() {
@@ -910,57 +932,67 @@ const Data = (() => {
       const newlyAcceptedEmails = [];
       try {
         // ── Phase 1: read from Drive OUTSIDE the write lock ─────────────
-        const files = await Drive.listSharedFilesWithName('mc-freqacc-');
-        if (!files.length) return;
+        const [accFiles, remFiles] = await Promise.all([
+          Drive.listSharedFilesWithName('mc-freqacc-'),
+          Drive.listSharedFilesWithName('mc-fremov-')
+        ]);
 
         const me      = Auth.getCurrentUser();
         const handled = await _getHandledNotifIds();
+        const allFiles = [...accFiles, ...remFiles].filter(f => !handled.includes(f.id));
+        if (!allFiles.length) return;
 
-        // Read all unhandled acceptance files in parallel
+        // Read all unhandled files in parallel
         const toProcess = (await Promise.all(
-          files
-            .filter(f => !handled.includes(f.id))
-            .map(async f => {
-              try {
-                const d = await Drive.readJsonFile(f.id);
-                return (d.type === 'mc_friend_accepted' && d.toEmail === me.email)
-                  ? { fileId: f.id, ...d }
-                  : null;
-              } catch { return null; }
-            })
+          allFiles.map(async f => {
+            try {
+              const d = await Drive.readJsonFile(f.id);
+              const validType = d.type === 'mc_friend_accepted' || d.type === 'mc_friend_removed';
+              return (validType && d.toEmail === me.email) ? { fileId: f.id, ...d } : null;
+            } catch { return null; }
+          })
         )).filter(Boolean);
 
         if (!toProcess.length) return;
 
         // ── Phase 2: mutate state inside the write lock (fast: cache hits + 2 writes) ─
         await _withWriteLock(async () => {
-          const data          = await _getFriendsFile();
+          const data           = await _getFriendsFile();
           const currentHandled = await _getHandledNotifIds();
-          let changed = false;
+          let changed  = false;
           const newHandled = [...currentHandled];
 
           for (const d of toProcess) {
-            if (newHandled.includes(d.fileId)) continue; // already handled in parallel call
-            const friend = data.friends.find(fr => fr.email === d.fromEmail);
-            if (friend) {
-              if (friend.status === 'pending_sent' || !friend.displayName || friend.displayName === friend.email) {
-                friend.status      = 'accepted';
-                friend.displayName = d.fromName || d.fromEmail;
-                if (d.fromPicture) friend.picture = d.fromPicture;
+            if (newHandled.includes(d.fileId)) continue;
+
+            if (d.type === 'mc_friend_accepted') {
+              const friend = data.friends.find(fr => fr.email === d.fromEmail);
+              if (friend) {
+                if (friend.status === 'pending_sent' || !friend.displayName || friend.displayName === friend.email) {
+                  friend.status      = 'accepted';
+                  friend.displayName = d.fromName || d.fromEmail;
+                  if (d.fromPicture) friend.picture = d.fromPicture;
+                  changed = true;
+                  newlyAcceptedEmails.push(d.fromEmail);
+                }
+              } else if (!data.friends.some(fr => fr.email === d.fromEmail)) {
+                data.friends.push({
+                  email:       d.fromEmail,
+                  displayName: d.fromName || d.fromEmail,
+                  picture:     d.fromPicture || null,
+                  addedAt:     new Date().toISOString(),
+                  status:      'accepted'
+                });
                 changed = true;
                 newlyAcceptedEmails.push(d.fromEmail);
               }
-            } else if (!data.friends.some(fr => fr.email === d.fromEmail)) {
-              data.friends.push({
-                email:       d.fromEmail,
-                displayName: d.fromName || d.fromEmail,
-                picture:     d.fromPicture || null,
-                addedAt:     new Date().toISOString(),
-                status:      'accepted'
-              });
-              changed = true;
-              newlyAcceptedEmails.push(d.fromEmail);
+            } else if (d.type === 'mc_friend_removed') {
+              // The other person removed us — mirror it locally
+              const before = data.friends.length;
+              data.friends = data.friends.filter(fr => fr.email !== d.fromEmail);
+              if (data.friends.length !== before) changed = true;
             }
+
             newHandled.push(d.fileId);
           }
 
@@ -1157,6 +1189,7 @@ const Data = (() => {
     getFeedFolders,
     getHiddenIds, hideFile, unhideFile,
     getHiddenPostIds, hidePost, unhidePost,
-    getPin, setPin, verifyPin, clearPin
+    getPin, setPin, verifyPin, clearPin,
+    _resetSyncThrottle
   };
 })();

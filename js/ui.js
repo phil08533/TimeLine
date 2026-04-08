@@ -705,8 +705,9 @@ const UI = (() => {
           <textarea id="post-caption" class="input" rows="3" placeholder="What's on your mind?"></textarea>
         </div>
 
-        <div class="form-field">
+        <div class="form-field" id="post-audience-section">
           <label>Who can see this?</label>
+          <p id="album-audience-note" class="muted-text small" hidden style="margin:.2rem 0 .4rem">Albums use their own sharing settings — manage them in the Albums tab.</p>
           <div class="audience-options">
 
             <label class="audience-option">
@@ -727,7 +728,6 @@ const UI = (() => {
             <div class="circle-picker" id="circle-picker" hidden>
               ${circlePillsHtml}
             </div>
-
 
           </div>
         </div>
@@ -774,6 +774,14 @@ const UI = (() => {
     saveAlbumChk.addEventListener('change', () => {
       albumTitleRow.hidden = !saveAlbumChk.checked;
       if (saveAlbumChk.checked && !albumTitle.value) albumTitle.focus();
+      // Grey out audience when saving as album — albums manage their own sharing
+      const audienceSection = document.getElementById('post-audience-section');
+      if (audienceSection) {
+        audienceSection.style.opacity = saveAlbumChk.checked ? '0.4' : '';
+        audienceSection.style.pointerEvents = saveAlbumChk.checked ? 'none' : '';
+        const note = document.getElementById('album-audience-note');
+        if (note) note.hidden = !saveAlbumChk.checked;
+      }
     });
 
     function _applyFiles(files) {
@@ -3799,10 +3807,10 @@ const UI = (() => {
     _on('add-friend-name',  'keydown', e => { if (e.key === 'Enter') _addFriend(); });
 
     try {
+      // getFriends fires sync in the background; returns cached data instantly
       const [friends, blocked, hiddenUsers] = await Promise.all([
         Data.getFriends(), Data.getBlocked(), Data.getHiddenUsers().catch(() => [])
       ]);
-      // If user already has friends, profile was made public before
       if (friends.length && !localStorage.getItem('mc_profile_public')) {
         localStorage.setItem('mc_profile_public', '1');
       }
@@ -3810,7 +3818,24 @@ const UI = (() => {
       _renderFriendsList(friends);
       _renderHiddenUsersList(hiddenUsers);
       _renderBlockedList(blocked);
-      await _renderFriendSuggestions(friends, blocked);
+
+      // After a short delay, force a fresh sync and silently update the list
+      // if the background sync completed and found new data.
+      setTimeout(async () => {
+        if (_currentPage !== 'friends') return;
+        try {
+          Data._resetSyncThrottle();
+          const fresh = await Data.getFriends();
+          const counts = fresh.length;
+          const old    = document.getElementById('friends-count').textContent;
+          // Only re-render if something changed
+          if (String(counts) !== old) {
+            document.getElementById('friends-count').textContent = counts;
+            _renderFriendsList(fresh);
+          }
+        } catch {}
+      }, 4000);
+
     } catch { Utils.showToast('Failed to load friends', 'error'); }
   }
 
@@ -3849,12 +3874,19 @@ const UI = (() => {
         row.addEventListener('click', () => navigate('user-profile', { person: f }));
       }
       row.querySelector('[data-action="remove"]').addEventListener('click', async e => {
-        e.stopPropagation(); await Data.removeFriend(f.email); _renderFriends();
+        e.stopPropagation();
+        row.remove(); // optimistic — remove row instantly
+        Data.removeFriend(f.email).catch(() => Utils.showToast('Could not remove friend', 'error'));
+        const cnt = document.getElementById('friends-count');
+        if (cnt) cnt.textContent = Math.max(0, parseInt(cnt.textContent || '0') - 1);
       });
       row.querySelector('[data-action="block"]')?.addEventListener('click', async e => {
         e.stopPropagation();
-        await Data.blockUser(f.email); await Data.removeFriend(f.email);
-        _renderFriends(); Utils.showToast(`${f.email} blocked`);
+        row.remove(); // optimistic
+        Utils.showToast(`${f.displayName || f.email} blocked`);
+        Promise.all([Data.blockUser(f.email), Data.removeFriend(f.email)])
+          .then(() => _renderFriends())
+          .catch(() => Utils.showToast('Could not block user', 'error'));
       });
       list.appendChild(row);
     });
@@ -4015,109 +4047,6 @@ const UI = (() => {
     } catch { Utils.showToast('Failed to send friend request', 'error'); }
   }
 
-  async function _renderFriendSuggestions(friends, blocked) {
-    const block = document.getElementById('friend-suggestions-block');
-    const list  = document.getElementById('friend-suggestions-list');
-    block.hidden = true;
-    list.innerHTML = '';
-
-    const me = Auth.getCurrentUser();
-    const friendEmails = new Set(friends.map(f => f.email.toLowerCase()));
-    const blockedEmails = new Set((blocked || []).map(b => (b.email || b).toLowerCase()));
-    const skip = new Set([me?.email?.toLowerCase(), ...friendEmails, ...blockedEmails]);
-    const suggestions = []; // { email, name, picture, source }
-
-    // Source 1: People who shared content with you (from your feed) but aren't friends
-    try {
-      const shared = await Data.getFeedFolders();
-      const seen = new Set();
-      for (const f of shared) {
-        const email = f.owners?.[0]?.emailAddress;
-        if (!email || skip.has(email.toLowerCase()) || seen.has(email.toLowerCase())) continue;
-        seen.add(email.toLowerCase());
-        suggestions.push({
-          email,
-          name: f.owners[0].displayName || email,
-          picture: f.owners[0].photoLink || null,
-          source: 'Shared content with you'
-        });
-      }
-    } catch (e) { console.warn('[Suggestions] Feed folders failed:', e); }
-
-    // Source 2: Friends of friends — people in the same circles as your friends
-    try {
-      const circles = await Data.listCircles();
-      for (const c of circles) {
-        const members = (c.members || []).map(m => m.email?.toLowerCase()).filter(Boolean);
-        // Find which of your friends are in this circle
-        const friendsInCircle = friends.filter(f => members.includes(f.email.toLowerCase()));
-        for (const m of (c.members || [])) {
-          if (!m.email || skip.has(m.email.toLowerCase())) continue;
-          if (suggestions.some(s => s.email.toLowerCase() === m.email.toLowerCase())) continue;
-          const mutualFriend = friendsInCircle[0];
-          const source = mutualFriend
-            ? `Friends with ${mutualFriend.displayName || mutualFriend.email}`
-            : `In circle "${c.name}"`;
-          suggestions.push({
-            email: m.email,
-            name: m.displayName || m.email,
-            picture: null,
-            source
-          });
-        }
-      }
-    } catch (e) { console.warn('[Suggestions] Circles failed:', e); }
-
-    // Always show the section — display a message if no suggestions found
-    block.hidden = false;
-    if (!suggestions.length) {
-      list.innerHTML = '<p class="muted-text">No suggestions yet — they\'ll appear as people share content with you or join your circles.</p>';
-      return;
-    }
-
-    suggestions.slice(0, 10).forEach(s => {
-      const avatarHtml = s.picture
-        ? `<img src="${Utils.escapeHtml(s.picture)}" alt="" class="avatar-sm avatar-sm-img" referrerpolicy="no-referrer" />`
-        : `<div class="avatar-sm">${(s.name || s.email)[0].toUpperCase()}</div>`;
-      const row = _el(`
-        <div class="person-row person-row--clickable">
-          ${avatarHtml}
-          <div class="person-info">
-            <div class="person-name">${Utils.escapeHtml(s.name || s.email)}</div>
-            <div class="person-email">${Utils.escapeHtml(s.email)} <span style="opacity:.55">· ${Utils.escapeHtml(s.source)}</span></div>
-          </div>
-          <div class="person-actions">
-            <button class="btn btn-primary btn-sm suggest-add-btn">Add</button>
-          </div>
-        </div>
-      `);
-      row.addEventListener('click', () => {
-        navigate('user-profile', { person: { email: s.email, displayName: s.name, picture: s.picture } });
-      });
-      row.querySelector('.suggest-add-btn').addEventListener('click', async e => {
-        e.stopPropagation();
-        const btn = e.target;
-        const doSend = async () => {
-          btn.disabled = true; btn.textContent = 'Sending...';
-          try {
-            await Data.sendFriendRequest(s.email);
-            btn.textContent = 'Sent!';
-            Utils.showToast(`Friend request sent to ${s.email}!`);
-          } catch {
-            Utils.showToast('Could not send request', 'error');
-            btn.disabled = false; btn.textContent = 'Add';
-          }
-        };
-        if (!localStorage.getItem('mc_profile_public')) {
-          _showPublicProfilePromptThen(doSend);
-        } else {
-          await doSend();
-        }
-      });
-      list.appendChild(row);
-    });
-    block.hidden = false;
-  }
 
   /* ── User Profile (other people) ─────────────── */
 
