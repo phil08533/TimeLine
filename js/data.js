@@ -1011,11 +1011,14 @@ const Data = (() => {
   async function verifyPin(pin) {
     const stored = await getPin();
     if (!stored) return true;
-    // Backward-compat: old pin.json may lack salt (used static 'mc_pin_v1')
-    const salt = stored.salt || 'mc_pin_v1';
-    const input = stored.salt ? pin : (pin + salt);
-    const hash = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(stored.salt ? (salt + ':' + pin) : (pin + 'mc_pin_v1')));
-    const hex = Array.from(new Uint8Array(hash)).map(b => b.toString(16).padStart(2, '0')).join('');
+    // Backward-compat: old pin.json may lack a salt field (legacy used static 'mc_pin_v1').
+    // New format: hash = SHA-256(salt + ':' + pin)
+    // Legacy format: hash = SHA-256(pin + 'mc_pin_v1')
+    const hashInput = stored.salt
+      ? (stored.salt + ':' + pin)
+      : (pin + 'mc_pin_v1');
+    const buf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(hashInput));
+    const hex = Array.from(new Uint8Array(buf)).map(b => b.toString(16).padStart(2, '0')).join('');
     return hex === (stored.hash || stored);
   }
 
@@ -1118,11 +1121,11 @@ const Data = (() => {
   async function deleteAccount() {
     // Delete the mycircle root folder (all app data lives inside it)
     await Drive.deleteFile(_folders.rootId);
-    // Wipe local caches
+    // Wipe in-memory caches
     Object.keys(_cache).forEach(k => delete _cache[k]);
-    try {
-      localStorage.removeItem('mc_profile_public');
-    } catch {}
+    // Clear all app-owned localStorage keys so no stale state persists
+    const _LS_KEYS = ['mc_profile_public', 'mc_welcome_done', 'mc_theme', 'mc_color', 'mc_client_id', 'mc_demo'];
+    _LS_KEYS.forEach(k => { try { localStorage.removeItem(k); } catch {} });
     _folders = null;
   }
 

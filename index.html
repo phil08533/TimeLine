@@ -317,6 +317,9 @@
       Demo mode — your data is stored locally in this browser, not in Google Drive.
       <a href="#" id="demo-sign-in-link" class="link">Sign in with Google</a> to sync for real.
     </div>
+    <div id="offline-banner" class="offline-banner" hidden>
+      You're offline — changes will not be saved until your connection is restored.
+    </div>
 
     <header class="topbar">
       <a href="#feed" class="topbar-brand">
@@ -687,7 +690,18 @@
         </div>
 
         <div class="section-block">
+          <h3>Legal</h3>
+          <p class="muted-text small" style="margin-bottom:.75rem">Review how your data is handled and the terms governing use of the app.</p>
+          <div style="display:flex;gap:.5rem;flex-wrap:wrap">
+            <a href="privacy.html" target="_blank" rel="noopener" class="btn btn-ghost btn-sm">Privacy Policy ↗</a>
+            <a href="terms.html"   target="_blank" rel="noopener" class="btn btn-ghost btn-sm">Terms of Service ↗</a>
+          </div>
+        </div>
+
+        <div class="section-block">
           <h3>Account</h3>
+          <p id="settings-signed-in-as" class="muted-text small" style="margin-bottom:.75rem"></p>
+          <button id="sign-out-settings-btn" class="btn btn-ghost btn-sm" style="margin-bottom:1.5rem">Sign Out</button>
           <p class="muted-text small" style="margin-bottom:.5rem">Permanently delete all your My Circle data from Google Drive. This cannot be undone.</p>
           <button id="delete-account-btn" class="btn btn-ghost btn-sm danger-btn">Delete Account</button>
         </div>
@@ -714,7 +728,12 @@
             <li>Your friend list lives in <code>mycircle/contacts/friends.json</code> — readable only by you</li>
           </ul>
           <h3>Privacy</h3>
-          <p>We request the <code>drive</code> scope to read and write files in your Drive. We only touch files inside the <code>mycircle/</code> folder we create for you. OAuth tokens are stored in <code>sessionStorage</code> only — they are cleared when you close the tab. No telemetry, no analytics, no tracking of any kind. <a href="privacy.html" target="_blank" rel="noopener" class="link">Full Privacy Policy →</a></p>
+          <p>We request the <code>drive</code> scope to read and write files in your Drive. We only touch files inside the <code>mycircle/</code> folder we create for you. OAuth tokens are stored in <code>sessionStorage</code> only — they are cleared when you close the tab. No telemetry, no analytics, no tracking of any kind.</p>
+          <p style="margin-top:.5rem">
+            <a href="privacy.html" target="_blank" rel="noopener" class="link">Full Privacy Policy →</a>
+            &nbsp;&nbsp;
+            <a href="terms.html" target="_blank" rel="noopener" class="link">Terms of Service →</a>
+          </p>
           <h3>License</h3>
           <p>MIT License — free to use, modify, and self-host. <a href="https://github.com/phil08533/TimeLine" target="_blank" rel="noopener" class="link">View source on GitHub →</a></p>
         </div>

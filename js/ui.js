@@ -36,6 +36,15 @@ const UI = (() => {
 
     _initSetupUI();
 
+    // Offline / online indicator
+    function _updateOfflineBanner() {
+      const banner = document.getElementById('offline-banner');
+      if (banner) banner.hidden = navigator.onLine;
+    }
+    window.addEventListener('online',  _updateOfflineBanner);
+    window.addEventListener('offline', _updateOfflineBanner);
+    _updateOfflineBanner(); // set initial state
+
     if (Auth.isSignedIn()) _onSignIn(Auth.getCurrentUser());
   }
 
@@ -674,7 +683,7 @@ const UI = (() => {
 
         <div class="form-field" id="post-album-row" hidden>
           <label>Album title <span class="muted-text small">(required when adding multiple photos)</span></label>
-          <input type="text" id="post-album-title" class="input" placeholder="Summer 2025, Road trip…" maxlength="80" />
+          <input type="text" id="post-album-title" class="input" placeholder="Summer 2026, Road trip…" maxlength="80" />
         </div>
 
         <div class="form-field">
@@ -4483,8 +4492,19 @@ const UI = (() => {
       fresh.addEventListener('change', _saveSettingsFromUI);
     });
 
-    _on('report-bug-btn',     'click', () => _openBugReportModal());
-    _on('delete-account-btn', 'click', () => _openDeleteAccountModal());
+    // Always re-sync settings UI to current values in case they changed since boot
+    Data.getSettings().then(s => _syncSettingsUI(s)).catch(() => {});
+
+    // Show the signed-in user's email in the Account section
+    const signedInLabel = document.getElementById('settings-signed-in-as');
+    if (signedInLabel) {
+      const user = Auth.getCurrentUser();
+      signedInLabel.textContent = user?.email ? `Signed in as ${user.email}` : '';
+    }
+
+    _on('report-bug-btn',        'click', () => _openBugReportModal());
+    _on('sign-out-settings-btn', 'click', () => Auth.signOut());
+    _on('delete-account-btn',    'click', () => _openDeleteAccountModal());
   }
 
   function _openDeleteAccountModal() {
