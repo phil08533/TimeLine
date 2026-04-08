@@ -348,16 +348,22 @@ const Data = (() => {
   // with _meta.json and reactions.json inside.
 
   async function listCollections() {
-    const folders = await Drive.listFiles(_folders.collectionsFolderId, `mimeType='application/vnd.google-apps.folder'`);
-    const metas = await Promise.all(folders.map(async f => {
-      try {
-        const metaFile = await Drive.findFile('_meta.json', f.id);
-        if (!metaFile) return null;
-        const meta = await Drive.readJsonFile(metaFile.id);
-        return { ...meta, folderId: f.id };
-      } catch { return null; }
-    }));
-    return metas.filter(Boolean);
+    const cached = _cacheGet('collections');
+    if (cached) return cached;
+    return _dedup('collections', async () => {
+      const folders = await Drive.listFiles(_folders.collectionsFolderId, `mimeType='application/vnd.google-apps.folder'`);
+      const metas = await Promise.all(folders.map(async f => {
+        try {
+          const metaFile = await Drive.findFile('_meta.json', f.id);
+          if (!metaFile) return null;
+          const meta = await Drive.readJsonFile(metaFile.id);
+          return { ...meta, folderId: f.id };
+        } catch { return null; }
+      }));
+      const result = metas.filter(Boolean);
+      _cacheSet('collections', result);
+      return result;
+    });
   }
 
   async function createCollection(name, description = '', sharing = 'friends', allowCopying = true) {
@@ -394,6 +400,7 @@ const Data = (() => {
 
   async function deleteCollection(folderId) {
     await Drive.deleteFile(folderId);
+    _cacheDel('collections');
   }
 
   async function shareCollection(folderId, emails) {
@@ -529,6 +536,7 @@ const Data = (() => {
     if (opts.sourceAlbumId)  meta.sourceAlbumId  = opts.sourceAlbumId;
     await Drive.createJsonFile('_meta.json', meta, folderId);
     await _shareByAudience(folderId, sharing, circleIds);
+    _cacheDel('collections');
     return { ...meta, folderId };
   }
 
@@ -541,7 +549,7 @@ const Data = (() => {
 
   // opts: { caption, sharing, circleIds }
   async function createStory(opts = {}) {
-    const caption   = opts.caption   || '';
+    const caption   = (opts.caption || '').slice(0, 200); // enforce max length in data layer
     const sharing   = _VALID_SHARING.has(opts.sharing) ? opts.sharing : 'friends';
     const circleIds = opts.circleIds || [];
     const expiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString();
@@ -558,7 +566,7 @@ const Data = (() => {
     };
     await Drive.createJsonFile('_meta.json', meta, folderId);
     await _shareByAudience(folderId, sharing, circleIds);
-
+    _cacheDel('collections');
     return { ...meta, folderId };
   }
 
