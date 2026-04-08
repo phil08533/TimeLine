@@ -2904,6 +2904,26 @@ textarea.input { resize: vertical; min-height: 80px; }
 .share-option-desc { font-size: .72rem; color: var(--muted); }
 .share-step { margin-top: .75rem; }
 
+/* ── Post circle badges (shown on own circle-scoped posts) ── */
+.post-circle-badges {
+  display: flex; flex-wrap: wrap; gap: .35rem;
+  padding: .3rem 1rem .55rem;
+}
+.post-circle-badge {
+  display: inline-flex; align-items: center; gap: .3rem;
+  background: color-mix(in srgb, var(--accent) 12%, var(--bg));
+  color: var(--accent);
+  border: 1px solid color-mix(in srgb, var(--accent) 30%, transparent);
+  border-radius: 99px;
+  font-size: .75rem; font-weight: 500;
+  padding: .2rem .65rem;
+  cursor: pointer;
+  transition: background .12s;
+}
+.post-circle-badge:hover {
+  background: color-mix(in srgb, var(--accent) 22%, var(--bg));
+}
+
 /* ── Post share button ── */
 .post-share-btn {
   background: none; border: none; color: var(--muted);

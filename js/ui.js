@@ -478,9 +478,10 @@ const UI = (() => {
 
   /* ── Feed ───────────────────────────────────── */
 
-  let _feedAlbums = [];   // cached after load for filter re-renders
-  let _feedFilter = 'all';
-  let _feedQueue  = [];   // albums not yet rendered (infinite scroll)
+  let _feedAlbums    = [];   // cached after load for filter re-renders
+  let _feedFilter    = 'all';
+  let _feedQueue     = [];   // albums not yet rendered (infinite scroll)
+  let _userCircles   = [];   // own circles, cached for feed circle-badge lookups
   let _feedSentinelObs = null; // IntersectionObserver for infinite scroll
   let _focusedPostIndex = -1; // keyboard navigation
   let _hiddenPostIds    = new Set(); // IDs of posts hidden by the user
@@ -941,15 +942,17 @@ const UI = (() => {
     });
 
     try {
-      const [sharedFolders, ownPosts, ownStories, hiddenIds, hiddenUsers] = await Promise.all([
+      const [sharedFolders, ownPosts, ownStories, hiddenIds, hiddenUsers, circles] = await Promise.all([
         Data.getFeedFolders(),
         Data.listOwnPosts(),
         Data.listOwnStories().catch(() => []),
         Data.getHiddenPostIds().catch(() => []),
-        Data.getHiddenUsers().catch(() => [])
+        Data.getHiddenUsers().catch(() => []),
+        Data.listCircles().catch(() => [])
       ]);
       _hiddenPostIds    = new Set(hiddenIds);
       _hiddenUserEmails = new Set(hiddenUsers.map(u => u.email));
+      _userCircles      = circles;
 
       const me = Auth.getCurrentUser();
 
@@ -979,6 +982,8 @@ const UI = (() => {
           sharedAt: p.createdAt || new Date().toISOString(),
           caption: p.caption,
           voidscroll: p.voidscroll || null,
+          sharing: p.sharing || 'friends',
+          circleIds: p.circleIds || [],
           _isOwn: true
         }))
       ];
@@ -1479,9 +1484,26 @@ const UI = (() => {
           </button>
           <button class="post-share-btn" title="Share this post">↗ Share</button>
         </div>
+        ${(album._isOwn && album.sharing === 'circles' && album.circleIds?.length)
+            ? `<div class="post-circle-badges" id="circle-badges-${Utils.escapeHtml(album.id)}"></div>`
+            : ''}
         <div class="post-comments-section" id="comments-${Utils.escapeHtml(album.id)}" hidden></div>
       </div>
     `);
+
+    // Circle badge buttons — shown only on own posts shared to specific circles
+    if (album._isOwn && album.sharing === 'circles' && album.circleIds?.length) {
+      const badgeRow = card.querySelector(`#circle-badges-${album.id}`);
+      if (badgeRow) {
+        album.circleIds.forEach(fid => {
+          const circle = _userCircles.find(c => c.folderId === fid);
+          const label  = circle ? circle.name : 'Circle';
+          const btn = _el(`<button class="post-circle-badge">◎ ${Utils.escapeHtml(label)}</button>`);
+          btn.addEventListener('click', () => navigate('circle-detail', { folderId: fid }));
+          badgeRow.appendChild(btn);
+        });
+      }
+    }
 
     // Build carousel slides
     const track = card.querySelector('.post-carousel-track');
