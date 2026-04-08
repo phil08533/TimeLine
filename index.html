@@ -479,24 +479,32 @@
 
       <!-- COLLECTION DETAIL -->
       <section id="page-collection-detail" class="page" data-page="collection-detail" hidden>
-        <div class="album-back-row">
-          <button class="btn btn-ghost btn-sm" id="back-from-collection">← Albums</button>
-        </div>
-        <div class="album-hero" id="collection-hero">
-          <div class="album-hero-cover" id="collection-hero-cover"></div>
-          <div class="album-hero-overlay"></div>
-          <div class="album-hero-content">
-            <div class="album-hero-info">
+        <div class="circle-hero" id="collection-detail-hero">
+          <div class="circle-hero-top">
+            <button class="btn btn-ghost btn-sm" id="back-from-collection">← Albums</button>
+            <div id="collection-detail-actions" class="page-header-actions"></div>
+          </div>
+          <div class="circle-hero-body">
+            <div class="album-cover-thumb" id="collection-detail-cover">📸</div>
+            <div class="circle-hero-info">
               <div id="collection-tag-row" class="album-tag-row"></div>
               <h2 id="collection-detail-name"></h2>
-              <p id="collection-detail-desc" class="album-desc muted-text"></p>
-              <div id="collection-detail-stats" class="album-stats"></div>
+              <p id="collection-detail-desc" class="muted-text circle-detail-desc"></p>
+              <div id="collection-detail-stats" class="circle-hero-stats"></div>
             </div>
-            <div id="collection-detail-actions" class="album-actions"></div>
           </div>
         </div>
-        <div id="collection-contributors-bar" class="contributors-bar" hidden></div>
-        <div id="collection-detail-grid" class="media-grid collection-media-grid"></div>
+        <div class="circle-tabs" id="collection-tabs">
+          <button class="circle-tab active" data-tab="photos">Photos</button>
+          <button class="circle-tab" data-tab="info">Info</button>
+        </div>
+        <div id="collection-tab-photos">
+          <div id="collection-detail-grid" class="media-grid collection-media-grid"></div>
+        </div>
+        <div id="collection-tab-info" hidden>
+          <div id="collection-contributors-bar" class="contributors-bar section-block" hidden></div>
+          <div class="section-block" id="collection-info-sharing"></div>
+        </div>
       </section>
 
       <!-- FRIENDS -->

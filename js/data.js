@@ -366,7 +366,7 @@ const Data = (() => {
     });
   }
 
-  async function createCollection(name, description = '', sharing = 'friends', allowCopying = true) {
+  async function createCollection(name, description = '', sharing = 'friends', allowCopying = true, circleIds = []) {
     sharing = _VALID_SHARING.has(sharing) ? sharing : 'friends';
     const id = Utils.generateId('coll');
     const folderId = await Drive.getOrCreateFolder(id, _folders.collectionsFolderId);
@@ -379,6 +379,8 @@ const Data = (() => {
     };
     await Drive.createJsonFile('_meta.json', meta, folderId);
     await Drive.createJsonFile('reactions.json', { likes: [] }, folderId);
+    await _shareByAudience(folderId, sharing, circleIds);
+    _cacheDel('collections');
     return { ...meta, folderId };
   }
 
