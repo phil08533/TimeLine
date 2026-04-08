@@ -534,8 +534,9 @@ const Data = (() => {
       sharedWith: [], allowCopying: false,
       createdAt: new Date().toISOString()
     };
-    if (opts.voidscroll)     meta.voidscroll     = opts.voidscroll;
-    if (opts.sourceAlbumId)  meta.sourceAlbumId  = opts.sourceAlbumId;
+    if (opts.voidscroll)                    meta.voidscroll    = opts.voidscroll;
+    if (opts.sourceAlbumId)                 meta.sourceAlbumId = opts.sourceAlbumId;
+    if (sharing === 'circles' && circleIds.length) meta.circleIds = circleIds;
     await Drive.createJsonFile('_meta.json', meta, folderId);
     await _shareByAudience(folderId, sharing, circleIds);
     _cacheDel('collections');
