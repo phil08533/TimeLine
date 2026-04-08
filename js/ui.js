@@ -689,8 +689,14 @@ const UI = (() => {
 
         <div id="post-previews" class="post-previews" hidden></div>
 
-        <div class="form-field" id="post-album-row" hidden>
-          <label>Album title <span class="muted-text small">(required — saves to your Albums tab)</span></label>
+        <div class="form-field post-save-album-row" id="post-save-album-row" hidden>
+          <label class="inline-check-label">
+            <input type="checkbox" id="post-save-album" />
+            <span>Also save as album <span class="muted-text small">(adds to Albums tab)</span></span>
+          </label>
+        </div>
+        <div class="form-field" id="post-album-title-row" hidden>
+          <label>Album title <span class="muted-text small">(required)</span></label>
           <input type="text" id="post-album-title" class="input" placeholder="Summer 2026, Road trip…" maxlength="80" />
         </div>
 
@@ -736,13 +742,15 @@ const UI = (() => {
 
     document.querySelector('.modal-cancel-btn').addEventListener('click', closeModal);
 
-    const dropzone   = document.getElementById('post-dropzone');
-    const fileInput  = document.getElementById('post-files');
-    const previewBox = document.getElementById('post-previews');
-    const albumRow   = document.getElementById('post-album-row');
-    const albumTitle = document.getElementById('post-album-title');
-    const circlePick = document.getElementById('circle-picker');
-    const status     = document.getElementById('post-status');
+    const dropzone      = document.getElementById('post-dropzone');
+    const fileInput     = document.getElementById('post-files');
+    const previewBox    = document.getElementById('post-previews');
+    const saveAlbumRow  = document.getElementById('post-save-album-row');
+    const saveAlbumChk  = document.getElementById('post-save-album');
+    const albumTitleRow = document.getElementById('post-album-title-row');
+    const albumTitle    = document.getElementById('post-album-title');
+    const circlePick    = document.getElementById('circle-picker');
+    const status        = document.getElementById('post-status');
     let selectedFiles = [];
 
     // Dropzone click / keyboard
@@ -762,17 +770,24 @@ const UI = (() => {
 
     fileInput.addEventListener('change', () => _applyFiles(Array.from(fileInput.files)));
 
+    // Toggle album title field when checkbox changes
+    saveAlbumChk.addEventListener('change', () => {
+      albumTitleRow.hidden = !saveAlbumChk.checked;
+      if (saveAlbumChk.checked && !albumTitle.value) albumTitle.focus();
+    });
+
     function _applyFiles(files) {
       selectedFiles = files;
       previewBox.innerHTML = '';
       previewBox.hidden = !files.length;
-      albumRow.hidden    = files.length <= 1;
+      const multi = files.length > 1;
+      saveAlbumRow.hidden = !multi;
+      if (!multi) { saveAlbumChk.checked = false; albumTitleRow.hidden = true; }
       files.forEach(f => {
         const url  = _trackModalBlob(f);
         const item = _el(`<div class="post-preview-item"><img src="${url}" alt="${Utils.escapeHtml(f.name)}" /></div>`);
         previewBox.appendChild(item);
       });
-      if (files.length > 1 && !albumTitle.value) albumTitle.focus();
     }
 
     // Show / hide circle picker when audience radio changes
@@ -788,7 +803,7 @@ const UI = (() => {
       const caption  = document.getElementById('post-caption').value.trim();
       const audience = document.querySelector('input[name="audience"]:checked').value;
       const title    = albumTitle.value.trim();
-      const isAlbum  = selectedFiles.length > 1;
+      const isAlbum  = saveAlbumChk.checked && selectedFiles.length > 1;
 
       if (!caption && !selectedFiles.length) {
         status.textContent = 'Write something or add a photo first.';
@@ -3450,10 +3465,20 @@ const UI = (() => {
     }
   }
 
-  function _openCreateCollectionModal() {
-    const tagOptions = _albumTagLabels.map(t =>
-      `<option value="${t.toLowerCase()}">${t}</option>`
-    ).join('');
+  async function _openCreateCollectionModal() {
+    const [tagOptions, ownCircles] = await Promise.all([
+      Promise.resolve(_albumTagLabels.map(t => `<option value="${t.toLowerCase()}">${t}</option>`).join('')),
+      Data.listCircles().catch(() => [])
+    ]);
+
+    const circlePillsHtml = ownCircles.length
+      ? ownCircles.map(c => `
+          <label class="circle-check">
+            <input type="checkbox" name="album-circle-ids" value="${Utils.escapeHtml(c.folderId)}" />
+            <span>${Utils.escapeHtml(c.name)}</span>
+          </label>`).join('')
+      : '<span class="muted-text small">No circles yet.</span>';
+
     openModal(`
       <h3>New Album</h3>
       <form id="mf" class="form-block">
@@ -3468,12 +3493,15 @@ const UI = (() => {
         </div>
         <div class="form-field">
           <label>Visible to</label>
-          <select name="sharing" class="select-sm" style="width:100%">
+          <select name="sharing" id="album-sharing-select" class="select-sm" style="width:100%">
             <option value="friends">Friends only</option>
-            <option value="circles">My circles</option>
+            <option value="circles">Specific circles</option>
             <option value="everyone">Anyone with link</option>
             <option value="select">Specific people</option>
           </select>
+        </div>
+        <div class="circle-picker" id="album-circle-picker" hidden>
+          ${circlePillsHtml}
         </div>
         <label style="display:flex;align-items:center;gap:.5rem;font-size:.875rem;cursor:pointer">
           <input type="checkbox" name="allowCopying" checked /> Allow contributors to copy files
@@ -3485,13 +3513,29 @@ const UI = (() => {
       </form>
     `);
     document.querySelector('.modal-cancel-btn').addEventListener('click', closeModal);
+
+    // Show/hide circle picker based on sharing selection
+    const sharingSelect = document.getElementById('album-sharing-select');
+    const albumCirclePicker = document.getElementById('album-circle-picker');
+    sharingSelect.addEventListener('change', () => {
+      albumCirclePicker.hidden = sharingSelect.value !== 'circles';
+    });
+
     document.getElementById('mf').addEventListener('submit', async e => {
       e.preventDefault();
       const fd = new FormData(e.target);
+      const sharing = fd.get('sharing');
+      let circleIds = [];
+      if (sharing === 'circles') {
+        circleIds = [...document.querySelectorAll('input[name="album-circle-ids"]:checked')].map(el => el.value);
+        if (!circleIds.length) {
+          Utils.showToast('Select at least one circle', 'error');
+          return;
+        }
+      }
       Utils.showLoading();
       try {
-        const coll = await Data.createCollection(fd.get('name'), fd.get('description'), fd.get('sharing'), !!fd.get('allowCopying'));
-        // Store tag in metadata
+        const coll = await Data.createCollection(fd.get('name'), fd.get('description'), sharing, !!fd.get('allowCopying'), circleIds);
         if (fd.get('tag')) {
           await Data.updateCollectionMeta(coll.folderId, { tag: fd.get('tag') }).catch(() => {});
         }
